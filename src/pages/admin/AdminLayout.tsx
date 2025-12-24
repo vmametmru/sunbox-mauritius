@@ -24,6 +24,7 @@ const menuItems = [
   { icon: Settings, label: 'Options', path: '/admin/options' },
   { icon: Users, label: 'Contacts', path: '/admin/contacts' },
   { icon: Mail, label: 'Email', path: '/admin/email' },
+  { icon: Settings, label: 'Site', path: '/admin/site' },
   { icon: Activity, label: 'Activité', path: '/admin/activity' },
 ];
 
