@@ -7,6 +7,8 @@ import {
 } from 'lucide-react';
 import { useQuote } from '@/contexts/QuoteContext';
 import { api } from '@/lib/api';
+import ConstructionBanner from "@/components/ConstructionBanner";
+import { useSiteSettings } from "@/hooks/use-site-settings";
 
 
 const QuotePage: React.FC = () => {
@@ -18,6 +20,11 @@ const QuotePage: React.FC = () => {
   const [emailSent, setEmailSent] = useState(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const quoteRef = useRef<HTMLDivElement>(null);
+  const { data: siteSettings } = useSiteSettings();
+const underConstruction = siteSettings?.site_under_construction === "true";
+const ucMessage =
+  siteSettings?.under_construction_message ||
+  "🚧 Page en construction — merci de revenir ultérieurement.";
 
   useEffect(() => {
     if (!generatedQuote) {
@@ -316,6 +323,8 @@ const QuotePage: React.FC = () => {
               }
             </style>
           </head>
+{underConstruction && <ConstructionBanner message={ucMessage} />}
+          
           <body>
             <div class="header">
               <div class="logo-section">
