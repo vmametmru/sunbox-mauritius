@@ -3,12 +3,19 @@ import { useNavigate } from 'react-router-dom';
 import { Home, Waves, ArrowRight, Phone, Mail, MapPin, Check, Menu, X, FileText } from 'lucide-react';
 import { containerModels, poolModels, allModels } from '@/data/models';
 import { useQuote, Model } from '@/contexts/QuoteContext';
+import ConstructionBanner from "@/components/ConstructionBanner";
+import { useSiteSettings } from "@/hooks/use-site-settings";
 
 const ModelsPage: React.FC = () => {
   const navigate = useNavigate();
   const { setSelectedModel } = useQuote();
   const [filter, setFilter] = useState<'all' | 'container' | 'pool'>('all');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const { data: siteSettings } = useSiteSettings();
+const underConstruction = siteSettings?.site_under_construction === "true";
+const ucMessage =
+  siteSettings?.under_construction_message ||
+  "🚧 Page en construction — merci de revenir ultérieurement.";
 
   const filteredModels = filter === 'all' 
     ? allModels 
@@ -73,6 +80,8 @@ const ModelsPage: React.FC = () => {
           </div>
         )}
       </header>
+
+      {underConstruction && <ConstructionBanner message={ucMessage} />}
 
       {/* Hero Section */}
       <section className="bg-gradient-to-br from-[#1A365D] via-[#2D4A7C] to-[#1A365D] text-white py-16 lg:py-24">
