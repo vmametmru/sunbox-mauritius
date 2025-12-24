@@ -1,0 +1,44 @@
+name: Build frontend
+
+on:
+  workflow_dispatch:
+  push:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Force API base to /api
+        run: |
+          if [ -f src/lib/api.ts ]; then
+            perl -0777 -pe "s/const\\s+API_BASE_URL\\s*=\\s*['\\\"][^'\\\"]*['\\\"];?/const API_BASE_URL = '\\\\/api';/m" -i src/lib/api.ts
+          fi
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
+        run: npm run build
+
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Upload api artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: api
+          path: api
