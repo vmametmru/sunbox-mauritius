@@ -10,6 +10,7 @@ import ConfigurePage from "./pages/ConfigurePage";
 import DetailsPage from "./pages/DetailsPage";
 import QuotePage from "./pages/QuotePage";
 import NotFound from "./pages/NotFound";
+import SiteSettingsPage from "./pages/admin/SiteSettingsPage";
 
 // Admin Pages
 import AdminLayout from "./pages/admin/AdminLayout";
@@ -43,6 +44,7 @@ const App = () => (
                 <Route path="models" element={<AdminModelsPage />} />
                 <Route path="options" element={<OptionsPage />} />
                 <Route path="email" element={<EmailSettingsPage />} />
+                <Route path="site" element={<SiteSettingsPage />} />
               </Route>
               
               <Route path="*" element={<NotFound />} />
