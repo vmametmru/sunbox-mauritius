@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, Check, Home, Waves, ChevronDown, ChevronUp, X, ZoomIn, Image, FileText } from 'lucide-react';
 import { useQuote, ModelOption } from '@/contexts/QuoteContext';
 import { getModelOptions } from '@/data/models';
+import ConstructionBanner from "@/components/ConstructionBanner";
+import { useSiteSettings } from "@/hooks/use-site-settings";
 
 const ConfigurePage: React.FC = () => {
   const navigate = useNavigate();
@@ -23,6 +25,11 @@ const ConfigurePage: React.FC = () => {
 
   const model = quoteData.model;
   const options = getModelOptions(model);
+  const { data: siteSettings } = useSiteSettings();
+const underConstruction = siteSettings?.site_under_construction === "true";
+const ucMessage =
+  siteSettings?.under_construction_message ||
+  "🚧 Page en construction — merci de revenir ultérieurement.";
   
   // Group options by category
   const groupedOptions = options.reduce((acc, option) => {
@@ -111,6 +118,8 @@ const ConfigurePage: React.FC = () => {
           </div>
         </div>
       </header>
+
+      {underConstruction && <ConstructionBanner message={ucMessage} />}
 
       {/* Progress Steps */}
       <div className="bg-white border-b">
