@@ -19,9 +19,22 @@ jobs:
 
       - name: Force API base to /api
         run: |
-          if [ -f src/lib/api.ts ]; then
-            perl -0777 -pe "s/const\\s+API_BASE_URL\\s*=\\s*['\\\"][^'\\\"]*['\\\"];?/const API_BASE_URL = '\\\\/api';/m" -i src/lib/api.ts
-          fi
+          python3 - <<'PY'
+          import re, pathlib
+          p = pathlib.Path("src/lib/api.ts")
+          if p.exists():
+              s = p.read_text(encoding="utf-8")
+              s2, n = re.subn(r"const\s+API_BASE_URL\s*=\s*['\"][^'\"]*['\"]\s*;?",
+                             "const API_BASE_URL = '/api';",
+                             s, count=1)
+              if n == 0:
+                  print("API_BASE_URL not found (no change).")
+              else:
+                  p.write_text(s2, encoding="utf-8")
+                  print("Patched API_BASE_URL -> /api")
+          else:
+              print("src/lib/api.ts not found (skipped).")
+          PY
 
       - name: Install
         run: npm install --no-audit --no-fund
