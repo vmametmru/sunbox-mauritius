@@ -1,71 +1,68 @@
 <?php
+declare(strict_types=1);
+
 require_once __DIR__ . '/config.php';
 
 handleCORS();
-startSession(); // doit exister dans config.php
+startSession();
 
 $action = $_GET['action'] ?? 'me';
 $body   = getRequestBody();
 
-function ok($data = [], $message = 'OK') { successResponse($data, $message); }
-function fail($msg, $code = 401) { errorResponse($msg, $code); }
+function fail(string $msg, int $code = 401): void { errorResponse($msg, $code); }
+function ok(array $data = []): void { successResponse($data); }
 
-// Lire le hash admin depuis l'environnement (.env chargé dans config.php)
-$adminHash =
-    ($_ENV['ADMIN_PASSWORD_HASH'] ?? '') ?:
-    (getenv('ADMIN_PASSWORD_HASH') ?: '');
+try {
+    $adminHash = env('ADMIN_PASSWORD_HASH', '');
+    $adminHash = preg_replace("/\s+/", "", $adminHash); // enlève espaces/newlines
 
-$adminHash = trim((string)$adminHash);
-$adminHash = trim($adminHash, "\"'");                 // enlève "..." ou '...'
-$adminHash = preg_replace("/\s+/", "", $adminHash);   // enlève espaces/newlines
-
-if (!$adminHash || strlen($adminHash) < 20) {
-    fail("ADMIN_PASSWORD_HASH manquant ou invalide côté serveur.", 500);
-}
-
-switch ($action) {
-
-    case 'login': {
-        validateRequired($body, ['password']);
-
-        // anti brute-force très simple (par session)
-        $_SESSION['login_tries'] = $_SESSION['login_tries'] ?? 0;
-        if ($_SESSION['login_tries'] >= 10) {
-            fail("Trop de tentatives. Réessaie plus tard.", 429);
-        }
-
-        $pass = (string)($body['password'] ?? '');
-        if (!password_verify($pass, $adminHash)) {
-            $_SESSION['login_tries']++;
-            fail("Mot de passe incorrect.", 401);
-        }
-
-        // OK
-        session_regenerate_id(true);
-        $_SESSION['is_admin'] = true;
-        $_SESSION['admin_login_at'] = time();
-        $_SESSION['login_tries'] = 0;
-
-        ok(['is_admin' => true], 'Login OK');
-        break;
+    if (!$adminHash || strlen($adminHash) < 20) {
+        fail("ADMIN_PASSWORD_HASH invalide côté serveur (.env).", 500);
     }
 
-    case 'logout': {
-        $_SESSION = [];
+    switch ($action) {
+        case 'login': {
+            validateRequired($body, ['password']);
 
-        if (ini_get('session.use_cookies')) {
-            $p = session_get_cookie_params();
-            setcookie(session_name(), '', time() - 42000, $p['path'], $p['domain'], $p['secure'], $p['httponly']);
+            $_SESSION['login_tries'] = $_SESSION['login_tries'] ?? 0;
+            if ($_SESSION['login_tries'] >= 10) {
+                fail("Trop de tentatives. Réessaie plus tard.", 429);
+            }
+
+            $pass = (string)$body['password'];
+
+            if (!password_verify($pass, $adminHash)) {
+                $_SESSION['login_tries']++;
+                fail("Mot de passe incorrect.", 401);
+            }
+
+            session_regenerate_id(true);
+            $_SESSION['is_admin'] = true;
+            $_SESSION['admin_login_at'] = time();
+            $_SESSION['login_tries'] = 0;
+
+            ok(['is_admin' => true]);
+            break;
         }
 
-        session_destroy();
-        ok(['is_admin' => false], 'Logged out');
-        break;
-    }
+        case 'logout': {
+            $_SESSION = [];
+            if (ini_get('session.use_cookies')) {
+                $p = session_get_cookie_params();
+                setcookie(session_name(), '', time() - 42000, $p['path'], $p['domain'], $p['secure'], $p['httponly']);
+            }
+            session_destroy();
+            ok(['is_admin' => false]);
+            break;
+        }
 
-    case 'me':
-    default: {
-        ok(['is_admin' => !empty($_SESSION['is_admin'])]);
-        break;
+        case 'me':
+        default: {
+            ok(['is_admin' => !empty($_SESSION['is_admin'])]);
+            break;
+        }
     }
+} catch (Throwable $e) {
+    error_log("auth.php error: " . $e->getMessage());
+    fail(API_DEBUG ? $e->getMessage() : "Server error", 500);
 }
