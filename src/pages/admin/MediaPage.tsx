@@ -1,79 +1,98 @@
 import React, { useEffect, useState } from "react";
 
-type MediaItem = {
+type ApiRow = {
   id: number;
-  type: "model" | "plan";
-  ref_id: number;
-  file: string;
-  url: string;
-  is_main?: boolean;
+  model_id?: number;
+  plan_id?: number;
+  file_path: string;
+  is_primary?: number | boolean;
+  sort_order?: number;
   created_at?: string;
 };
 
 export default function MediaPage() {
-  const [items, setItems] = useState<MediaItem[]>([]);
+  const [type, setType] = useState<"model" | "plan">("model");
+  const [refId, setRefId] = useState<string>(""); // model_id ou plan_id
+  const [file, setFile] = useState<File | null>(null);
+
+  const [items, setItems] = useState<ApiRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // formulaire
-  const [type, setType] = useState<"model" | "plan">("model");
-  const [refId, setRefId] = useState<string>(""); // id modèle/plan
-  const [file, setFile] = useState<File | null>(null);
+  function buildListUrl() {
+    const id = Number(refId || 0);
+    if (type === "model") return `/api/media.php?action=model_list&model_id=${id}`;
+    return `/api/media.php?action=plan_list&plan_id=${id}`;
+  }
 
-  function normalizeItems(j: any): MediaItem[] {
-    const candidate = j?.data?.items ?? j?.data ?? j?.items ?? [];
-    return Array.isArray(candidate) ? candidate : [];
+  function buildUploadUrl() {
+    const id = Number(refId || 0);
+    if (type === "model") return `/api/media.php?action=model_upload&model_id=${id}`;
+    return `/api/media.php?action=plan_upload&plan_id=${id}`;
+  }
+
+  function buildDeleteUrl(id: number) {
+    if (type === "model") return `/api/media.php?action=model_delete&id=${id}`;
+    return `/api/media.php?action=plan_delete&id=${id}`;
+  }
+
+  function toPublicUrl(filePath: string) {
+    return "/" + String(filePath || "").replace(/^\/+/, "");
   }
 
   async function loadList() {
-    setLoading(true);
     setError(null);
 
-    try {
-      const qs = new URLSearchParams({ action: "list", type });
-      if (refId) qs.set("ref_id", String(refId));
+    const id = Number(refId || 0);
+    if (!id) {
+      setItems([]);
+      return;
+    }
 
-      const r = await fetch(`/api/media.php?${qs.toString()}`, {
+    setLoading(true);
+    try {
+      const r = await fetch(buildListUrl(), {
         method: "GET",
         credentials: "include",
       });
 
-      const j = await r.json().catch(() => ({}));
+      const j = await r.json().catch(() => ({} as any));
       if (!r.ok || !j?.success) throw new Error(j?.error || "Erreur liste media");
 
-      setItems(normalizeItems(j));
+      const arr = Array.isArray(j?.data?.items) ? (j.data.items as ApiRow[]) : [];
+      setItems(arr);
     } catch (e: any) {
-      setItems([]);
       setError(e?.message || "Erreur");
+      setItems([]);
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
+    // charge automatiquement quand type/refId changent
     loadList();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [type, refId]);
 
   async function uploadOne(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
 
-    if (!refId) return setError("Indique l'ID (modèle ou plan).");
+    const id = Number(refId || 0);
+    if (!id) return setError("Indique l'ID (modèle ou plan).");
     if (!file) return setError("Choisis un fichier image.");
 
     const fd = new FormData();
-    fd.append("type", type);
-    fd.append("ref_id", String(refId));
-    fd.append("image", file); // backend accepte image (et parfois file)
+    fd.append("file", file); // IMPORTANT: media.php attend "file"
 
-    const r = await fetch(`/api/media.php?action=upload`, {
+    const r = await fetch(buildUploadUrl(), {
       method: "POST",
       credentials: "include",
       body: fd,
     });
 
-    const j = await r.json().catch(() => ({}));
+    const j = await r.json().catch(() => ({} as any));
     if (!r.ok || !j?.success) {
       setError(j?.error || "Upload failed");
       return;
@@ -83,18 +102,16 @@ export default function MediaPage() {
     await loadList();
   }
 
-  async function deleteOne(id: number, itemType: "model" | "plan") {
+  async function deleteOne(id: number) {
     if (!confirm("Supprimer cette image ?")) return;
     setError(null);
 
-    const r = await fetch(`/api/media.php?action=delete`, {
+    const r = await fetch(buildDeleteUrl(id), {
       method: "POST",
       credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, type: itemType }),
     });
 
-    const j = await r.json().catch(() => ({}));
+    const j = await r.json().catch(() => ({} as any));
     if (!r.ok || !j?.success) {
       setError(j?.error || "Delete failed");
       return;
@@ -118,7 +135,7 @@ export default function MediaPage() {
           gap: 10,
         }}
       >
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
           <label>
             Type&nbsp;
             <select value={type} onChange={(e) => setType(e.target.value as any)}>
@@ -132,8 +149,8 @@ export default function MediaPage() {
             <input
               value={refId}
               onChange={(e) => setRefId(e.target.value)}
-              placeholder="ex: 12"
-              style={{ width: 120 }}
+              placeholder={type === "model" ? "model_id (ex: 12)" : "plan_id (ex: 7)"}
+              style={{ width: 160 }}
             />
           </label>
 
@@ -142,8 +159,11 @@ export default function MediaPage() {
             <input type="file" accept="image/*" onChange={(e) => setFile(e.target.files?.[0] || null)} />
           </label>
 
-          <button type="submit">Uploader</button>
-          <button type="button" onClick={loadList} disabled={loading}>
+          <button type="submit" disabled={loading}>
+            Uploader
+          </button>
+
+          <button type="button" onClick={loadList} disabled={loading || !refId}>
             {loading ? "Chargement..." : "Rafraîchir"}
           </button>
         </div>
@@ -152,7 +172,9 @@ export default function MediaPage() {
       </form>
 
       <div style={{ background: "white", padding: 16, borderRadius: 12 }}>
-        <h2 style={{ fontSize: 18 }}>Images</h2>
+        <h2 style={{ fontSize: 18, marginBottom: 10 }}>
+          Images {refId ? `(${type} #${refId})` : "(choisir un ID)"}
+        </h2>
 
         <div
           style={{
@@ -163,10 +185,10 @@ export default function MediaPage() {
           }}
         >
           {items.map((it) => (
-            <div key={`${it.type}-${it.id}`} style={{ border: "1px solid #eee", borderRadius: 12, overflow: "hidden" }}>
+            <div key={it.id} style={{ border: "1px solid #eee", borderRadius: 12, overflow: "hidden" }}>
               <div style={{ aspectRatio: "4/3", background: "#f3f4f6" }}>
                 <img
-                  src={it.url}
+                  src={toPublicUrl(it.file_path)}
                   alt=""
                   style={{ width: "100%", height: "100%", objectFit: "cover" }}
                   loading="lazy"
@@ -174,16 +196,18 @@ export default function MediaPage() {
               </div>
               <div style={{ padding: 10 }}>
                 <div style={{ fontSize: 12, opacity: 0.8 }}>
-                  {it.type} #{it.ref_id}
+                  {type} #{type === "model" ? it.model_id : it.plan_id} — ID image: {it.id}
                 </div>
-                <div style={{ fontSize: 12, wordBreak: "break-all" }}>{it.file}</div>
-                <button style={{ marginTop: 8 }} onClick={() => deleteOne(it.id, it.type)}>
+                <div style={{ fontSize: 12, wordBreak: "break-all" }}>{it.file_path}</div>
+                <button style={{ marginTop: 8 }} onClick={() => deleteOne(it.id)}>
                   Supprimer
                 </button>
               </div>
             </div>
           ))}
-          {!loading && items.length === 0 && <div>Aucune image.</div>}
+
+          {!loading && refId && items.length === 0 && <div>Aucune image pour cet ID.</div>}
+          {!refId && <div>Entre un ID (modèle ou plan) pour afficher les images.</div>}
         </div>
       </div>
     </div>
