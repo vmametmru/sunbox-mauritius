@@ -21,6 +21,7 @@ import OptionsPage from "./pages/admin/OptionsPage";
 import EmailSettingsPage from "./pages/admin/EmailSettingsPage";
 import RequireAdmin from "./components/RequireAdmin";
 import AdminLoginPage from "./pages/AdminLoginPage";
+import MediaPage from "./pages/admin/MediaPage";
 
 const queryClient = new QueryClient();
 
@@ -46,6 +47,7 @@ const App = () => (
                   <Route index element={<DashboardPage />} />
                   <Route path="quotes" element={<QuotesPage />} />
                   <Route path="models" element={<AdminModelsPage />} />
+                  <Route path="media" element={<MediaPage />} />
                   <Route path="options" element={<OptionsPage />} />
                   <Route path="email" element={<EmailSettingsPage />} />
                   <Route path="site" element={<SiteSettingsPage />} />
