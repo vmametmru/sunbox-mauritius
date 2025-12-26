@@ -10,7 +10,11 @@ $body   = getRequestBody();
 function ok($data = []) { successResponse($data); }
 function fail($msg, $code = 401) { errorResponse($msg, $code); }
 
-$adminHash = getenv('ADMIN_PASSWORD_HASH') ?: '';
+$adminHash =
+    ($_ENV['ADMIN_PASSWORD_HASH'] ?? '') ?:
+    ($_SERVER['ADMIN_PASSWORD_HASH'] ?? '') ?:
+    (getenv('ADMIN_PASSWORD_HASH') ?: '');
+
 if (!$adminHash) {
     fail("ADMIN_PASSWORD_HASH manquant côté serveur (.env).", 500);
 }
