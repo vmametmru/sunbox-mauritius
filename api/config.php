@@ -5,6 +5,24 @@
  * .env location on server: public_html/.env
  */
 
+function startSession() {
+    if (session_status() === PHP_SESSION_ACTIVE) return;
+
+    $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
+
+    // Cookies de session compatibles cross-site si besoin
+    session_set_cookie_params([
+        'lifetime' => 0,
+        'path' => '/',
+        'domain' => '',        // laisse vide (recommandé)
+        'secure' => $isHttps,  // true en https
+        'httponly' => true,
+        'samesite' => 'None',  // IMPORTANT si front sur autre domaine
+    ]);
+
+    session_start();
+}
+
 /**
  * Load .env from project root (public_html/.env)
  * No external dependency required.
