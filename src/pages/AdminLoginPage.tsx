@@ -22,6 +22,8 @@ export default function AdminLoginPage() {
 
     const j = await r.json().catch(() => ({}));
 
+    console.log("status", r.status, "json", j);
+
     if (r.ok && (j?.success || j?.data?.is_admin || j?.is_admin)) {
   navigate(from, { replace: true });
 } else {
