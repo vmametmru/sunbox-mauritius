@@ -158,6 +158,7 @@ try {
             break;
 
         case 'get_logs':
+            requireAdmin();
             $limit = (int)($body['limit'] ?? 50);
             if ($limit < 1) $limit = 50;
             if ($limit > 500) $limit = 500;
