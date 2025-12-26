@@ -1,16 +1,16 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 
 type MediaItem = {
   id: number;
   type: "model" | "plan";
   ref_id: number;
-  file: string;        // ex: "uploads/models/12/photo1.jpg"
-  url: string;         // url complète renvoyée par l’API
+  file: string; // ex: "uploads/models/12/photo1.jpg"
+  url: string;  // url complète renvoyée par l’API
   is_main?: boolean;
   created_at?: string;
 };
 
-export default function MediaPage() {
+const MediaPage: React.FC = () => {
   const [items, setItems] = useState<MediaItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,11 +28,11 @@ export default function MediaPage() {
         method: "GET",
         credentials: "include",
       });
-      const j = await r.json().catch(() => ({}));
+      const j = await r.json().catch(() => ({} as any));
       if (!r.ok || !j?.success) throw new Error(j?.error || "Erreur liste media");
-      setItems(j.data || []);
+      setItems((j.data || []) as MediaItem[]);
     } catch (e: any) {
-      setError(e.message || "Erreur");
+      setError(e?.message || "Erreur");
     } finally {
       setLoading(false);
     }
@@ -50,9 +50,9 @@ export default function MediaPage() {
     if (!file) return setError("Choisis un fichier image.");
 
     const fd = new FormData();
-    fd.append("type", type);                // "model" | "plan"
-    fd.append("ref_id", String(refId));     // ex: 12
-    fd.append("image", file);               // IMPORTANT: name "image"
+    fd.append("type", type);              // "model" | "plan"
+    fd.append("ref_id", String(refId));   // ex: 12
+    fd.append("image", file);             // IMPORTANT: name "image"
 
     const r = await fetch(`/api/media.php?action=upload`, {
       method: "POST",
@@ -60,7 +60,7 @@ export default function MediaPage() {
       body: fd,
     });
 
-    const j = await r.json().catch(() => ({}));
+    const j = await r.json().catch(() => ({} as any));
     if (!r.ok || !j?.success) {
       setError(j?.error || "Upload failed");
       return;
@@ -71,7 +71,7 @@ export default function MediaPage() {
   }
 
   async function deleteOne(id: number) {
-    if (!confirm("Supprimer cette image ?")) return;
+    if (!window.confirm("Supprimer cette image ?")) return;
     setError(null);
 
     const r = await fetch(`/api/media.php?action=delete`, {
@@ -81,7 +81,7 @@ export default function MediaPage() {
       body: JSON.stringify({ id }),
     });
 
-    const j = await r.json().catch(() => ({}));
+    const j = await r.json().catch(() => ({} as any));
     if (!r.ok || !j?.success) {
       setError(j?.error || "Delete failed");
       return;
@@ -109,7 +109,7 @@ export default function MediaPage() {
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <label>
             Type&nbsp;
-            <select value={type} onChange={(e) => setType(e.target.value as any)}>
+            <select value={type} onChange={(e) => setType(e.target.value as "model" | "plan")}>
               <option value="model">Modèle</option>
               <option value="plan">Plan</option>
             </select>
@@ -158,7 +158,10 @@ export default function MediaPage() {
           }}
         >
           {items.map((it) => (
-            <div key={it.id} style={{ border: "1px solid #eee", borderRadius: 12, overflow: "hidden" }}>
+            <div
+              key={it.id}
+              style={{ border: "1px solid #eee", borderRadius: 12, overflow: "hidden" }}
+            >
               <div style={{ aspectRatio: "4/3", background: "#f3f4f6" }}>
                 <img
                   src={it.url}
@@ -172,18 +175,18 @@ export default function MediaPage() {
                   {it.type} #{it.ref_id}
                 </div>
                 <div style={{ fontSize: 12, wordBreak: "break-all" }}>{it.file}</div>
-                <button
-                  style={{ marginTop: 8 }}
-                  onClick={() => deleteOne(it.id)}
-                >
+                <button style={{ marginTop: 8 }} onClick={() => deleteOne(it.id)}>
                   Supprimer
                 </button>
               </div>
             </div>
           ))}
+
           {!loading && items.length === 0 && <div>Aucune image.</div>}
         </div>
       </div>
     </div>
   );
-}
+};
+
+export default MediaPage;
