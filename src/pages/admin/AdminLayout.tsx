@@ -1,18 +1,17 @@
 import React, { useState } from 'react';
 import { Link, useLocation, Outlet, useNavigate } from 'react-router-dom';
-import { 
-  LayoutDashboard, 
-  FileText, 
-  Package, 
-  Settings, 
-  Mail, 
-  Users, 
-  LogOut,
+import {
+  LayoutDashboard,
+  FileText,
+  Package,
+  Settings,
+  Mail,
+  Users,
   Menu,
   X,
   Home,
-  ChevronDown,
-  Activity
+  Activity,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -21,6 +20,10 @@ const menuItems = [
   { icon: LayoutDashboard, label: 'Dashboard', path: '/admin' },
   { icon: FileText, label: 'Devis', path: '/admin/quotes' },
   { icon: Package, label: 'Modèles', path: '/admin/models' },
+
+  // ✅ NEW: Gestion photos (modèles + plans)
+  { icon: ImageIcon, label: 'Photos', path: '/admin/media' },
+
   { icon: Settings, label: 'Options', path: '/admin/options' },
   { icon: Users, label: 'Contacts', path: '/admin/contacts' },
   { icon: Mail, label: 'Email', path: '/admin/email' },
@@ -34,17 +37,23 @@ export default function AdminLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+  // Helper: active state also for subroutes (ex: /admin/media/123)
+  const isActive = (path: string) =>
+    location.pathname === path || location.pathname.startsWith(path + '/');
+
   return (
     <div className="min-h-screen bg-gray-100">
       {/* Mobile Header */}
       <div className="lg:hidden bg-[#1A365D] text-white p-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-xl font-bold">Sun<span className="text-orange-400">box</span></span>
+          <span className="text-xl font-bold">
+            Sun<span className="text-orange-400">box</span>
+          </span>
           <span className="text-sm opacity-75">Admin</span>
         </div>
-        <Button 
-          variant="ghost" 
-          size="icon" 
+        <Button
+          variant="ghost"
+          size="icon"
           className="text-white"
           onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
         >
@@ -63,7 +72,7 @@ export default function AdminLayout() {
                 onClick={() => setMobileMenuOpen(false)}
                 className={cn(
                   "flex items-center gap-3 px-4 py-3 rounded-lg transition-colors",
-                  location.pathname === item.path
+                  isActive(item.path)
                     ? "bg-orange-500 text-white"
                     : "hover:bg-white/10"
                 )}
@@ -87,10 +96,12 @@ export default function AdminLayout() {
 
       <div className="flex">
         {/* Desktop Sidebar */}
-        <aside className={cn(
-          "hidden lg:flex flex-col bg-[#1A365D] text-white min-h-screen transition-all duration-300",
-          sidebarOpen ? "w-64" : "w-20"
-        )}>
+        <aside
+          className={cn(
+            "hidden lg:flex flex-col bg-[#1A365D] text-white min-h-screen transition-all duration-300",
+            sidebarOpen ? "w-64" : "w-20"
+          )}
+        >
           {/* Logo */}
           <div className="p-6 border-b border-white/10">
             <div className="flex items-center gap-3">
@@ -99,7 +110,9 @@ export default function AdminLayout() {
               </div>
               {sidebarOpen && (
                 <div>
-                  <span className="text-xl font-bold">Sun<span className="text-orange-400">box</span></span>
+                  <span className="text-xl font-bold">
+                    Sun<span className="text-orange-400">box</span>
+                  </span>
                   <p className="text-xs opacity-75">Administration</p>
                 </div>
               )}
@@ -114,7 +127,7 @@ export default function AdminLayout() {
                 to={item.path}
                 className={cn(
                   "flex items-center gap-3 px-4 py-3 rounded-lg transition-colors",
-                  location.pathname === item.path
+                  isActive(item.path)
                     ? "bg-orange-500 text-white"
                     : "hover:bg-white/10"
                 )}
