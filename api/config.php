@@ -17,7 +17,7 @@ function startSession() {
         'domain' => '',        // laisse vide (recommandé)
         'secure' => $isHttps,  // true en https
         'httponly' => true,
-        'samesite' => 'None',  // IMPORTANT si front sur autre domaine
+        'samesite' => 'Lax',  // IMPORTANT si front sur autre domaine
     ]);
 
     session_start();
