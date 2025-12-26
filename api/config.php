@@ -182,10 +182,17 @@ function getDB() {
 function handleCORS() {
     $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
 
-    if ($origin && (in_array($origin, ALLOWED_ORIGINS, true) || API_DEBUG)) {
-        header("Access-Control-Allow-Origin: " . $origin);
+    if ($origin && in_array($origin, ALLOWED_ORIGINS, true)) {
+        header("Access-Control-Allow-Origin: $origin");
+        header("Access-Control-Allow-Credentials: true");
+        header("Vary: Origin");
     } else {
-        header("Access-Control-Allow-Origin: *");
+        // Si pas d'Origin (appel serveur->serveur), ok.
+        // Sinon, on refuse les origines non listées (plus safe).
+        if ($origin) {
+            header("Access-Control-Allow-Origin: https://sunbox-mauritius.com");
+            header("Vary: Origin");
+        }
     }
 
     header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
@@ -193,7 +200,7 @@ function handleCORS() {
     header("Access-Control-Max-Age: 86400");
     header("Content-Type: application/json; charset=UTF-8");
 
-    if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
+    if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
         http_response_code(200);
         exit();
     }
