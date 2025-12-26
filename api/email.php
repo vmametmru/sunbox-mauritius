@@ -49,9 +49,11 @@ try {
         case 'send':
             validateRequired($body, ['to', 'subject']);
 
-            // Check if we have SMTP configured
             if (empty($emailSettings['smtp_host']) || empty($emailSettings['smtp_user'])) {
                 errorResponse('Email not configured. Please configure SMTP settings in admin panel.');
+            }
+            if (empty($emailSettings['smtp_password'])) {
+                errorResponse('SMTP password missing. Please set SMTP_PASS in .env on the server.');
             }
 
             $result = sendEmail($emailSettings, $body);
@@ -94,6 +96,10 @@ try {
                 $emailData['cc'] = $body['cc'];
             }
 
+            if (empty($emailSettings['smtp_password'])) {
+                errorResponse('SMTP password missing. Please set SMTP_PASS in .env on the server.');
+            }
+
             $result = sendEmail($emailSettings, $emailData);
 
             // Log the email
@@ -111,6 +117,9 @@ try {
 
             if (empty($emailSettings['smtp_host']) || empty($emailSettings['smtp_user'])) {
                 errorResponse('Email not configured. Please configure SMTP settings first.');
+            }
+            if (empty($emailSettings['smtp_password'])) {
+                errorResponse('SMTP password missing. Please set SMTP_PASS in .env on the server.');
             }
 
             $testEmail = [
@@ -150,10 +159,11 @@ try {
 
         case 'get_logs':
             $limit = (int)($body['limit'] ?? 50);
+            if ($limit < 1) $limit = 50;
+            if ($limit > 500) $limit = 500;
 
-            // NOTE: Some MySQL configs don't allow binding LIMIT as param; if it fails, switch to intval + string concat.
-            $stmt = $db->prepare("SELECT * FROM email_logs ORDER BY created_at DESC LIMIT ?");
-            $stmt->execute([$limit]);
+            // Safer than binding LIMIT for some MySQL configs
+            $stmt = $db->query("SELECT * FROM email_logs ORDER BY created_at DESC LIMIT " . $limit);
             successResponse($stmt->fetchAll());
             break;
 
@@ -167,34 +177,35 @@ try {
 
 /**
  * Normalize email settings:
- * - Accept DB keys like smtp_host/smtp_user/smtp_password etc.
- * - If smtp_password is missing/empty, pull from .env (SMTP_PASS)
- * - Fill other missing values from .env as safe defaults
+ * - DB values are used when present
+ * - .env provides fallback values
+ * - SMTP password is ALWAYS preferred from .env when set
  */
-function normalizeEmailSettings(array $dbSettings): array {
-    // pull from env (config.php loaded .env + provides getenv)
-    $envHost = getenv('SMTP_HOST') ?: 'mail.sunbox-mauritius.com';
-    $envPort = getenv('SMTP_PORT') ?: '465';
-    $envUser = getenv('SMTP_USER') ?: 'info@sunbox-mauritius.com';
-    $envPass = getenv('SMTP_PASS') ?: '';
-    $envSec  = getenv('SMTP_SECURE') ?: 'ssl';
-    $envFrom = getenv('SMTP_FROM_EMAIL') ?: $envUser;
-    $envName = getenv('SMTP_FROM_NAME') ?: 'Sunbox Ltd';
+function normalizeEmailSettings(array $dbSettings): array
+{
+    // env() is defined in config.php
+    $envHost = (string) env('SMTP_HOST', 'mail.sunbox-mauritius.com');
+    $envPort = (string) env('SMTP_PORT', '465');
+    $envUser = (string) env('SMTP_USER', 'info@sunbox-mauritius.com');
+    $envPass = (string) env('SMTP_PASS', '');
+    $envSec  = (string) env('SMTP_SECURE', 'ssl');
+    $envFrom = (string) env('SMTP_FROM_EMAIL', $envUser);
+    $envName = (string) env('SMTP_FROM_NAME', 'Sunbox Ltd');
 
-    // DB-first, env fallback
     $out = $dbSettings;
 
     $out['smtp_host'] = $out['smtp_host'] ?? $envHost;
     $out['smtp_port'] = $out['smtp_port'] ?? $envPort;
     $out['smtp_user'] = $out['smtp_user'] ?? $envUser;
 
-    // IMPORTANT: password should NOT be stored in DB ideally
-    // If DB has no smtp_password or it's empty, use .env
-    if (empty($out['smtp_password'])) {
+    // IMPORTANT: Prefer .env for password (recommended). If .env empty, use DB as fallback.
+    if ($envPass !== '') {
         $out['smtp_password'] = $envPass;
+    } else {
+        $out['smtp_password'] = $out['smtp_password'] ?? '';
     }
 
-    $out['smtp_secure'] = $out['smtp_secure'] ?? $envSec;
+    $out['smtp_secure']     = $out['smtp_secure'] ?? $envSec;
     $out['smtp_from_email'] = $out['smtp_from_email'] ?? $envFrom;
     $out['smtp_from_name']  = $out['smtp_from_name'] ?? $envName;
 
@@ -202,34 +213,31 @@ function normalizeEmailSettings(array $dbSettings): array {
 }
 
 /**
- * Send email using PHPMailer or native mail()
+ * Send email using PHPMailer (required)
  */
-function sendEmail($settings, $data) {
-    // Try PHPMailer first
-    if (class_exists('PHPMailer\\PHPMailer\\PHPMailer')) {
-        return sendWithPHPMailer($settings, $data);
+function sendEmail($settings, $data)
+{
+    if (!class_exists('PHPMailer\\PHPMailer\\PHPMailer')) {
+        errorResponse('PHPMailer is not installed. Run: composer require phpmailer/phpmailer', 500);
     }
-
-    // Fallback to native mail()
-    return sendWithNativeMail($settings, $data);
+    return sendWithPHPMailer($settings, $data);
 }
 
 /**
  * Send email using PHPMailer
  */
-function sendWithPHPMailer($settings, $data) {
+function sendWithPHPMailer($settings, $data)
+{
     try {
         $mail = new PHPMailer\PHPMailer\PHPMailer(true);
 
-        // Server settings
         $mail->isSMTP();
-        $mail->Host = $settings['smtp_host'];
-        $mail->Port = (int)($settings['smtp_port'] ?? 587);
-        $mail->SMTPAuth = true;
-        $mail->Username = $settings['smtp_user'];
-        $mail->Password = $settings['smtp_password'];
+        $mail->Host       = $settings['smtp_host'];
+        $mail->Port       = (int)($settings['smtp_port'] ?? 587);
+        $mail->SMTPAuth   = true;
+        $mail->Username   = $settings['smtp_user'];
+        $mail->Password   = $settings['smtp_password'];
 
-        // Security
         $secure = $settings['smtp_secure'] ?? 'tls';
         if ($secure === 'tls') {
             $mail->SMTPSecure = PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS;
@@ -237,34 +245,31 @@ function sendWithPHPMailer($settings, $data) {
             $mail->SMTPSecure = PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS;
         }
 
-        // Encoding
         $mail->CharSet = 'UTF-8';
 
-        // From
         $fromEmail = $settings['smtp_from_email'] ?? $settings['smtp_user'];
         $fromName  = $settings['smtp_from_name'] ?? 'Sunbox Mauritius';
         $mail->setFrom($fromEmail, $fromName);
 
-        // To
         $recipients = is_array($data['to']) ? $data['to'] : [$data['to']];
         foreach ($recipients as $to) {
             $mail->addAddress($to);
         }
 
-        // CC
         if (!empty($data['cc'])) {
             $ccList = is_array($data['cc']) ? $data['cc'] : explode(',', $data['cc']);
             foreach ($ccList as $cc) {
                 $cc = trim($cc);
-                if ($cc) $mail->addCC($cc);
+                if ($cc) {
+                    $mail->addCC($cc);
+                }
             }
         }
 
-        // Content
         $mail->isHTML(true);
-        $mail->Subject = $data['subject'];
-        $mail->Body    = $data['html'] ?? $data['body'] ?? '';
-        $mail->AltBody = $data['text'] ?? strip_tags($mail->Body);
+        $mail->Subject = (string)($data['subject'] ?? '');
+        $mail->Body    = (string)($data['html'] ?? $data['body'] ?? '');
+        $mail->AltBody = (string)($data['text'] ?? strip_tags($mail->Body));
 
         return $mail->send();
 
@@ -275,40 +280,12 @@ function sendWithPHPMailer($settings, $data) {
 }
 
 /**
- * Send email using native mail() function
- * Note: Requires server mail configuration (not true SMTP auth)
- */
-function sendWithNativeMail($settings, $data) {
-    $to      = is_array($data['to']) ? implode(', ', $data['to']) : $data['to'];
-    $subject = $data['subject'];
-
-    $fromEmail = $settings['smtp_from_email'] ?? $settings['smtp_user'] ?? 'noreply@sunbox-mauritius.com';
-    $fromName  = $settings['smtp_from_name'] ?? 'Sunbox Mauritius';
-
-    $headers = [
-        'MIME-Version: 1.0',
-        'Content-type: text/html; charset=UTF-8',
-        'From: ' . $fromName . ' <' . $fromEmail . '>',
-        'Reply-To: ' . $fromEmail,
-        'X-Mailer: PHP/' . phpversion()
-    ];
-
-    if (!empty($data['cc'])) {
-        $cc = is_array($data['cc']) ? implode(', ', $data['cc']) : $data['cc'];
-        $headers[] = 'Cc: ' . $cc;
-    }
-
-    $body = $data['html'] ?? $data['body'] ?? '';
-
-    return mail($to, $subject, $body, implode("\r\n", $headers));
-}
-
-/**
  * Replace template variables
  */
-function replaceVariables($template, $data) {
+function replaceVariables($template, $data)
+{
     foreach ($data as $key => $value) {
-        $template = str_replace('{{' . $key . '}}', $value, $template);
+        $template = str_replace('{{' . $key . '}}', (string)$value, $template);
     }
     return $template;
 }
@@ -316,7 +293,8 @@ function replaceVariables($template, $data) {
 /**
  * Log email to database
  */
-function logEmail($db, $data, $status, $templateKey = null) {
+function logEmail($db, $data, $status, $templateKey = null)
+{
     try {
         $stmt = $db->prepare("
             INSERT INTO email_logs (recipient_email, recipient_name, subject, template_key, status, sent_at)
@@ -328,7 +306,7 @@ function logEmail($db, $data, $status, $templateKey = null) {
         $stmt->execute([
             $to,
             $data['recipient_name'] ?? null,
-            $data['subject'],
+            $data['subject'] ?? '',
             $templateKey,
             $status,
             $status === 'sent' ? date('Y-m-d H:i:s') : null
