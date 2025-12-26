@@ -63,19 +63,19 @@ export default function ModelsPage() {
     loadModels();
   }, []);
 
-  const loadModels = async () => {
-    try {
-      setLoading(true);
-      const result = await api.getModels();
-      if (result.success) {
-        setModels(result.data || []);
-      }
-    } catch (err: any) {
-      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
-    } finally {
-      setLoading(false);
-    }
-  };
+const loadModels = async () => {
+  try {
+    setLoading(true);
+    // en admin, on veut souvent tout voir (actifs + inactifs)
+    const data = await api.getModels(undefined, false);
+    setModels(Array.isArray(data) ? data : []);
+  } catch (err: any) {
+    toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    setModels([]);
+  } finally {
+    setLoading(false);
+  }
+};
 
   const openNewModel = () => {
     setEditingModel({ ...emptyModel });
