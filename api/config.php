@@ -23,6 +23,13 @@ function startSession() {
     session_start();
 }
 
+function requireAdmin() {
+    startSession();
+    if (empty($_SESSION['is_admin'])) {
+        errorResponse('Unauthorized (admin only)', 401);
+    }
+}
+
 /**
  * Load .env from project root (public_html/.env)
  * No external dependency required.
