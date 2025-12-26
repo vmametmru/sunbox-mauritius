@@ -2,76 +2,100 @@
 /**
  * SUNBOX MAURITIUS - API config
  * Path: public_html/api/config.php
+ *
+ * IMPORTANT:
+ * - Ne mets AUCUN secret ici.
+ * - Les secrets restent dans /home/mauriti2/sunbox-mauritius.com/.env (non versionné).
  */
 
-declare(strict_types=1);
+/**
+ * ------------------------------------------------------------
+ * 1) Load .env (manual loader, no Composer required)
+ * ------------------------------------------------------------
+ */
+function loadEnvFile(): void
+{
+    // config.php est dans .../api/config.php
+    // dirname(__DIR__) = .../ (racine du site) -> donc .env est là
+    $candidates = [
+        dirname(__DIR__) . '/.env',          // /home/mauriti2/sunbox-mauritius.com/.env  ✅ ton cas
+        __DIR__ . '/.env',                   // /home/.../api/.env
+        dirname(__DIR__, 2) . '/.env',       // /home/mauriti2/.env (au cas où)
+    ];
 
-// --------------------
-// .env loader (no composer needed)
-// --------------------
-function loadEnvFile(string $path): void {
-    if (!is_readable($path)) return;
+    $loaded = '';
+    foreach ($candidates as $path) {
+        if (is_file($path) && is_readable($path)) {
+            $loaded = $path;
+            $lines = file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+            if (!$lines) break;
 
-    $lines = file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-    if (!$lines) return;
+            foreach ($lines as $line) {
+                $line = trim($line);
+                if ($line === '' || str_starts_with($line, '#') || str_starts_with($line, ';')) continue;
+                if (!str_contains($line, '=')) continue;
 
-    foreach ($lines as $line) {
-        $line = trim($line);
-        if ($line === '' || str_starts_with($line, '#')) continue;
+                [$key, $val] = explode('=', $line, 2);
+                $key = trim($key);
+                $val = trim($val);
 
-        $pos = strpos($line, '=');
-        if ($pos === false) continue;
+                // enlève quotes "..." ou '...'
+                if ((str_starts_with($val, '"') && str_ends_with($val, '"')) ||
+                    (str_starts_with($val, "'") && str_ends_with($val, "'"))) {
+                    $val = substr($val, 1, -1);
+                }
 
-        $key = trim(substr($line, 0, $pos));
-        $val = trim(substr($line, $pos + 1));
+                // ne pas écraser une variable déjà définie par le serveur
+                $already = getenv($key);
+                if ($already !== false && $already !== '') continue;
 
-        // Remove optional quotes
-        $val = trim($val);
-        $val = trim($val, "\"'");
-
-        if ($key === '') continue;
-
-        // Do not overwrite existing env
-        if (getenv($key) !== false) continue;
-
-        putenv("$key=$val");
-        $_ENV[$key] = $val;
-        $_SERVER[$key] = $val;
+                // set env
+                @putenv($key . '=' . $val);
+                $_ENV[$key] = $val;
+                $_SERVER[$key] = $val;
+            }
+            break;
+        }
     }
+
+    // utile pour tester (sans exposer les secrets)
+    $GLOBALS['ENV_FILE_LOADED'] = $loaded;
 }
 
-function env(string $key, string $default = ''): string {
-    $v =
-        ($_ENV[$key] ?? '') ?:
-        ($_SERVER[$key] ?? '') ?:
-        (getenv($key) !== false ? (string)getenv($key) : '');
+loadEnvFile();
 
-    $v = trim((string)$v);
-    $v = trim($v, "\"'");
-    return $v !== '' ? $v : $default;
+/**
+ * Helper: read env from getenv/$_ENV/$_SERVER
+ */
+function env(string $key, $default = null)
+{
+    $v = getenv($key);
+    if ($v !== false && $v !== '') return $v;
+    if (isset($_ENV[$key]) && $_ENV[$key] !== '') return $_ENV[$key];
+    if (isset($_SERVER[$key]) && $_SERVER[$key] !== '') return $_SERVER[$key];
+    return $default;
 }
 
-// Load .env from project root (public_html/.env)
-$projectRoot = realpath(__DIR__ . '/..'); // public_html
-if ($projectRoot) {
-    loadEnvFile($projectRoot . '/.env');
+function envBool(string $key, bool $default = false): bool
+{
+    $v = strtolower((string)env($key, $default ? 'true' : 'false'));
+    return in_array($v, ['1','true','yes','on'], true);
 }
 
-// --------------------
-// App / debug
-// --------------------
-define('API_DEBUG', env('API_DEBUG', 'false') === 'true');
+/**
+ * ------------------------------------------------------------
+ * 2) Settings (NO secrets here)
+ * ------------------------------------------------------------
+ */
+define('API_DEBUG', envBool('API_DEBUG', false));
 
-// --------------------
-// DB (from .env)
-// --------------------
 define('DB_HOST', env('DB_HOST', 'localhost'));
 define('DB_NAME', env('DB_NAME', ''));
 define('DB_USER', env('DB_USER', ''));
 define('DB_PASS', env('DB_PASS', ''));
 define('DB_CHARSET', env('DB_CHARSET', 'utf8mb4'));
 
-// CORS settings
+// CORS allowed origins (keep as you had)
 define('ALLOWED_ORIGINS', [
     'http://localhost:3000',
     'http://localhost:5173',
@@ -81,67 +105,49 @@ define('ALLOWED_ORIGINS', [
     'https://famous.ai',
 ]);
 
-// --------------------
-// PDO
-// --------------------
-function getDB(): PDO {
+/**
+ * ------------------------------------------------------------
+ * 3) DB connection
+ * ------------------------------------------------------------
+ */
+function getDB() {
     static $pdo = null;
 
     if ($pdo === null) {
         if (!DB_NAME || !DB_USER) {
-            throw new Exception("DB env missing (DB_NAME/DB_USER).");
+            throw new Exception("Database env missing (DB_NAME/DB_USER).");
         }
-
-        $dsn = "mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=" . DB_CHARSET;
-        $options = [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_EMULATE_PREPARES => false,
-        ];
-        $pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
+        try {
+            $dsn = "mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=" . DB_CHARSET;
+            $options = [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                PDO::ATTR_EMULATE_PREPARES => false,
+            ];
+            $pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
+        } catch (PDOException $e) {
+            if (API_DEBUG) throw new Exception("Database connection failed: " . $e->getMessage());
+            throw new Exception("Database connection failed");
+        }
     }
 
     return $pdo;
 }
 
-// --------------------
-// Sessions (needed for admin login)
-// --------------------
-function startSession(): void {
-    if (session_status() === PHP_SESSION_ACTIVE) return;
-
-    // secure cookies on HTTPS
-    $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
-
-    ini_set('session.use_strict_mode', '1');
-    ini_set('session.use_only_cookies', '1');
-
-    session_set_cookie_params([
-        'lifetime' => 0,
-        'path' => '/',
-        'domain' => '',         // keep default host
-        'secure' => $secure,
-        'httponly' => true,
-        'samesite' => 'Lax',    // OK for same-site app
-    ]);
-
-    session_start();
-}
-
-// --------------------
-// CORS
-// --------------------
-function handleCORS(): void {
+/**
+ * ------------------------------------------------------------
+ * 4) CORS (session-friendly)
+ * ------------------------------------------------------------
+ */
+function handleCORS() {
     $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
 
-    // If credentials are used, we must NOT return "*"
-    $allowed = $origin && in_array($origin, ALLOWED_ORIGINS, true);
-
-    if ($allowed) {
+    if ($origin && in_array($origin, ALLOWED_ORIGINS, true)) {
         header("Access-Control-Allow-Origin: $origin");
         header("Access-Control-Allow-Credentials: true");
+        header("Vary: Origin");
     } else {
-        // For same-origin requests (no Origin header) or simple public API usage
+        // same-origin requests don't need CORS; but keep permissive for non-browser tools
         header("Access-Control-Allow-Origin: *");
     }
 
@@ -156,35 +162,86 @@ function handleCORS(): void {
     }
 }
 
-// --------------------
-// JSON helpers
-// --------------------
-function jsonResponse($data, int $statusCode = 200): void {
+/**
+ * ------------------------------------------------------------
+ * 5) Session helper
+ * ------------------------------------------------------------
+ */
+function startSession(): void
+{
+    if (session_status() === PHP_SESSION_ACTIVE) return;
+
+    $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        || (($_SERVER['SERVER_PORT'] ?? '') == 443);
+
+    // SameSite: if calling API from another domain with credentials -> needs None
+    $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+    $host   = $_SERVER['HTTP_HOST'] ?? '';
+    $sameSite = 'Lax';
+
+    if ($origin) {
+        $originHost = parse_url($origin, PHP_URL_HOST) ?: '';
+        if ($originHost && $host && strcasecmp($originHost, $host) !== 0) {
+            $sameSite = 'None'; // cross-site + credentials
+        }
+    }
+
+    session_set_cookie_params([
+        'lifetime' => 0,
+        'path' => '/',
+        'secure' => $isHttps,
+        'httponly' => true,
+        'samesite' => $sameSite,
+    ]);
+
+    session_start();
+}
+
+/**
+ * ------------------------------------------------------------
+ * 6) Response helpers
+ * ------------------------------------------------------------
+ */
+function jsonResponse($data, $statusCode = 200) {
     http_response_code($statusCode);
     echo json_encode($data, JSON_UNESCAPED_UNICODE);
     exit();
 }
 
-function errorResponse(string $message, int $statusCode = 400): void {
-    jsonResponse(['success' => false, 'error' => $message], $statusCode);
+function errorResponse($message, $statusCode = 400) {
+    jsonResponse(['error' => $message, 'success' => false], $statusCode);
 }
 
-function successResponse($data = null, string $message = 'Success'): void {
-    $resp = ['success' => true, 'message' => $message];
-    if ($data !== null) $resp['data'] = $data;
-    jsonResponse($resp);
+function successResponse($data = null, $message = 'Success') {
+    $response = ['success' => true, 'message' => $message];
+    if ($data !== null) $response['data'] = $data;
+    jsonResponse($response);
 }
 
-function getRequestBody(): array {
+function getRequestBody() {
     $input = file_get_contents('php://input');
-    $j = json_decode($input ?: '', true);
-    return is_array($j) ? $j : [];
+    return json_decode($input, true) ?? [];
 }
 
-function validateRequired(array $data, array $fields): void {
+function validateRequired($data, $fields) {
     $missing = [];
-    foreach ($fields as $f) {
-        if (!isset($data[$f]) || $data[$f] === '') $missing[] = $f;
+    foreach ($fields as $field) {
+        if (!isset($data[$field]) || $data[$field] === '') $missing[] = $field;
     }
-    if ($missing) errorResponse("Missing required fields: " . implode(', ', $missing), 400);
+    if (!empty($missing)) {
+        errorResponse("Missing required fields: " . implode(', ', $missing));
+    }
+}
+
+function sanitize($value) {
+    if (is_string($value)) {
+        return htmlspecialchars(strip_tags(trim($value)), ENT_QUOTES, 'UTF-8');
+    }
+    return $value;
+}
+
+function generateQuoteReference() {
+    $date = date('Ymd');
+    $random = strtoupper(substr(md5(uniqid(mt_rand(), true)), 0, 4));
+    return "SBX-{$date}-{$random}";
 }
