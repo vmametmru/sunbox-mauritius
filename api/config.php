@@ -1,149 +1,75 @@
 <?php
 /**
- * SUNBOX MAURITIUS - API Configuration
- * Location on server: public_html/api/config.php
- * .env location on server: public_html/.env
+ * SUNBOX MAURITIUS - API config
+ * Path: public_html/api/config.php
  */
 
-// Project root (public_html)
-$ROOT = dirname(__DIR__);
+declare(strict_types=1);
 
-// Composer autoload (root)
-$autoload = $ROOT . '/vendor/autoload.php';
-if (file_exists($autoload)) {
-    require_once $autoload;
-}
-
-// Load .env (server only)
-if (class_exists('Dotenv\\Dotenv') && file_exists($ROOT . '/.env')) {
-    // createUnsafeImmutable => remplit aussi getenv() via putenv()
-    $dotenv = Dotenv\Dotenv::createUnsafeImmutable($ROOT);
-    $dotenv->safeLoad();
-}
-
-// Helper to read env reliably
-function env(string $key, $default = null) {
-    if (isset($_ENV[$key]) && $_ENV[$key] !== '') return $_ENV[$key];
-    if (isset($_SERVER[$key]) && $_SERVER[$key] !== '') return $_SERVER[$key];
-    $v = getenv($key);
-    return ($v === false || $v === '') ? $default : $v;
-}
-
-function startSession() {
-    if (session_status() === PHP_SESSION_ACTIVE) return;
-
-    $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
-
-    // Cookies de session compatibles cross-site si besoin
-    session_set_cookie_params([
-        'lifetime' => 0,
-        'path' => '/',
-        'domain' => '',        // laisse vide (recommandé)
-        'secure' => $isHttps,  // true en https
-        'httponly' => true,
-        'samesite' => 'Lax',  // IMPORTANT si front sur autre domaine
-    ]);
-
-    session_start();
-}
-
-/**
- * Load .env from project root (public_html/.env)
- * No external dependency required.
- */
-function loadEnvFile(string $path): void
-{
-    if (!is_readable($path)) {
-        return;
-    }
+// --------------------
+// .env loader (no composer needed)
+// --------------------
+function loadEnvFile(string $path): void {
+    if (!is_readable($path)) return;
 
     $lines = file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-    if ($lines === false) {
-        return;
-    }
+    if (!$lines) return;
 
     foreach ($lines as $line) {
         $line = trim($line);
+        if ($line === '' || str_starts_with($line, '#')) continue;
 
-        // Skip comments
-        if ($line === '' || str_starts_with($line, '#') || str_starts_with($line, ';')) {
-            continue;
-        }
-
-        // Support "export KEY=VALUE"
-        if (str_starts_with($line, 'export ')) {
-            $line = trim(substr($line, 7));
-        }
-
-        // Must contain "="
         $pos = strpos($line, '=');
-        if ($pos === false) {
-            continue;
-        }
+        if ($pos === false) continue;
 
         $key = trim(substr($line, 0, $pos));
-        $value = trim(substr($line, $pos + 1));
+        $val = trim(substr($line, $pos + 1));
 
-        if ($key === '') {
-            continue;
-        }
+        // Remove optional quotes
+        $val = trim($val);
+        $val = trim($val, "\"'");
 
-        // Remove surrounding quotes
-        if ((str_starts_with($value, '"') && str_ends_with($value, '"')) ||
-            (str_starts_with($value, "'") && str_ends_with($value, "'"))) {
-            $value = substr($value, 1, -1);
-        }
+        if ($key === '') continue;
 
-        // Don’t overwrite existing env (cPanel can set env too)
-        $already = getenv($key);
-        if ($already !== false) {
-            continue;
-        }
+        // Do not overwrite existing env
+        if (getenv($key) !== false) continue;
 
-        // Populate env
-        putenv("$key=$value");
-        $_ENV[$key] = $value;
-        $_SERVER[$key] = $value;
+        putenv("$key=$val");
+        $_ENV[$key] = $val;
+        $_SERVER[$key] = $val;
     }
 }
 
-/**
- * Read env var with default
- */
-function env(string $key, $default = null)
-{
-    $val = getenv($key);
-    if ($val === false || $val === null) {
-        return $default;
-    }
-    return $val;
+function env(string $key, string $default = ''): string {
+    $v =
+        ($_ENV[$key] ?? '') ?:
+        ($_SERVER[$key] ?? '') ?:
+        (getenv($key) !== false ? (string)getenv($key) : '');
+
+    $v = trim((string)$v);
+    $v = trim($v, "\"'");
+    return $v !== '' ? $v : $default;
 }
 
-function envBool(string $key, bool $default = false): bool
-{
-    $v = strtolower((string)env($key, $default ? 'true' : 'false'));
-    return in_array($v, ['1', 'true', 'yes', 'on'], true);
-}
-
-// Load .env from public_html/.env (one level above /api)
+// Load .env from project root (public_html/.env)
 $projectRoot = realpath(__DIR__ . '/..'); // public_html
 if ($projectRoot) {
     loadEnvFile($projectRoot . '/.env');
 }
 
-// ----------------------
-// Settings from .env
-// ----------------------
+// --------------------
+// App / debug
+// --------------------
+define('API_DEBUG', env('API_DEBUG', 'false') === 'true');
 
-// API
-define('API_DEBUG', envBool('API_DEBUG', false));
-
-// Database
-define('DB_HOST', (string) env('DB_HOST', 'localhost'));
-define('DB_NAME', (string) env('DB_NAME', ''));
-define('DB_USER', (string) env('DB_USER', ''));
-define('DB_PASS', (string) env('DB_PASS', ''));
-define('DB_CHARSET', (string) env('DB_CHARSET', 'utf8mb4'));
+// --------------------
+// DB (from .env)
+// --------------------
+define('DB_HOST', env('DB_HOST', 'localhost'));
+define('DB_NAME', env('DB_NAME', ''));
+define('DB_USER', env('DB_USER', ''));
+define('DB_PASS', env('DB_PASS', ''));
+define('DB_CHARSET', env('DB_CHARSET', 'utf8mb4'));
 
 // CORS settings
 define('ALLOWED_ORIGINS', [
@@ -155,68 +81,68 @@ define('ALLOWED_ORIGINS', [
     'https://famous.ai',
 ]);
 
-/**
- * Optional SMTP defaults from .env (useful as fallback)
- * (No secret in GitHub — real values only in server .env)
- */
-$SMTP_CONFIG = [
-    'host'       => (string) env('SMTP_HOST', ''),
-    'port'       => (int)    env('SMTP_PORT', '587'),
-    'username'   => (string) env('SMTP_USER', ''),
-    'password'   => (string) env('SMTP_PASS', ''), // secret lives ONLY in .env on server
-    'secure'     => (string) env('SMTP_SECURE', 'tls'), // tls|ssl
-    'from_email' => (string) env('SMTP_FROM_EMAIL', env('SMTP_USER', '')),
-    'from_name'  => (string) env('SMTP_FROM_NAME', 'Sunbox Ltd'),
-];
-
-// ----------------------
-// PDO connection
-// ----------------------
-function getDB() {
+// --------------------
+// PDO
+// --------------------
+function getDB(): PDO {
     static $pdo = null;
 
     if ($pdo === null) {
-        try {
-            if (!DB_NAME || !DB_USER) {
-                throw new Exception("Database env vars missing (DB_NAME/DB_USER).");
-            }
-
-            $dsn = "mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=" . DB_CHARSET;
-            $options = [
-                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-                PDO::ATTR_EMULATE_PREPARES => false,
-            ];
-
-            $pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
-        } catch (PDOException $e) {
-            if (API_DEBUG) {
-                throw new Exception("Database connection failed: " . $e->getMessage());
-            }
-            throw new Exception("Database connection failed");
+        if (!DB_NAME || !DB_USER) {
+            throw new Exception("DB env missing (DB_NAME/DB_USER).");
         }
+
+        $dsn = "mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=" . DB_CHARSET;
+        $options = [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            PDO::ATTR_EMULATE_PREPARES => false,
+        ];
+        $pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
     }
 
     return $pdo;
 }
 
-// ----------------------
+// --------------------
+// Sessions (needed for admin login)
+// --------------------
+function startSession(): void {
+    if (session_status() === PHP_SESSION_ACTIVE) return;
+
+    // secure cookies on HTTPS
+    $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
+
+    ini_set('session.use_strict_mode', '1');
+    ini_set('session.use_only_cookies', '1');
+
+    session_set_cookie_params([
+        'lifetime' => 0,
+        'path' => '/',
+        'domain' => '',         // keep default host
+        'secure' => $secure,
+        'httponly' => true,
+        'samesite' => 'Lax',    // OK for same-site app
+    ]);
+
+    session_start();
+}
+
+// --------------------
 // CORS
-// ----------------------
-function handleCORS() {
+// --------------------
+function handleCORS(): void {
     $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
 
-    if ($origin && in_array($origin, ALLOWED_ORIGINS, true)) {
+    // If credentials are used, we must NOT return "*"
+    $allowed = $origin && in_array($origin, ALLOWED_ORIGINS, true);
+
+    if ($allowed) {
         header("Access-Control-Allow-Origin: $origin");
         header("Access-Control-Allow-Credentials: true");
-        header("Vary: Origin");
     } else {
-        // Si pas d'Origin (appel serveur->serveur), ok.
-        // Sinon, on refuse les origines non listées (plus safe).
-        if ($origin) {
-            header("Access-Control-Allow-Origin: https://sunbox-mauritius.com");
-            header("Vary: Origin");
-        }
+        // For same-origin requests (no Origin header) or simple public API usage
+        header("Access-Control-Allow-Origin: *");
     }
 
     header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
@@ -224,66 +150,41 @@ function handleCORS() {
     header("Access-Control-Max-Age: 86400");
     header("Content-Type: application/json; charset=UTF-8");
 
-    if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
         http_response_code(200);
         exit();
     }
 }
 
-// ----------------------
-// Helpers
-// ----------------------
-function jsonResponse($data, $statusCode = 200) {
+// --------------------
+// JSON helpers
+// --------------------
+function jsonResponse($data, int $statusCode = 200): void {
     http_response_code($statusCode);
     echo json_encode($data, JSON_UNESCAPED_UNICODE);
     exit();
 }
 
-function errorResponse($message, $statusCode = 400) {
-    jsonResponse(['error' => $message, 'success' => false], $statusCode);
+function errorResponse(string $message, int $statusCode = 400): void {
+    jsonResponse(['success' => false, 'error' => $message], $statusCode);
 }
 
-function successResponse($data = null, $message = 'Success') {
-    $response = ['success' => true, 'message' => $message];
-    if ($data !== null) {
-        $response['data'] = $data;
-    }
-    jsonResponse($response);
+function successResponse($data = null, string $message = 'Success'): void {
+    $resp = ['success' => true, 'message' => $message];
+    if ($data !== null) $resp['data'] = $data;
+    jsonResponse($resp);
 }
 
-function getRequestBody() {
+function getRequestBody(): array {
     $input = file_get_contents('php://input');
-    return json_decode($input, true) ?? [];
+    $j = json_decode($input ?: '', true);
+    return is_array($j) ? $j : [];
 }
 
-function validateRequired($data, $fields) {
+function validateRequired(array $data, array $fields): void {
     $missing = [];
-    foreach ($fields as $field) {
-        if (!isset($data[$field]) || $data[$field] === '') {
-            $missing[] = $field;
-        }
+    foreach ($fields as $f) {
+        if (!isset($data[$f]) || $data[$f] === '') $missing[] = $f;
     }
-    if (!empty($missing)) {
-        errorResponse("Missing required fields: " . implode(', ', $missing));
-    }
-}
-
-function sanitize($value) {
-    if (is_string($value)) {
-        return htmlspecialchars(strip_tags(trim($value)), ENT_QUOTES, 'UTF-8');
-    }
-    return $value;
-}
-
-function generateQuoteReference() {
-    $date = date('Ymd');
-    $random = strtoupper(substr(md5(uniqid(mt_rand(), true)), 0, 4));
-    return "SBX-{$date}-{$random}";
-}
-
-function requireAdmin() {
-    startSession();
-    if (empty($_SESSION['is_admin'])) {
-        errorResponse('Unauthorized (admin only)', 401);
-    }
+    if ($missing) errorResponse("Missing required fields: " . implode(', ', $missing), 400);
 }
