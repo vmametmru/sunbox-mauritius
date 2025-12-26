@@ -1,23 +1,22 @@
 import React, { useEffect, useState } from "react";
 
-type MediaItem = {
+export type MediaItem = {
   id: number;
   type: "model" | "plan";
   ref_id: number;
-  file: string; // ex: "uploads/models/12/photo1.jpg"
-  url: string;  // url complète renvoyée par l’API
+  file: string;
+  url: string;
   is_main?: boolean;
   created_at?: string;
 };
 
-const MediaPage: React.FC = () => {
+export function MediaPage() {
   const [items, setItems] = useState<MediaItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // formulaire
   const [type, setType] = useState<"model" | "plan">("model");
-  const [refId, setRefId] = useState<string>(""); // id modèle/plan
+  const [refId, setRefId] = useState<string>("");
   const [file, setFile] = useState<File | null>(null);
 
   async function loadList() {
@@ -50,9 +49,9 @@ const MediaPage: React.FC = () => {
     if (!file) return setError("Choisis un fichier image.");
 
     const fd = new FormData();
-    fd.append("type", type);              // "model" | "plan"
-    fd.append("ref_id", String(refId));   // ex: 12
-    fd.append("image", file);             // IMPORTANT: name "image"
+    fd.append("type", type);
+    fd.append("ref_id", String(refId));
+    fd.append("image", file);
 
     const r = await fetch(`/api/media.php?action=upload`, {
       method: "POST",
@@ -94,7 +93,6 @@ const MediaPage: React.FC = () => {
     <div style={{ maxWidth: 1100, margin: "0 auto" }}>
       <h1 style={{ fontSize: 22, marginBottom: 12 }}>Gestion Photos</h1>
 
-      {/* Upload */}
       <form
         onSubmit={uploadOne}
         style={{
@@ -109,7 +107,7 @@ const MediaPage: React.FC = () => {
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <label>
             Type&nbsp;
-            <select value={type} onChange={(e) => setType(e.target.value as "model" | "plan")}>
+            <select value={type} onChange={(e) => setType(e.target.value as any)}>
               <option value="model">Modèle</option>
               <option value="plan">Plan</option>
             </select>
@@ -140,7 +138,6 @@ const MediaPage: React.FC = () => {
         {error && <div style={{ color: "red" }}>{error}</div>}
       </form>
 
-      {/* Liste */}
       <div style={{ background: "white", padding: 16, borderRadius: 12 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <h2 style={{ fontSize: 18 }}>Images</h2>
@@ -158,10 +155,7 @@ const MediaPage: React.FC = () => {
           }}
         >
           {items.map((it) => (
-            <div
-              key={it.id}
-              style={{ border: "1px solid #eee", borderRadius: 12, overflow: "hidden" }}
-            >
+            <div key={it.id} style={{ border: "1px solid #eee", borderRadius: 12, overflow: "hidden" }}>
               <div style={{ aspectRatio: "4/3", background: "#f3f4f6" }}>
                 <img
                   src={it.url}
@@ -181,12 +175,12 @@ const MediaPage: React.FC = () => {
               </div>
             </div>
           ))}
-
           {!loading && items.length === 0 && <div>Aucune image.</div>}
         </div>
       </div>
     </div>
   );
-};
+}
 
+// ✅ export default garanti
 export default MediaPage;
