@@ -5,6 +5,30 @@
  * .env location on server: public_html/.env
  */
 
+// Project root (public_html)
+$ROOT = dirname(__DIR__);
+
+// Composer autoload (root)
+$autoload = $ROOT . '/vendor/autoload.php';
+if (file_exists($autoload)) {
+    require_once $autoload;
+}
+
+// Load .env (server only)
+if (class_exists('Dotenv\\Dotenv') && file_exists($ROOT . '/.env')) {
+    // createUnsafeImmutable => remplit aussi getenv() via putenv()
+    $dotenv = Dotenv\Dotenv::createUnsafeImmutable($ROOT);
+    $dotenv->safeLoad();
+}
+
+// Helper to read env reliably
+function env(string $key, $default = null) {
+    if (isset($_ENV[$key]) && $_ENV[$key] !== '') return $_ENV[$key];
+    if (isset($_SERVER[$key]) && $_SERVER[$key] !== '') return $_SERVER[$key];
+    $v = getenv($key);
+    return ($v === false || $v === '') ? $default : $v;
+}
+
 function startSession() {
     if (session_status() === PHP_SESSION_ACTIVE) return;
 
