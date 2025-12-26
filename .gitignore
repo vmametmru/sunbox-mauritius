@@ -1,0 +1,17 @@
+# Environment / secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Node
+node_modules/
+dist/
+build/
+.npmrc
+
+# Logs
+*.log
+
+# OS
+.DS_Store
