@@ -11,7 +11,7 @@
 define('DB_HOST', 'localhost');
 define('DB_NAME', 'mauriti2_sunbox_mauritius');
 define('DB_USER', 'mauriti2_vmamet');
-define('DB_PASS', '~Access1976~');
+define('DB_PASS', '');
 define('DB_CHARSET', 'utf8mb4');
 
 // CORS settings - Update with your actual domain
@@ -30,13 +30,13 @@ define('API_DEBUG', false); // Set to false in production
 
 // Email settings (will be loaded from database)
 $SMTP_CONFIG = [
-    'host' => '',
-    'port' => 587,
-    'username' => '',
+    'host' => 'mail.sunbox-mauritius.com',
+    'port' => 465,
+    'username' => 'info@sunbox-mauritius.com',
     'password' => '',
-    'secure' => 'tls',
-    'from_email' => '',
-    'from_name' => 'Sunbox Mauritius'
+    'secure' => 'ssl',
+    'from_email' => 'info@sunbox-mauritius.com',
+    'from_name' => 'Sunbox Ltd'
 ];
 
 // Create PDO connection
