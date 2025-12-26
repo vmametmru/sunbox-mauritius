@@ -13,27 +13,29 @@ function fail(string $msg, int $code = 401): void { errorResponse($msg, $code); 
 function ok(array $data = []): void { successResponse($data); }
 
 try {
-    // 1) Lecture du hash depuis .env
+    // 1) Lecture du hash depuis .env (format normal bcrypt: $2y$...)
     $adminHash = (string) env('ADMIN_PASSWORD_HASH', '');
-
-    // 2) Nettoyage robuste (évite les guillemets + espaces invisibles)
     $adminHash = trim($adminHash);
-    $adminHash = trim($adminHash, "\"'");            // enlève "..." ou '...'
+    $adminHash = trim($adminHash, "\"'");
     $adminHash = preg_replace("/\s+/", "", $adminHash);
 
-    // 3) Option: si tu stockes en base64 pour éviter les problèmes de caractères
-    // (dans .env: ADMIN_PASSWORD_HASH_BASE64="JDJ5JDEwJ..."
-    $b64 = (string) env('ADMIN_PASSWORD_HASH_BASE64', '');
-    $b64 = trim($b64);
-    $b64 = trim($b64, "\"'");
-    if ($b64 !== '') {
-        $decoded = base64_decode($b64, true);
-        if ($decoded !== false && $decoded !== '') {
-            $adminHash = trim($decoded);
+    // 2) Fallback base64 UNIQUEMENT si le hash normal est vide
+    if ($adminHash === '') {
+        $b64 = (string) env('ADMIN_PASSWORD_HASH_BASE64', '');
+        $b64 = trim($b64);
+        $b64 = trim($b64, "\"'");
+        if ($b64 !== '') {
+            $decoded = base64_decode($b64, true);
+            if ($decoded !== false && $decoded !== '') {
+                $adminHash = trim($decoded);
+                $adminHash = trim($adminHash, "\"'");
+                $adminHash = preg_replace("/\s+/", "", $adminHash);
+            }
         }
     }
 
-    if ($adminHash === '' || strlen($adminHash) < 20) {
+    // 3) Validation
+    if ($adminHash === '' || strlen($adminHash) < 20 || strpos($adminHash, '$2') !== 0) {
         fail("ADMIN_PASSWORD_HASH invalide côté serveur (.env).", 500);
     }
 
