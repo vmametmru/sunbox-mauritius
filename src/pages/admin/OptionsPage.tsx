@@ -63,18 +63,17 @@ export default function OptionsPage() {
   }, []);
 
   const loadOptions = async () => {
-    try {
-      setLoading(true);
-      const result = await api.getOptions();
-      if (result.success) {
-        setOptions(result.data || []);
-      }
-    } catch (err: any) {
-      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
-    } finally {
-      setLoading(false);
-    }
-  };
+  try {
+    setLoading(true);
+    const data = await api.getOptions();
+    setOptions(Array.isArray(data) ? data : []);
+  } catch (err: any) {
+    toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    setOptions([]);
+  } finally {
+    setLoading(false);
+  }
+};
 
   const openNewOption = () => {
     setEditingOption({ ...emptyOption });
