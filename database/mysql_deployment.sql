@@ -297,7 +297,7 @@ INSERT INTO settings (setting_key, setting_value, setting_group, description) VA
 -- Company Info
 ('company_name', 'Sunbox Mauritius', 'company', 'Nom de l\'entreprise'),
 ('company_email', 'info@sunbox-mauritius.com', 'company', 'Email de contact'),
-('company_phone', '+230 5250 1234', 'company', 'Téléphone'),
+('company_phone', '+230 52544544 / +230 54221025', 'company', 'Téléphone'),
 ('company_address', 'Grand Baie, Mauritius', 'company', 'Adresse'),
 ('company_website', 'https://sunbox-mauritius.com', 'company', 'Site web'),
 
