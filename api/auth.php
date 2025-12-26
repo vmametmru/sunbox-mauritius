@@ -15,8 +15,21 @@ $adminHash =
     ($_SERVER['ADMIN_PASSWORD_HASH'] ?? '') ?:
     (getenv('ADMIN_PASSWORD_HASH') ?: '');
 
-if (!$adminHash) {
-    fail("ADMIN_PASSWORD_HASH manquant côté serveur (.env).", 500);
+$adminHash = trim($adminHash);
+$adminHash = trim($adminHash, "\"'");          // enlève '...' ou "..."
+$adminHash = preg_replace("/\s+/", "", $adminHash); // enlève espaces/newlines
+
+if (!$adminHash || strlen($adminHash) < 20) {
+    fail("ADMIN_PASSWORD_HASH invalide côté serveur.", 500);
+}
+
+$password = (string)($body['password'] ?? '');
+if ($password === '') {
+    fail("Mot de passe manquant.", 400);
+}
+
+if (!password_verify($password, $adminHash)) {
+    fail("Login failed", 401);
 }
 
 switch ($action) {
