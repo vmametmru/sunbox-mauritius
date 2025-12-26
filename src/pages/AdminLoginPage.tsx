@@ -22,11 +22,11 @@ export default function AdminLoginPage() {
 
     const j = await r.json().catch(() => ({}));
 
-    if (r.ok && j?.success) {
-      navigate(from, { replace: true });
-    } else {
-      setError(j?.error || "Login failed");
-    }
+    if (r.ok && (j?.success || j?.data?.is_admin || j?.is_admin)) {
+  navigate(from, { replace: true });
+} else {
+  setError(j?.error || "Login failed");
+}
   }
 
   return (
