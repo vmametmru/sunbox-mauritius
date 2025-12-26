@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 /**
  * SUNBOX MAURITIUS - API config
  * Path: public_html/api/config.php
@@ -8,30 +10,6 @@
  * - Les secrets restent dans /home/mauriti2/sunbox-mauritius.com/.env (non versionné).
  */
 
-declare(strict_types=1);
-
-/**
- * ------------------------------------------------------------
- * Helpers compat (si jamais PHP < 8 sur un autre serveur)
- * ------------------------------------------------------------
- */
-if (!function_exists('str_starts_with')) {
-    function str_starts_with(string $haystack, string $needle): bool {
-        return $needle === '' || strncmp($haystack, $needle, strlen($needle)) === 0;
-    }
-}
-if (!function_exists('str_ends_with')) {
-    function str_ends_with(string $haystack, string $needle): bool {
-        if ($needle === '') return true;
-        return substr($haystack, -strlen($needle)) === $needle;
-    }
-}
-if (!function_exists('str_contains')) {
-    function str_contains(string $haystack, string $needle): bool {
-        return $needle === '' || strpos($haystack, $needle) !== false;
-    }
-}
-
 /**
  * ------------------------------------------------------------
  * 1) Load .env (manual loader, no Composer required)
@@ -39,56 +17,44 @@ if (!function_exists('str_contains')) {
  */
 function loadEnvFile(): void
 {
-    // config.php est dans .../api/config.php
-    // dirname(__DIR__) = racine du site => .env doit être là dans ton cas
     $candidates = [
-        dirname(__DIR__) . '/.env',     // /home/mauriti2/sunbox-mauritius.com/.env ✅
-        __DIR__ . '/.env',              // /home/.../api/.env
-        dirname(__DIR__, 2) . '/.env',  // /home/mauriti2/.env (fallback)
+        dirname(__DIR__) . '/.env',          // /home/mauriti2/sunbox-mauritius.com/.env
+        __DIR__ . '/.env',                   // /home/.../api/.env
+        dirname(__DIR__, 2) . '/.env',       // /home/mauriti2/.env (fallback)
     ];
 
     $loaded = '';
     foreach ($candidates as $path) {
-        if (!is_file($path) || !is_readable($path)) continue;
+        if (is_file($path) && is_readable($path)) {
+            $loaded = $path;
+            $lines = file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+            if (!$lines) break;
 
-        $loaded = $path;
-        $lines = file($path, FILE_IGNORE_NEW_LINES);
-        if (!$lines) break;
+            foreach ($lines as $line) {
+                $line = trim($line);
+                if ($line === '' || str_starts_with($line, '#') || str_starts_with($line, ';')) continue;
+                if (!str_contains($line, '=')) continue;
 
-        foreach ($lines as $line) {
-            $line = trim($line);
+                [$key, $val] = explode('=', $line, 2);
+                $key = trim($key);
+                $val = trim($val);
 
-            // ignore empty + comments
-            if ($line === '' || str_starts_with($line, '#') || str_starts_with($line, ';')) continue;
+                if ((str_starts_with($val, '"') && str_ends_with($val, '"')) ||
+                    (str_starts_with($val, "'") && str_ends_with($val, "'"))) {
+                    $val = substr($val, 1, -1);
+                }
 
-            // must contain '='
-            if (!str_contains($line, '=')) continue;
+                $already = getenv($key);
+                if ($already !== false && $already !== '') continue;
 
-            [$key, $val] = explode('=', $line, 2);
-            $key = trim($key);
-            $val = trim($val);
-
-            if ($key === '') continue;
-
-            // remove surrounding quotes "..." or '...'
-            if ((str_starts_with($val, '"') && str_ends_with($val, '"')) ||
-                (str_starts_with($val, "'") && str_ends_with($val, "'"))) {
-                $val = substr($val, 1, -1);
+                @putenv($key . '=' . $val);
+                $_ENV[$key] = $val;
+                $_SERVER[$key] = $val;
             }
-
-            // do not override if already defined by server env
-            $already = getenv($key);
-            if ($already !== false && $already !== '') continue;
-
-            @putenv($key . '=' . $val);
-            $_ENV[$key] = $val;
-            $_SERVER[$key] = $val;
+            break;
         }
-
-        break;
     }
 
-    // utile pour test interne (ne pas afficher les secrets)
     $GLOBALS['ENV_FILE_LOADED'] = $loaded;
 }
 
@@ -114,7 +80,7 @@ function envBool(string $key, bool $default = false): bool
 
 /**
  * ------------------------------------------------------------
- * 2) Settings (NO secrets here)
+ * 2) Settings
  * ------------------------------------------------------------
  */
 define('API_DEBUG', envBool('API_DEBUG', false));
@@ -171,16 +137,9 @@ function getDB(): PDO {
 function handleCORS(): void {
     $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
 
-    // IMPORTANT:
-    // - si credentials=true, on ne peut pas utiliser "*"
-    // - si pas d'origin (same-origin), pas besoin de CORS
     if ($origin && in_array($origin, ALLOWED_ORIGINS, true)) {
         header("Access-Control-Allow-Origin: $origin");
         header("Access-Control-Allow-Credentials: true");
-        header("Vary: Origin");
-    } elseif ($origin) {
-        // Origin inconnu => on n'autorise pas les credentials
-        header("Access-Control-Allow-Origin: $origin");
         header("Vary: Origin");
     }
 
@@ -197,7 +156,7 @@ function handleCORS(): void {
 
 /**
  * ------------------------------------------------------------
- * 5) Session helper + Admin guard
+ * 5) Session helpers
  * ------------------------------------------------------------
  */
 function startSession(): void
@@ -207,7 +166,6 @@ function startSession(): void
     $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
         || (($_SERVER['SERVER_PORT'] ?? '') == 443);
 
-    // SameSite auto: Lax si même domaine, None si cross-site
     $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
     $host   = $_SERVER['HTTP_HOST'] ?? '';
     $sameSite = 'Lax';
@@ -219,17 +177,10 @@ function startSession(): void
         }
     }
 
-    // Si SameSite=None => secure obligatoire
-    if ($sameSite === 'None') {
-        $isHttps = true;
-    }
-
-    session_name('SUNBOXSESSID');
     session_set_cookie_params([
         'lifetime' => 0,
-        'path'     => '/',
-        'domain'   => '',
-        'secure'   => $isHttps,
+        'path' => '/',
+        'secure' => $isHttps,
         'httponly' => true,
         'samesite' => $sameSite,
     ]);
@@ -237,9 +188,6 @@ function startSession(): void
     session_start();
 }
 
-/**
- * Require admin session for protected endpoints
- */
 function requireAdmin(): void
 {
     startSession();
@@ -253,17 +201,17 @@ function requireAdmin(): void
  * 6) Response helpers
  * ------------------------------------------------------------
  */
-function jsonResponse($data, int $statusCode = 200): void {
+function jsonResponse($data, $statusCode = 200): void {
     http_response_code($statusCode);
     echo json_encode($data, JSON_UNESCAPED_UNICODE);
     exit();
 }
 
-function errorResponse(string $message, int $statusCode = 400): void {
+function errorResponse($message, $statusCode = 400): void {
     jsonResponse(['error' => $message, 'success' => false], $statusCode);
 }
 
-function successResponse($data = null, string $message = 'Success'): void {
+function successResponse($data = null, $message = 'Success'): void {
     $response = ['success' => true, 'message' => $message];
     if ($data !== null) $response['data'] = $data;
     jsonResponse($response);
@@ -274,7 +222,7 @@ function getRequestBody(): array {
     return json_decode($input, true) ?? [];
 }
 
-function validateRequired(array $data, array $fields): void {
+function validateRequired($data, $fields): void {
     $missing = [];
     foreach ($fields as $field) {
         if (!isset($data[$field]) || $data[$field] === '') $missing[] = $field;
@@ -293,6 +241,6 @@ function sanitize($value) {
 
 function generateQuoteReference(): string {
     $date = date('Ymd');
-    $random = strtoupper(substr(md5(uniqid((string)mt_rand(), true)), 0, 4));
+    $random = strtoupper(substr(md5(uniqid(mt_rand(), true)), 0, 4));
     return "SBX-{$date}-{$random}";
 }
