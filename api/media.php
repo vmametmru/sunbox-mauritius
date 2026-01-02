@@ -10,37 +10,65 @@ requireAdmin();
 function fail(string $msg, int $code = 400): void { errorResponse($msg, $code); }
 function ok(array $data = []): void { successResponse($data); }
 
-$db = getDB();
 $action = $_GET['action'] ?? '';
+$db = getDB();
 
-$MAX_BYTES = 6 * 1024 * 1024; // 6MB
+/**
+ * ✅ Nouvelle limite
+ */
+$MAX_BYTES = 20 * 1024 * 1024; // 20MB
+
+/**
+ * ✅ On accepte l’upload en jpeg/png/webp,
+ * mais on convertit tout en JPG.
+ */
 $ALLOWED_MIME = [
-  'image/jpeg' => 'jpg',
-  'image/png'  => 'png',
-  'image/webp' => 'webp',
+  'image/jpeg' => true,
+  'image/png'  => true,
+  'image/webp' => true,
 ];
 
 function getPublicUrl(string $relativePath): string {
   return '/' . ltrim($relativePath, '/');
 }
 
-function safeRandomName(string $ext): string {
-  return bin2hex(random_bytes(16)) . '.' . $ext;
+function safeRandomNameJpg(): string {
+  return bin2hex(random_bytes(16)) . '.jpg';
+}
+
+function applyExifOrientationIfPossible($img, string $tmpFile) {
+  if (!function_exists('exif_read_data')) return $img;
+
+  $exif = @exif_read_data($tmpFile);
+  if (!$exif || empty($exif['Orientation'])) return $img;
+
+  switch ((int)$exif['Orientation']) {
+    case 3:  $img = imagerotate($img, 180, 0); break;
+    case 6:  $img = imagerotate($img, -90, 0); break;
+    case 8:  $img = imagerotate($img, 90, 0); break;
+  }
+  return $img;
+}
+
+function loadImageResource(string $mime, string $tmpFile) {
+  switch ($mime) {
+    case 'image/jpeg': return @imagecreatefromjpeg($tmpFile);
+    case 'image/png':  return @imagecreatefrompng($tmpFile);
+    case 'image/webp': return function_exists('imagecreatefromwebp') ? @imagecreatefromwebp($tmpFile) : false;
+    default: return false;
+  }
 }
 
 /**
- * accepte un upload en multipart:
- * - field name: "file" OU "image"
+ * ✅ Upload + resize (max 1920px wide) + convert to JPG
+ * Field attendu: $_FILES['file']
  */
 function uploadOne(string $folder, array $allowedMime, int $maxBytes): array {
-  $fileKey = null;
-  if (!empty($_FILES['file']['tmp_name']))  $fileKey = 'file';
-  if (!empty($_FILES['image']['tmp_name'])) $fileKey = 'image';
-  if ($fileKey === null) {
-    fail("Fichier manquant (field name = file ou image).", 400);
+  if (empty($_FILES['file']) || !isset($_FILES['file']['tmp_name'])) {
+    fail("Fichier manquant (field name = file).", 400);
   }
 
-  $f = $_FILES[$fileKey];
+  $f = $_FILES['file'];
 
   if (!empty($f['error'])) {
     fail("Erreur upload: " . (string)$f['error'], 400);
@@ -50,172 +78,140 @@ function uploadOne(string $folder, array $allowedMime, int $maxBytes): array {
     fail("Taille invalide (max " . (int)($maxBytes/1024/1024) . "MB).", 400);
   }
 
-  $tmp = $f['tmp_name'];
+  $tmp = (string)$f['tmp_name'];
 
-  $mime = '';
-  if (function_exists('finfo_open')) {
-    $fi = finfo_open(FILEINFO_MIME_TYPE);
-    $mime = finfo_file($fi, $tmp) ?: '';
-    finfo_close($fi);
-  } elseif (function_exists('mime_content_type')) {
-    $mime = mime_content_type($tmp) ?: '';
-  }
+  $fi = finfo_open(FILEINFO_MIME_TYPE);
+  $mime = finfo_file($fi, $tmp) ?: '';
+  finfo_close($fi);
 
   if (!isset($allowedMime[$mime])) {
     fail("Type non autorisé: $mime. Autorisés: jpg, png, webp.", 400);
   }
 
-  $ext = $allowedMime[$mime];
-  $name = safeRandomName($ext);
-
-  $absFolder = dirname(__DIR__) . '/' . trim($folder, '/'); // public_html/uploads/...
+  $absFolder = dirname(__DIR__) . '/' . trim($folder, '/'); // ex: /home/.../uploads/models
   if (!is_dir($absFolder)) {
     fail("Dossier cible introuvable: $absFolder", 500);
   }
+  if (!is_writable($absFolder)) {
+    fail("Dossier non inscriptible (permissions): $absFolder", 500);
+  }
 
-  $relPath = trim($folder, '/') . '/' . $name;              // uploads/models/xxx.jpg
+  // Load image
+  $src = loadImageResource($mime, $tmp);
+  if (!$src) fail("Impossible de lire l'image (GD/webp?).", 400);
+
+  // EXIF orientation for JPEG
+  if ($mime === 'image/jpeg') {
+    $src = applyExifOrientationIfPossible($src, $tmp);
+  }
+
+  $srcW = imagesx($src);
+  $srcH = imagesy($src);
+
+  // Resize to max width 1920
+  $targetW = $srcW;
+  $targetH = $srcH;
+  $maxW = 1920;
+
+  if ($srcW > $maxW) {
+    $ratio = $maxW / $srcW;
+    $targetW = $maxW;
+    $targetH = (int)round($srcH * $ratio);
+  }
+
+  $dst = imagecreatetruecolor($targetW, $targetH);
+
+  // White background (important for PNG/WebP transparency when converting to JPG)
+  $white = imagecolorallocate($dst, 255, 255, 255);
+  imagefilledrectangle($dst, 0, 0, $targetW, $targetH, $white);
+
+  imagecopyresampled($dst, $src, 0, 0, 0, 0, $targetW, $targetH, $srcW, $srcH);
+
+  // Save as JPG
+  $name = safeRandomNameJpg();
+  $relPath = trim($folder, '/') . '/' . $name;
   $absPath = dirname(__DIR__) . '/' . $relPath;
 
-  if (!move_uploaded_file($tmp, $absPath)) {
-    fail("Impossible d'enregistrer le fichier.", 500);
+  $quality = 85;
+  if (!imagejpeg($dst, $absPath, $quality)) {
+    imagedestroy($src);
+    imagedestroy($dst);
+    fail("Impossible d'enregistrer le JPG.", 500);
   }
 
   @chmod($absPath, 0644);
 
+  imagedestroy($src);
+  imagedestroy($dst);
+
   return [
-    'file' => $relPath,
-    'url'  => getPublicUrl($relPath),
-    'mime' => $mime,
-    'size' => (int)$f['size'],
+    'relative' => $relPath,
+    'url'      => getPublicUrl($relPath),
+    'mime'     => 'image/jpeg',
+    'size'     => (int)filesize($absPath),
+    'width'    => $targetW,
+    'height'   => $targetH,
   ];
 }
 
-function normType(string $t): string {
-  $t = strtolower(trim($t));
-  return ($t === 'plan') ? 'plan' : 'model';
-}
-
-function tableForType(string $type): array {
-  if ($type === 'plan') return ['table' => 'plan_images',  'refcol' => 'plan_id',  'folder' => 'uploads/plans',  'primary' => 'is_primary'];
-  return               ['table' => 'model_images', 'refcol' => 'model_id', 'folder' => 'uploads/models', 'primary' => 'is_primary'];
-}
-
 try {
-  // Aliases (compat avec l’ancien code)
-  if ($action === 'model_list')        { $_GET['type'] = 'model'; $action = 'list';  }
-  if ($action === 'plan_list')         { $_GET['type'] = 'plan';  $action = 'list';  }
-  if ($action === 'model_upload')      { $_GET['type'] = 'model'; $action = 'upload'; }
-  if ($action === 'plan_upload')       { $_GET['type'] = 'plan';  $action = 'upload'; }
-  if ($action === 'model_delete')      { $_GET['type'] = 'model'; $action = 'delete'; }
-  if ($action === 'plan_delete')       { $_GET['type'] = 'plan';  $action = 'delete'; }
-  if ($action === 'model_set_primary') { $_GET['type'] = 'model'; $action = 'set_primary'; }
-  if ($action === 'plan_set_primary')  { $_GET['type'] = 'plan';  $action = 'set_primary'; }
-
   switch ($action) {
 
-    /**
-     * GET /api/media.php?action=list&type=model&ref_id=12
-     * GET /api/media.php?action=list&type=plan&ref_id=7
-     * (si ref_id absent → retourne une liste “mixte” limitée)
-     */
-    case 'list': {
-      $type = normType((string)($_GET['type'] ?? 'model'));
-      $refId = (int)($_GET['ref_id'] ?? ($_GET['model_id'] ?? ($_GET['plan_id'] ?? 0)));
+    // ========== MODELS ==========
+    case 'model_list': {
+      $modelId = (int)($_GET['model_id'] ?? 0);
+      if ($modelId <= 0) fail("model_id manquant.", 400);
 
-      if ($refId > 0) {
-        $meta = tableForType($type);
-        $stmt = $db->prepare("
-          SELECT id, {$meta['refcol']} AS ref_id, file_path AS file, {$meta['primary']} AS is_main, created_at
-          FROM {$meta['table']}
-          WHERE {$meta['refcol']} = ?
-          ORDER BY {$meta['primary']} DESC, sort_order ASC, id DESC
-        ");
-        $stmt->execute([$refId]);
-        $rows = $stmt->fetchAll();
-        foreach ($rows as &$r) $r['url'] = getPublicUrl((string)$r['file']);
-        ok(['items' => $rows]);
-      }
-
-      // Sans ref_id : liste mixte (limite)
-      $limit = 200;
-      $q = "
-        (SELECT 'model' AS type, id, model_id AS ref_id, file_path AS file, is_primary AS is_main, created_at FROM model_images ORDER BY id DESC LIMIT $limit)
-        UNION ALL
-        (SELECT 'plan'  AS type, id, plan_id  AS ref_id, file_path AS file, is_primary AS is_main, created_at FROM plan_images  ORDER BY id DESC LIMIT $limit)
-      ";
-      $rows = $db->query($q)->fetchAll();
-      foreach ($rows as &$r) $r['url'] = getPublicUrl((string)$r['file']);
-      ok(['items' => $rows]);
+      $stmt = $db->prepare("SELECT * FROM model_images WHERE model_id = ? ORDER BY is_primary DESC, sort_order ASC, id DESC");
+      $stmt->execute([$modelId]);
+      ok(['items' => $stmt->fetchAll()]);
       break;
     }
 
-    /**
-     * POST multipart:
-     * - type=model|plan
-     * - ref_id=12
-     * - file OR image
-     */
-    case 'upload': {
-      $type  = normType((string)($_POST['type'] ?? ($_GET['type'] ?? 'model')));
-      $refId = (int)($_POST['ref_id'] ?? ($_GET['ref_id'] ?? ($_GET['model_id'] ?? ($_GET['plan_id'] ?? 0))));
-      if ($refId <= 0) fail("ref_id manquant.", 400);
+    case 'model_upload': {
+      $modelId = (int)($_GET['model_id'] ?? 0);
+      if ($modelId <= 0) fail("model_id manquant.", 400);
 
-      $meta = tableForType($type);
-      $up = uploadOne($meta['folder'], $ALLOWED_MIME, $MAX_BYTES);
+      $up = uploadOne('uploads/models', $ALLOWED_MIME, $MAX_BYTES);
 
-      $stmt = $db->prepare("INSERT INTO {$meta['table']} ({$meta['refcol']}, file_path) VALUES (?, ?)");
-      $stmt->execute([$refId, $up['file']]);
+      $stmt = $db->prepare("INSERT INTO model_images (model_id, file_path) VALUES (?, ?)");
+      $stmt->execute([$modelId, $up['relative']]);
 
       ok(['file' => $up]);
       break;
     }
 
-    /**
-     * POST JSON:
-     * { "type":"model", "id":123 }
-     */
-    case 'delete': {
-      $body = getRequestBody();
-      $type = normType((string)($body['type'] ?? ($_GET['type'] ?? 'model')));
-      $id   = (int)($body['id'] ?? ($_GET['id'] ?? 0));
+    case 'model_delete': {
+      $id = (int)($_GET['id'] ?? 0);
       if ($id <= 0) fail("id manquant.", 400);
 
-      $meta = tableForType($type);
-
-      $stmt = $db->prepare("SELECT file_path FROM {$meta['table']} WHERE id = ?");
+      $stmt = $db->prepare("SELECT file_path FROM model_images WHERE id = ?");
       $stmt->execute([$id]);
       $row = $stmt->fetch();
       if (!$row) fail("Image introuvable.", 404);
 
-      $db->prepare("DELETE FROM {$meta['table']} WHERE id = ?")->execute([$id]);
+      $stmt = $db->prepare("DELETE FROM model_images WHERE id = ?");
+      $stmt->execute([$id]);
 
-      $abs = dirname(__DIR__) . '/' . ltrim((string)$row['file_path'], '/');
+      $abs = dirname(__DIR__) . '/' . ltrim($row['file_path'], '/');
       if (is_file($abs)) @unlink($abs);
 
       ok(['deleted' => true]);
       break;
     }
 
-    /**
-     * POST JSON:
-     * { "type":"model", "id":123 }
-     */
-    case 'set_primary': {
-      $body = getRequestBody();
-      $type = normType((string)($body['type'] ?? ($_GET['type'] ?? 'model')));
-      $id   = (int)($body['id'] ?? ($_GET['id'] ?? 0));
+    case 'model_set_primary': {
+      $id = (int)($_GET['id'] ?? 0);
       if ($id <= 0) fail("id manquant.", 400);
 
-      $meta = tableForType($type);
-
-      $stmt = $db->prepare("SELECT {$meta['refcol']} AS ref_id FROM {$meta['table']} WHERE id = ?");
+      $stmt = $db->prepare("SELECT model_id FROM model_images WHERE id = ?");
       $stmt->execute([$id]);
       $row = $stmt->fetch();
       if (!$row) fail("Image introuvable.", 404);
 
-      $refId = (int)$row['ref_id'];
-      $db->prepare("UPDATE {$meta['table']} SET {$meta['primary']} = 0 WHERE {$meta['refcol']} = ?")->execute([$refId]);
-      $db->prepare("UPDATE {$meta['table']} SET {$meta['primary']} = 1 WHERE id = ?")->execute([$id]);
+      $modelId = (int)$row['model_id'];
+      $db->prepare("UPDATE model_images SET is_primary = 0 WHERE model_id = ?")->execute([$modelId]);
+      $db->prepare("UPDATE model_images SET is_primary = 1 WHERE id = ?")->execute([$id]);
 
       ok(['primary' => true]);
       break;
