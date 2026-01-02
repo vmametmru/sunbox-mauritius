@@ -1,93 +1,80 @@
 <?php
 declare(strict_types=1);
-
 /**
  * SUNBOX MAURITIUS - Main API Endpoint
  *
- * Path: public_html/api/index.php
+ * Upload to: public_html/api/index.php
  *
- * Notes:
- * - Supporte GET + POST (JSON)
- * - Protège les actions admin via session (requireAdmin)
- * - get_models: remplit image_url depuis model_images (is_primary) si image_url vide
+ * Usage: POST /api/index.php?action=ACTION_NAME
  */
 
 require_once __DIR__ . '/config.php';
 
-// Handle CORS (may exit on OPTIONS)
 handleCORS();
 
-// Start session for admin endpoints (safe even for public)
-if (function_exists('startSession')) {
-    startSession();
-}
-
-// Action from query string
 $action = $_GET['action'] ?? '';
+$body   = getRequestBody();
 
-// Request body (JSON)
-$body = getRequestBody();
-
-// Merge params: GET first, then BODY overrides
-$params = array_merge($_GET, is_array($body) ? $body : []);
-
-function p(string $key, $default = null) {
-    global $params;
-    return array_key_exists($key, $params) ? $params[$key] : $default;
-}
-
-function pInt(string $key, int $default = 0): int {
-    $v = p($key, null);
-    if ($v === null || $v === '') return $default;
-    return (int)$v;
-}
-
-function pFloat(string $key, float $default = 0.0): float {
-    $v = p($key, null);
-    if ($v === null || $v === '') return $default;
-    return (float)$v;
-}
-
-function pBool(string $key, bool $default = false): bool {
-    $v = p($key, null);
+/**
+ * Helper: parse bool correctly (accept true/false, 1/0, "true"/"false", "yes"/"no", "on"/"off")
+ */
+function parseBool($v, bool $default = false): bool {
     if ($v === null) return $default;
     if (is_bool($v)) return $v;
+    if (is_int($v)) return $v === 1;
     $s = strtolower(trim((string)$v));
-    if ($s === '') return $default;
-    return !in_array($s, ['0', 'false', 'no', 'off'], true);
+    if (in_array($s, ['1','true','yes','on'], true)) return true;
+    if (in_array($s, ['0','false','no','off',''], true)) return false;
+    return $default;
 }
 
-function requireAdminSafe(): void {
-    // If you already defined requireAdmin() in config.php, use it
-    if (function_exists('requireAdmin')) {
-        requireAdmin();
-        return;
-    }
+/**
+ * Actions that must be ADMIN-only (session required)
+ * (Public actions stay accessible: get_models, get_options, create_quote, create_contact, etc.)
+ */
+$ADMIN_ACTIONS = [
+    'get_dashboard_stats',
 
-    // Fallback minimal check (auth.php sets $_SESSION['is_admin'] = true)
-    if (session_status() !== PHP_SESSION_ACTIVE && function_exists('startSession')) {
-        startSession();
-    }
-    if (empty($_SESSION['is_admin'])) {
-        errorResponse('Unauthorized', 401);
-    }
-}
+    // Quotes admin management
+    'get_quotes',
+    'get_quote',
+    'update_quote_status',
+    'delete_quote',
 
-// Public actions allowed without admin session
-$publicActions = [
-    'get_models',
-    'get_options',
-    'get_option_categories',
-    'create_quote',
-    'create_contact',
+    // Models admin management
+    'create_model',
+    'update_model',
+    'delete_model',
+
+    // Options admin management
+    'create_option',
+    'update_option',
+    'delete_option',
+
+    // Settings admin management
+    'get_settings',
+    'update_setting',
+    'update_settings_bulk',
+
+    // Contacts admin management
+    'get_contacts',
+    'update_contact_status',
+
+    // Email templates admin management
+    'get_email_templates',
+    'update_email_template',
+
+    // Activity logs (admin)
+    'get_activity_logs',
 ];
 
-// Everything else requires admin
-if ($action !== '' && !in_array($action, $publicActions, true)) {
-    requireAdminSafe();
-}
-
 try {
+    if (in_array($action, $ADMIN_ACTIONS, true)) {
+        startSession();
+        // requireAdmin() doit exister dans config.php (sinon ajoute-le)
+        requireAdmin();
+    }
+
     $db = getDB();
 
     switch ($action) {
@@ -123,7 +110,7 @@ try {
                 SELECT
                     DATE_FORMAT(created_at, '%Y-%m') as month,
                     COUNT(*) as count,
-                    SUM(total_price) as revenue
+                    COALESCE(SUM(total_price), 0) as revenue
                 FROM quotes
                 WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
                 GROUP BY DATE_FORMAT(created_at, '%Y-%m')
@@ -136,38 +123,39 @@ try {
         }
 
         // ============================================
-        // QUOTES (ADMIN)
+        // QUOTES
         // ============================================
         case 'get_quotes': {
-            $status = p('status', null);
-            $limit  = max(1, min(500, pInt('limit', 100)));
+            $status = $body['status'] ?? null;
+            $limit  = (int)($body['limit'] ?? 100);
+            if ($limit <= 0) $limit = 100;
+            if ($limit > 500) $limit = 500;
 
             $sql = "SELECT q.*,
-                    (SELECT GROUP_CONCAT(option_name SEPARATOR ', ') FROM quote_options WHERE quote_id = q.id) as options_list
-                    FROM quotes q";
-            $params2 = [];
+                (SELECT GROUP_CONCAT(option_name SEPARATOR ', ')
+                 FROM quote_options WHERE quote_id = q.id) as options_list
+                FROM quotes q";
+            $params = [];
 
             if ($status) {
                 $sql .= " WHERE q.status = ?";
-                $params2[] = $status;
+                $params[] = $status;
             }
 
-            // Avoid binding LIMIT (some MySQL configs dislike it)
+            // évite binding LIMIT (parfois bloqué)
             $sql .= " ORDER BY q.created_at DESC LIMIT " . (int)$limit;
 
             $stmt = $db->prepare($sql);
-            $stmt->execute($params2);
-
+            $stmt->execute($params);
             successResponse($stmt->fetchAll());
             break;
         }
 
         case 'get_quote': {
-            $id = pInt('id', 0);
-            if ($id <= 0) errorResponse('Missing id', 400);
+            validateRequired($body, ['id']);
 
             $stmt = $db->prepare("SELECT * FROM quotes WHERE id = ?");
-            $stmt->execute([$id]);
+            $stmt->execute([(int)$body['id']]);
             $quote = $stmt->fetch();
 
             if (!$quote) {
@@ -175,7 +163,7 @@ try {
             }
 
             $stmt = $db->prepare("SELECT * FROM quote_options WHERE quote_id = ?");
-            $stmt->execute([$id]);
+            $stmt->execute([(int)$body['id']]);
             $quote['options'] = $stmt->fetchAll();
 
             successResponse($quote);
@@ -183,9 +171,10 @@ try {
         }
 
         case 'create_quote': {
-            // public
-            $required = ['model_name', 'model_type', 'base_price', 'total_price', 'customer_name', 'customer_email', 'customer_phone'];
-            validateRequired($params, $required);
+            validateRequired($body, [
+                'model_name','model_type','base_price','total_price',
+                'customer_name','customer_email','customer_phone'
+            ]);
 
             $reference  = generateQuoteReference();
             $validUntil = date('Y-m-d', strtotime('+30 days'));
@@ -199,42 +188,42 @@ try {
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ");
 
-            $optionsTotal = pFloat('options_total', 0.0);
+            $optionsTotal = (float)($body['options_total'] ?? 0);
 
             $stmt->execute([
                 $reference,
-                p('model_id', null),
-                sanitize((string)p('model_name', '')),
-                (string)p('model_type', ''),
-                (float)p('base_price', 0),
-                (float)$optionsTotal,
-                (float)p('total_price', 0),
-                sanitize((string)p('customer_name', '')),
-                sanitize((string)p('customer_email', '')),
-                sanitize((string)p('customer_phone', '')),
-                sanitize((string)p('customer_address', '')),
-                sanitize((string)p('customer_message', '')),
+                $body['model_id'] ?? null,
+                sanitize($body['model_name']),
+                $body['model_type'],
+                (float)$body['base_price'],
+                $optionsTotal,
+                (float)$body['total_price'],
+                sanitize($body['customer_name']),
+                sanitize($body['customer_email']),
+                sanitize($body['customer_phone']),
+                sanitize($body['customer_address'] ?? ''),
+                sanitize($body['customer_message'] ?? ''),
                 $validUntil
             ]);
 
             $quoteId = (int)$db->lastInsertId();
 
-            if (!empty($params['options']) && is_array($params['options'])) {
+            if (!empty($body['options']) && is_array($body['options'])) {
                 $optStmt = $db->prepare("
                     INSERT INTO quote_options (quote_id, option_id, option_name, option_price)
                     VALUES (?, ?, ?, ?)
                 ");
-                foreach ($params['options'] as $opt) {
+
+                foreach ($body['options'] as $opt) {
                     $optStmt->execute([
                         $quoteId,
                         $opt['id'] ?? null,
-                        sanitize((string)($opt['name'] ?? '')),
+                        sanitize($opt['name'] ?? ''),
                         (float)($opt['price'] ?? 0)
                     ]);
                 }
             }
 
-            // optional log (admin table) - keep if exists
             logActivity($db, 'quote_created', 'quote', $quoteId, ['reference' => $reference]);
 
             successResponse([
@@ -246,51 +235,51 @@ try {
         }
 
         case 'update_quote_status': {
-            $id = pInt('id', 0);
-            $status = (string)p('status', '');
-            if ($id <= 0 || $status === '') errorResponse('Missing id/status', 400);
+            validateRequired($body, ['id','status']);
 
-            $validStatuses = ['pending', 'approved', 'rejected', 'completed'];
-            if (!in_array($status, $validStatuses, true)) {
-                errorResponse('Invalid status', 400);
+            $validStatuses = ['pending','approved','rejected','completed'];
+            if (!in_array($body['status'], $validStatuses, true)) {
+                errorResponse('Invalid status');
             }
 
             $stmt = $db->prepare("UPDATE quotes SET status = ?, updated_at = NOW() WHERE id = ?");
-            $stmt->execute([$status, $id]);
+            $stmt->execute([$body['status'], (int)$body['id']]);
 
-            logActivity($db, 'quote_status_updated', 'quote', $id, ['status' => $status]);
+            logActivity($db, 'quote_status_updated', 'quote', (int)$body['id'], ['status' => $body['status']]);
 
             successResponse(null, 'Quote status updated');
             break;
         }
 
         case 'delete_quote': {
-            $id = pInt('id', 0);
-            if ($id <= 0) errorResponse('Missing id', 400);
+            validateRequired($body, ['id']);
 
             $stmt = $db->prepare("DELETE FROM quotes WHERE id = ?");
-            $stmt->execute([$id]);
+            $stmt->execute([(int)$body['id']]);
 
-            logActivity($db, 'quote_deleted', 'quote', $id);
+            logActivity($db, 'quote_deleted', 'quote', (int)$body['id']);
 
             successResponse(null, 'Quote deleted');
             break;
         }
 
         // ============================================
-        // MODELS (PUBLIC get_models, ADMIN create/update/delete)
+        // MODELS
         // ============================================
         case 'get_models': {
-            // public by default => active only
-            $type = p('type', null);
-            $activeOnly = pBool('active_only', true);
+            $type = $body['type'] ?? null;
+
+            // IMPORTANT: parse bool properly (sinon "false" peut devenir true)
+            $activeOnly = array_key_exists('active_only', $body)
+                ? parseBool($body['active_only'], true)
+                : true;
 
             $sql = "SELECT * FROM models WHERE 1=1";
-            $params2 = [];
+            $params = [];
 
-            if (!empty($type) && $type !== 'all') {
+            if ($type) {
                 $sql .= " AND type = ?";
-                $params2[] = $type;
+                $params[] = $type;
             }
 
             if ($activeOnly) {
@@ -300,62 +289,16 @@ try {
             $sql .= " ORDER BY display_order ASC, name ASC";
 
             $stmt = $db->prepare($sql);
-            $stmt->execute($params2);
+            $stmt->execute($params);
             $models = $stmt->fetchAll();
 
-            // Attach primary image from model_images if image_url empty
-            $ids = [];
-            foreach ($models as $m) {
-                if (!empty($m['id'])) $ids[] = (int)$m['id'];
-            }
-            $ids = array_values(array_unique(array_filter($ids)));
-
-            $primaryByModel = [];
-            if (!empty($ids)) {
-                $placeholders = implode(',', array_fill(0, count($ids), '?'));
-
-                // Get images ordered so first row per model is best candidate
-                $imgStmt = $db->prepare("
-                    SELECT model_id, file_path, is_primary, sort_order, id
-                    FROM model_images
-                    WHERE model_id IN ($placeholders)
-                    ORDER BY model_id ASC, is_primary DESC, sort_order ASC, id DESC
-                ");
-                $imgStmt->execute($ids);
-                $rows = $imgStmt->fetchAll();
-
-                foreach ($rows as $r) {
-                    $mid = (int)$r['model_id'];
-                    if (!isset($primaryByModel[$mid])) {
-                        $fp = (string)($r['file_path'] ?? '');
-                        if ($fp !== '') {
-                            $primaryByModel[$mid] = '/' . ltrim($fp, '/'); // public url
-                        }
-                    }
-                }
-            }
-
-            // Parse JSON features + fill image_url fallback
             foreach ($models as &$model) {
-                // features can be JSON string in DB
-                if (isset($model['features']) && is_string($model['features']) && $model['features'] !== '') {
-                    $decoded = json_decode($model['features'], true);
+                if (!empty($model['features'])) {
+                    $decoded = json_decode((string)$model['features'], true);
                     $model['features'] = is_array($decoded) ? $decoded : [];
-                } elseif (!isset($model['features']) || $model['features'] === null) {
+                } else {
                     $model['features'] = [];
                 }
-
-                $mid = isset($model['id']) ? (int)$model['id'] : 0;
-
-                // If image_url empty, use uploaded primary image
-                if ((empty($model['image_url']) || trim((string)$model['image_url']) === '') && $mid > 0) {
-                    if (!empty($primaryByModel[$mid])) {
-                        $model['image_url'] = $primaryByModel[$mid];
-                    }
-                }
-
-                // also expose primary_image_url explicitly (optional)
-                $model['primary_image_url'] = ($mid > 0 && !empty($primaryByModel[$mid])) ? $primaryByModel[$mid] : ($model['image_url'] ?? '');
             }
             unset($model);
 
@@ -364,34 +307,27 @@ try {
         }
 
         case 'create_model': {
-            validateRequired($params, ['name', 'type', 'base_price']);
+            validateRequired($body, ['name','type','base_price']);
 
-            $type = (string)p('type', '');
-            if (!in_array($type, ['container', 'pool'], true)) {
-                errorResponse('Invalid model type', 400);
-            }
-
-            $featuresArr = p('features', []);
-            $features = is_array($featuresArr) ? json_encode($featuresArr, JSON_UNESCAPED_UNICODE) : null;
+            $features = isset($body['features']) ? json_encode($body['features']) : null;
 
             $stmt = $db->prepare("
-                INSERT INTO models
-                (name, type, description, base_price, dimensions, bedrooms, bathrooms, image_url, features, is_active, display_order)
+                INSERT INTO models (name, type, description, base_price, dimensions, bedrooms, bathrooms, image_url, features, is_active, display_order)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ");
 
             $stmt->execute([
-                sanitize((string)p('name', '')),
-                $type,
-                sanitize((string)p('description', '')),
-                (float)p('base_price', 0),
-                sanitize((string)p('dimensions', '')),
-                (int)p('bedrooms', 0),
-                (int)p('bathrooms', 0),
-                sanitize((string)p('image_url', '')),
+                sanitize($body['name']),
+                $body['type'],
+                sanitize($body['description'] ?? ''),
+                (float)$body['base_price'],
+                sanitize($body['dimensions'] ?? ''),
+                (int)($body['bedrooms'] ?? 0),
+                (int)($body['bathrooms'] ?? 0),
+                sanitize($body['image_url'] ?? ''),
                 $features,
-                pBool('is_active', true) ? 1 : 0,
-                (int)p('display_order', 0),
+                parseBool($body['is_active'] ?? true, true),
+                (int)($body['display_order'] ?? 0)
             ]);
 
             $modelId = (int)$db->lastInsertId();
@@ -402,98 +338,90 @@ try {
         }
 
         case 'update_model': {
-            $id = pInt('id', 0);
-            if ($id <= 0) errorResponse('Missing id', 400);
+            validateRequired($body, ['id']);
 
             $fields = [];
-            $params2 = [];
+            $params = [];
 
             $allowedFields = [
-                'name', 'type', 'description', 'base_price',
-                'dimensions', 'bedrooms', 'bathrooms',
-                'image_url', 'is_active', 'display_order'
+                'name','type','description','base_price','dimensions',
+                'bedrooms','bathrooms','image_url','is_active','display_order'
             ];
 
             foreach ($allowedFields as $field) {
-                if (array_key_exists($field, $params)) {
+                if (array_key_exists($field, $body)) {
                     $fields[] = "$field = ?";
-                    $value = $params[$field];
+                    $value = $body[$field];
 
-                    if (in_array($field, ['name', 'description', 'dimensions', 'image_url'], true)) {
+                    if (in_array($field, ['name','description','dimensions','image_url'], true)) {
                         $value = sanitize((string)$value);
                     } elseif ($field === 'base_price') {
                         $value = (float)$value;
-                    } elseif (in_array($field, ['bedrooms', 'bathrooms', 'display_order'], true)) {
+                    } elseif (in_array($field, ['bedrooms','bathrooms','display_order'], true)) {
                         $value = (int)$value;
                     } elseif ($field === 'is_active') {
-                        $value = pBool('is_active', true) ? 1 : 0;
-                    } elseif ($field === 'type') {
-                        $value = (string)$value;
-                        if (!in_array($value, ['container', 'pool'], true)) {
-                            errorResponse('Invalid model type', 400);
-                        }
+                        $value = parseBool($value, true);
                     }
 
-                    $params2[] = $value;
+                    $params[] = $value;
                 }
             }
 
-            if (array_key_exists('features', $params)) {
-                $featuresArr = p('features', []);
+            if (array_key_exists('features', $body)) {
                 $fields[] = "features = ?";
-                $params2[] = is_array($featuresArr)
-                    ? json_encode($featuresArr, JSON_UNESCAPED_UNICODE)
-                    : json_encode([], JSON_UNESCAPED_UNICODE);
+                $params[] = json_encode($body['features']);
             }
 
             if (empty($fields)) {
-                errorResponse('No fields to update', 400);
+                errorResponse('No fields to update');
             }
 
-            $params2[] = $id;
+            $params[] = (int)$body['id'];
 
             $sql = "UPDATE models SET " . implode(', ', $fields) . ", updated_at = NOW() WHERE id = ?";
             $stmt = $db->prepare($sql);
-            $stmt->execute($params2);
+            $stmt->execute($params);
 
-            logActivity($db, 'model_updated', 'model', $id);
+            logActivity($db, 'model_updated', 'model', (int)$body['id']);
 
             successResponse(null, 'Model updated successfully');
             break;
         }
 
         case 'delete_model': {
-            $id = pInt('id', 0);
-            if ($id <= 0) errorResponse('Missing id', 400);
+            validateRequired($body, ['id']);
 
             $stmt = $db->prepare("DELETE FROM models WHERE id = ?");
-            $stmt->execute([$id]);
+            $stmt->execute([(int)$body['id']]);
 
-            logActivity($db, 'model_deleted', 'model', $id);
+            logActivity($db, 'model_deleted', 'model', (int)$body['id']);
 
             successResponse(null, 'Model deleted');
             break;
         }
 
         // ============================================
-        // OPTIONS (PUBLIC get_options / get_option_categories, ADMIN create/update/delete)
+        // OPTIONS
         // ============================================
         case 'get_options': {
-            $productType = p('product_type', null);
-            $category    = p('category', null);
-            $activeOnly  = pBool('active_only', true);
+            $productType = $body['product_type'] ?? null;
+            $category    = $body['category'] ?? null;
+
+            $activeOnly = array_key_exists('active_only', $body)
+                ? parseBool($body['active_only'], true)
+                : true;
 
             $sql = "SELECT * FROM options WHERE 1=1";
-            $params2 = [];
+            $params = [];
 
             if ($productType) {
                 $sql .= " AND (product_type = ? OR product_type = 'both')";
-                $params2[] = $productType;
+                $params[] = $productType;
             }
 
             if ($category) {
                 $sql .= " AND category = ?";
-                $params2[] = $category;
+                $params[] = $category;
             }
 
             if ($activeOnly) {
@@ -503,7 +431,7 @@ try {
             $sql .= " ORDER BY category ASC, display_order ASC, name ASC";
 
             $stmt = $db->prepare($sql);
-            $stmt->execute($params2);
+            $stmt->execute($params);
             successResponse($stmt->fetchAll());
             break;
         }
@@ -515,7 +443,7 @@ try {
         }
 
         case 'create_option': {
-            validateRequired($params, ['name', 'category', 'price']);
+            validateRequired($body, ['name','category','price']);
 
             $stmt = $db->prepare("
                 INSERT INTO options (name, category, price, description, product_type, is_active, display_order)
@@ -523,13 +451,13 @@ try {
             ");
 
             $stmt->execute([
-                sanitize((string)p('name', '')),
-                sanitize((string)p('category', '')),
-                (float)p('price', 0),
-                sanitize((string)p('description', '')),
-                (string)p('product_type', 'both'),
-                pBool('is_active', true) ? 1 : 0,
-                (int)p('display_order', 0)
+                sanitize($body['name']),
+                sanitize($body['category']),
+                (float)$body['price'],
+                sanitize($body['description'] ?? ''),
+                $body['product_type'] ?? 'both',
+                parseBool($body['is_active'] ?? true, true),
+                (int)($body['display_order'] ?? 0)
             ]);
 
             $optionId = (int)$db->lastInsertId();
@@ -540,57 +468,55 @@ try {
         }
 
         case 'update_option': {
-            $id = pInt('id', 0);
-            if ($id <= 0) errorResponse('Missing id', 400);
+            validateRequired($body, ['id']);
 
             $fields = [];
-            $params2 = [];
+            $params = [];
 
-            $allowedFields = ['name', 'category', 'price', 'description', 'product_type', 'is_active', 'display_order'];
+            $allowedFields = ['name','category','price','description','product_type','is_active','display_order'];
 
             foreach ($allowedFields as $field) {
-                if (array_key_exists($field, $params)) {
+                if (array_key_exists($field, $body)) {
                     $fields[] = "$field = ?";
-                    $value = $params[$field];
+                    $value = $body[$field];
 
-                    if (in_array($field, ['name', 'category', 'description'], true)) {
+                    if (in_array($field, ['name','category','description'], true)) {
                         $value = sanitize((string)$value);
                     } elseif ($field === 'price') {
                         $value = (float)$value;
                     } elseif ($field === 'display_order') {
                         $value = (int)$value;
                     } elseif ($field === 'is_active') {
-                        $value = pBool('is_active', true) ? 1 : 0;
+                        $value = parseBool($value, true);
                     }
 
-                    $params2[] = $value;
+                    $params[] = $value;
                 }
             }
 
             if (empty($fields)) {
-                errorResponse('No fields to update', 400);
+                errorResponse('No fields to update');
             }
 
-            $params2[] = $id;
+            $params[] = (int)$body['id'];
 
             $sql = "UPDATE options SET " . implode(', ', $fields) . ", updated_at = NOW() WHERE id = ?";
             $stmt = $db->prepare($sql);
-            $stmt->execute($params2);
+            $stmt->execute($params);
 
-            logActivity($db, 'option_updated', 'option', $id);
+            logActivity($db, 'option_updated', 'option', (int)$body['id']);
 
             successResponse(null, 'Option updated');
             break;
         }
 
         case 'delete_option': {
-            $id = pInt('id', 0);
-            if ($id <= 0) errorResponse('Missing id', 400);
+            validateRequired($body, ['id']);
 
             $stmt = $db->prepare("DELETE FROM options WHERE id = ?");
-            $stmt->execute([$id]);
+            $stmt->execute([(int)$body['id']]);
 
-            logActivity($db, 'option_deleted', 'option', $id);
+            logActivity($db, 'option_deleted', 'option', (int)$body['id']);
 
             successResponse(null, 'Option deleted');
             break;
@@ -600,20 +526,20 @@ try {
         // SETTINGS (ADMIN)
         // ============================================
         case 'get_settings': {
-            $group = p('group', null);
+            $group = $body['group'] ?? null;
 
             $sql = "SELECT * FROM settings";
-            $params2 = [];
+            $params = [];
 
             if ($group) {
                 $sql .= " WHERE setting_group = ?";
-                $params2[] = $group;
+                $params[] = $group;
             }
 
             $sql .= " ORDER BY setting_group ASC, setting_key ASC";
 
             $stmt = $db->prepare($sql);
-            $stmt->execute($params2);
+            $stmt->execute($params);
             $settings = $stmt->fetchAll();
 
             $result = [];
@@ -626,7 +552,7 @@ try {
         }
 
         case 'update_setting': {
-            validateRequired($params, ['key', 'value']);
+            validateRequired($body, ['key','value']);
 
             $stmt = $db->prepare("
                 INSERT INTO settings (setting_key, setting_value, setting_group)
@@ -635,23 +561,19 @@ try {
             ");
 
             $stmt->execute([
-                (string)p('key', ''),
-                (string)p('value', ''),
-                (string)p('group', 'general')
+                (string)$body['key'],
+                (string)$body['value'],
+                (string)($body['group'] ?? 'general')
             ]);
 
-            logActivity($db, 'setting_updated', 'setting', null, ['key' => (string)p('key', '')]);
+            logActivity($db, 'setting_updated', 'setting', null, ['key' => (string)$body['key']]);
 
             successResponse(null, 'Setting updated');
             break;
         }
 
         case 'update_settings_bulk': {
-            validateRequired($params, ['settings']);
-
-            if (!is_array($params['settings'])) {
-                errorResponse('settings must be an array', 400);
-            }
+            validateRequired($body, ['settings']);
 
             $stmt = $db->prepare("
                 INSERT INTO settings (setting_key, setting_value, setting_group)
@@ -659,7 +581,7 @@ try {
                 ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()
             ");
 
-            foreach ($params['settings'] as $setting) {
+            foreach ((array)$body['settings'] as $setting) {
                 $stmt->execute([
                     (string)($setting['key'] ?? ''),
                     (string)($setting['value'] ?? ''),
@@ -674,31 +596,29 @@ try {
         }
 
         // ============================================
-        // CONTACTS (PUBLIC create_contact, ADMIN get_contacts)
+        // CONTACTS (admin list / public create)
         // ============================================
         case 'get_contacts': {
-            $status = p('status', null);
+            $status = $body['status'] ?? null;
 
             $sql = "SELECT * FROM contacts";
-            $params2 = [];
+            $params = [];
 
             if ($status) {
                 $sql .= " WHERE status = ?";
-                $params2[] = $status;
+                $params[] = $status;
             }
 
             $sql .= " ORDER BY created_at DESC";
 
             $stmt = $db->prepare($sql);
-            $stmt->execute($params2);
-
+            $stmt->execute($params);
             successResponse($stmt->fetchAll());
             break;
         }
 
         case 'create_contact': {
-            // public
-            validateRequired($params, ['name', 'email', 'message']);
+            validateRequired($body, ['name','email','message']);
 
             $stmt = $db->prepare("
                 INSERT INTO contacts (name, email, phone, subject, message)
@@ -706,25 +626,22 @@ try {
             ");
 
             $stmt->execute([
-                sanitize((string)p('name', '')),
-                sanitize((string)p('email', '')),
-                sanitize((string)p('phone', '')),
-                sanitize((string)p('subject', '')),
-                sanitize((string)p('message', '')),
+                sanitize($body['name']),
+                sanitize($body['email']),
+                sanitize($body['phone'] ?? ''),
+                sanitize($body['subject'] ?? ''),
+                sanitize($body['message'])
             ]);
 
-            $contactId = (int)$db->lastInsertId();
-            successResponse(['id' => $contactId], 'Contact message sent');
+            successResponse(['id' => (int)$db->lastInsertId()], 'Contact message sent');
             break;
         }
 
         case 'update_contact_status': {
-            $id = pInt('id', 0);
-            $status = (string)p('status', '');
-            if ($id <= 0 || $status === '') errorResponse('Missing id/status', 400);
+            validateRequired($body, ['id','status']);
 
             $stmt = $db->prepare("UPDATE contacts SET status = ?, updated_at = NOW() WHERE id = ?");
-            $stmt->execute([$status, $id]);
+            $stmt->execute([(string)$body['status'], (int)$body['id']]);
 
             successResponse(null, 'Contact status updated');
             break;
@@ -740,7 +657,7 @@ try {
         }
 
         case 'update_email_template': {
-            validateRequired($params, ['template_key', 'subject', 'body_html']);
+            validateRequired($body, ['template_key','subject','body_html']);
 
             $stmt = $db->prepare("
                 UPDATE email_templates
@@ -749,10 +666,10 @@ try {
             ");
 
             $stmt->execute([
-                (string)p('subject', ''),
-                (string)p('body_html', ''),
-                (string)p('body_text', ''),
-                (string)p('template_key', ''),
+                (string)$body['subject'],
+                (string)$body['body_html'],
+                (string)($body['body_text'] ?? ''),
+                (string)$body['template_key']
             ]);
 
             successResponse(null, 'Email template updated');
@@ -763,46 +680,35 @@ try {
         // ACTIVITY LOGS (ADMIN)
         // ============================================
         case 'get_activity_logs': {
-            $limit = max(1, min(500, pInt('limit', 50)));
+            $limit = (int)($body['limit'] ?? 50);
+            if ($limit <= 0) $limit = 50;
+            if ($limit > 500) $limit = 500;
 
-            $sql = "
-                SELECT al.*, u.name as user_name
+            $stmt = $db->prepare("
+                SELECT al.*
                 FROM activity_logs al
-                LEFT JOIN users u ON al.user_id = u.id
                 ORDER BY al.created_at DESC
-                LIMIT " . (int)$limit;
-
-            $stmt = $db->query($sql);
+                LIMIT " . (int)$limit
+            );
+            $stmt->execute();
             successResponse($stmt->fetchAll());
             break;
         }
 
-        // ============================================
-        // DEFAULT
-        // ============================================
         default:
             errorResponse('Invalid action: ' . $action, 400);
     }
 
 } catch (PDOException $e) {
-    error_log("api/index.php DB error: " . $e->getMessage());
-    if (defined('API_DEBUG') && API_DEBUG) {
-        errorResponse('Database error: ' . $e->getMessage(), 500);
-    }
-    errorResponse('Database error occurred', 500);
-
+    error_log("index.php PDO error: " . $e->getMessage());
+    errorResponse(API_DEBUG ? ('Database error: ' . $e->getMessage()) : 'Database error occurred', 500);
 } catch (Throwable $e) {
-    error_log("api/index.php error: " . $e->getMessage());
-    if (defined('API_DEBUG') && API_DEBUG) {
-        errorResponse($e->getMessage(), 500);
-    }
-    errorResponse('Server error', 500);
+    error_log("index.php error: " . $e->getMessage());
+    errorResponse(API_DEBUG ? $e->getMessage() : 'Server error', 500);
 }
 
-// ------------------------------------------------------------
-// Helper: activity log
-// ------------------------------------------------------------
-function logActivity($db, $action, $entityType, $entityId = null, $details = null) {
+// Helper function to log activity
+function logActivity($db, $action, $entityType, $entityId = null, $details = null): void {
     try {
         $stmt = $db->prepare("
             INSERT INTO activity_logs (action, entity_type, entity_id, details, ip_address)
@@ -810,10 +716,10 @@ function logActivity($db, $action, $entityType, $entityId = null, $details = nul
         ");
 
         $stmt->execute([
-            $action,
-            $entityType,
+            (string)$action,
+            (string)$entityType,
             $entityId,
-            $details ? json_encode($details, JSON_UNESCAPED_UNICODE) : null,
+            $details ? json_encode($details) : null,
             $_SERVER['REMOTE_ADDR'] ?? null
         ]);
     } catch (Throwable $e) {
