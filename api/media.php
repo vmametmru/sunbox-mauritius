@@ -169,36 +169,55 @@ try {
     }
 
     case 'model_upload': {
-      $modelId = (int)($_GET['model_id'] ?? 0);
-      if ($modelId <= 0) fail("model_id manquant.", 400);
+  $modelId = (int)($_GET['model_id'] ?? 0);
+  if ($modelId <= 0) fail("model_id manquant.", 400);
 
-      $up = uploadOne('uploads/models', $ALLOWED_MIME, $MAX_BYTES);
+  // Upload (convert + resize déjà OK chez toi)
+  $up = uploadOne('uploads/models', $ALLOWED_MIME, $MAX_BYTES);
 
-      $stmt = $db->prepare("INSERT INTO model_images (model_id, file_path) VALUES (?, ?)");
-      $stmt->execute([$modelId, $up['relative']]);
+  // Est-ce la première image ?
+  $stmt = $db->prepare("SELECT COUNT(*) AS c FROM model_images WHERE model_id = ?");
+  $stmt->execute([$modelId]);
+  $count = (int)($stmt->fetch()['c'] ?? 0);
 
-      ok(['file' => $up]);
-      break;
-    }
+  // Insert
+  $stmt = $db->prepare("INSERT INTO model_images (model_id, file_path, is_primary) VALUES (?, ?, ?)");
+  $stmt->execute([$modelId, $up['relative'], $count === 0 ? 1 : 0]);
 
-    case 'model_delete': {
-      $id = (int)($_GET['id'] ?? 0);
-      if ($id <= 0) fail("id manquant.", 400);
+  // Sync models.image_url
+  syncModelImageUrl($db, $modelId);
 
-      $stmt = $db->prepare("SELECT file_path FROM model_images WHERE id = ?");
-      $stmt->execute([$id]);
-      $row = $stmt->fetch();
-      if (!$row) fail("Image introuvable.", 404);
+  ok(['file' => $up]);
+  break;
+}
 
-      $stmt = $db->prepare("DELETE FROM model_images WHERE id = ?");
-      $stmt->execute([$id]);
+case 'model_delete': {
+  $id = (int)($_GET['id'] ?? 0);
+  if ($id <= 0) fail("id manquant.", 400);
 
-      $abs = dirname(__DIR__) . '/' . ltrim($row['file_path'], '/');
-      if (is_file($abs)) @unlink($abs);
+  // On récupère model_id + file_path AVANT suppression
+  $stmt = $db->prepare("SELECT model_id, file_path FROM model_images WHERE id = ?");
+  $stmt->execute([$id]);
+  $row = $stmt->fetch();
+  if (!$row) fail("Image introuvable.", 404);
 
-      ok(['deleted' => true]);
-      break;
-    }
+  $modelId = (int)$row['model_id'];
+  $filePath = (string)$row['file_path'];
+
+  // Supprime la ligne en base
+  $stmt = $db->prepare("DELETE FROM model_images WHERE id = ?");
+  $stmt->execute([$id]);
+
+  // Supprime le fichier sur disque
+  $abs = dirname(__DIR__) . '/' . ltrim($filePath, '/');
+  if (is_file($abs)) @unlink($abs);
+
+  // Met à jour models.image_url vers la prochaine image (primary ou plus récente)
+  syncModelImageUrl($db, $modelId);
+
+  ok(['deleted' => true]);
+  break;
+}
 
     case 'model_set_primary': {
       $id = (int)($_GET['id'] ?? 0);
@@ -213,6 +232,7 @@ try {
       $db->prepare("UPDATE model_images SET is_primary = 0 WHERE model_id = ?")->execute([$modelId]);
       $db->prepare("UPDATE model_images SET is_primary = 1 WHERE id = ?")->execute([$id]);
 
+      syncModelImageUrl($db, $modelId);
       ok(['primary' => true]);
       break;
     }
@@ -224,4 +244,25 @@ try {
 } catch (Throwable $e) {
   error_log("media.php error: " . $e->getMessage());
   fail(API_DEBUG ? $e->getMessage() : "Server error", 500);
+}
+
+function syncModelImageUrl(PDO $db, int $modelId): void {
+  // prend l'image principale, sinon la plus récente
+  $stmt = $db->prepare("
+    SELECT file_path
+    FROM model_images
+    WHERE model_id = ?
+    ORDER BY is_primary DESC, sort_order ASC, id DESC
+    LIMIT 1
+  ");
+  $stmt->execute([$modelId]);
+  $row = $stmt->fetch();
+
+  $url = '';
+  if ($row && !empty($row['file_path'])) {
+    $url = '/' . ltrim((string)$row['file_path'], '/'); // ex: /uploads/models/xxx.jpg
+  }
+
+  $up = $db->prepare("UPDATE models SET image_url = ? WHERE id = ?");
+  $up->execute([$url, $modelId]);
 }
