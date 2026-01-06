@@ -1,5 +1,5 @@
 import React from "react";
-import PublicLayout from "@/components/PublicLayout";
+import PublicLayout from "@/layouts/PublicLayout";
 
 export default function LegalPage() {
   return (
