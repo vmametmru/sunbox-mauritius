@@ -1,22 +1,27 @@
 import React, { useEffect, useState } from "react";
-import { Settings } from "lucide-react";
+import { Settings, Image } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 
-type SiteSettings = {
-  site_under_construction: string; // 'true' | 'false'
+interface SiteSettings {
+  site_under_construction: string;
   under_construction_message: string;
-};
+  site_logo_url?: string;
+  site_slogan?: string;
+}
 
 const defaults: SiteSettings = {
   site_under_construction: "true",
   under_construction_message:
     "🚧 Page en construction — merci de revenir ultérieurement. | Page under construction - please come back later",
+  site_logo_url: "",
+  site_slogan: "container home - swimming-pools",
 };
 
 export default function SiteSettingsPage() {
@@ -57,6 +62,16 @@ export default function SiteSettingsPage() {
           value: settings.under_construction_message || "",
           group: "site",
         },
+        {
+          key: "site_logo_url",
+          value: settings.site_logo_url || "",
+          group: "site",
+        },
+        {
+          key: "site_slogan",
+          value: settings.site_slogan || "",
+          group: "site",
+        },
       ]);
 
       toast({ title: "Succès", description: "Paramètres enregistrés." });
@@ -81,7 +96,7 @@ export default function SiteSettingsPage() {
         </div>
         <div>
           <h1 className="text-2xl font-bold text-[#1A365D]">Site</h1>
-          <p className="text-gray-600">Maintenance, message et état du site</p>
+          <p className="text-gray-600">Paramètres publics du site</p>
         </div>
       </div>
 
@@ -93,7 +108,7 @@ export default function SiteSettingsPage() {
             <>
               <div className="flex items-center justify-between gap-6">
                 <div className="space-y-1">
-                  <Label className="text-base">Site under construction</Label>
+                  <Label className="text-base">Site en construction</Label>
                   <p className="text-sm text-gray-600">
                     Affiche un bandeau sous le menu sur le site public.
                   </p>
@@ -121,6 +136,40 @@ export default function SiteSettingsPage() {
                     }))
                   }
                   rows={3}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Logo (URL)</Label>
+                <Input
+                  value={settings.site_logo_url || ""}
+                  onChange={(e) =>
+                    setSettings((prev) => ({
+                      ...prev,
+                      site_logo_url: e.target.value,
+                    }))
+                  }
+                  placeholder="https://..."
+                />
+                {settings.site_logo_url && (
+                  <img
+                    src={settings.site_logo_url}
+                    alt="Logo preview"
+                    className="mt-2 h-16"
+                  />
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label>Slogan</Label>
+                <Input
+                  value={settings.site_slogan || ""}
+                  onChange={(e) =>
+                    setSettings((prev) => ({
+                      ...prev,
+                      site_slogan: e.target.value,
+                    }))
+                  }
                 />
               </div>
 
