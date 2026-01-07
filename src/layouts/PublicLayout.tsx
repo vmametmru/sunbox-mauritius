@@ -1,14 +1,14 @@
 import React, { ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { useSettings } from "@/hooks/use-settings";
+import { useSiteSettings } from "@/hooks/use-site-settings";
 
 export default function PublicLayout({ children }: { children: ReactNode }) {
-  const {
-    siteLogo,
-    siteSlogan,
-    siteUnderConstruction,
-    constructionMessage,
-  } = useSettings();
+  const { data: settings } = useSiteSettings();
+
+const siteLogo = settings?.site_logo || "/logo.png";
+const siteSlogan = settings?.site_slogan || "container home - swimming-pools";
+const siteUnderConstruction = settings?.site_under_construction === "true";
+const constructionMessage = settings?.under_construction_message || "";
 
   return (
     <div className="flex flex-col min-h-screen text-gray-800">
