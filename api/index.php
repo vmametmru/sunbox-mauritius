@@ -1,13 +1,7 @@
 <?php
 declare(strict_types=1);
 
-/**
- * SUNBOX MAURITIUS – MAIN API ENDPOINT
- * Path: /api/index.php
- */
-
 require_once __DIR__ . '/config.php';
-
 handleCORS();
 
 $action = $_GET['action'] ?? '';
@@ -25,10 +19,6 @@ try {
     $db = getDB();
 
     switch ($action) {
-
-        /* =====================================================
-           DASHBOARD
-        ===================================================== */
         case 'get_dashboard_stats': {
             $stats = [];
 
@@ -48,9 +38,6 @@ try {
             break;
         }
 
-        /* =====================================================
-           SETTINGS (PUBLIC + ADMIN)
-        ===================================================== */
         case 'get_settings': {
             $group = $body['group'] ?? null;
 
@@ -118,9 +105,6 @@ try {
             break;
         }
 
-        /* =====================================================
-           MODELS (PUBLIC + ADMIN)
-        ===================================================== */
         case 'get_models': {
             $type       = $body['type'] ?? null;
             $activeOnly = $body['active_only'] ?? true;
@@ -147,6 +131,15 @@ try {
                 $m['features'] = $m['features']
                     ? json_decode($m['features'], true)
                     : [];
+
+                // Ajout plan_url depuis la table images
+                $planStmt = $db->prepare("
+                    SELECT file_path FROM model_images 
+                    WHERE model_id = ? AND media_type = 'plan' 
+                    ORDER BY id DESC LIMIT 1
+                ");
+                $planStmt->execute([$m['id']]);
+                $m['plan_url'] = ($row = $planStmt->fetch()) ? '/' . ltrim($row['file_path'], '/') : null;
             }
 
             ok($models);
@@ -225,9 +218,6 @@ try {
             break;
         }
 
-        /* =====================================================
-           DEFAULT
-        ===================================================== */
         default:
             fail('Invalid action', 400);
     }
