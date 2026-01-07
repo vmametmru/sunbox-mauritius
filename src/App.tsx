@@ -34,25 +34,32 @@ const App = () => (
           <Sonner />
           <BrowserRouter>
             <Routes>
-              {/* Public Routes */}
-              <Route path="/" element={<ModelsPage />} />
-              <Route path="/configure" element={<ConfigurePage />} />
-              <Route path="/details" element={<DetailsPage />} />
-              <Route path="/quote" element={<QuotePage />} />
-              <Route path="/admin-login" element={<AdminLoginPage />} />
-              
-              {/* Admin Routes */}
-              <Route element={<RequireAdmin />}>
-                <Route path="/admin" element={<AdminLayout />}>
-                  <Route index element={<DashboardPage />} />
-                  <Route path="quotes" element={<QuotesPage />} />
-                  <Route path="models" element={<AdminModelsPage />} />
-                  <Route path="media" element={<MediaPage />} />
-                  <Route path="options" element={<OptionsPage />} />
-                  <Route path="email" element={<EmailSettingsPage />} />
-                  <Route path="site" element={<SiteSettingsPage />} />
-                </Route>
-              </Route>
+  {/* Public Routes */}
+  <Route path="/" element={<HomePage />} />
+  <Route path="/models" element={<ModelsPage />} />
+  <Route path="/configure" element={<ConfigurePage />} />
+  <Route path="/details" element={<DetailsPage />} />
+  <Route path="/quote" element={<QuotePage />} />
+  <Route path="/about" element={<AboutPage />} />
+  <Route path="/contact" element={<ContactPage />} />
+  <Route path="/legal" element={<LegalPage />} />
+  <Route path="/admin-login" element={<AdminLoginPage />} />
+
+  {/* Admin Routes */}
+  <Route element={<RequireAdmin />}>
+    <Route path="/admin" element={<AdminLayout />}>
+      <Route index element={<DashboardPage />} />
+      <Route path="quotes" element={<QuotesPage />} />
+      <Route path="models" element={<AdminModelsPage />} />
+      <Route path="media" element={<MediaPage />} />
+      <Route path="options" element={<OptionsPage />} />
+      <Route path="email" element={<EmailSettingsPage />} />
+      <Route path="site" element={<SiteSettingsPage />} />
+    </Route>
+  </Route>
+
+  <Route path="*" element={<NotFound />} />
+</Routes>
               
               <Route path="*" element={<NotFound />} />
             </Routes>
