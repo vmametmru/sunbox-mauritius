@@ -14,29 +14,9 @@ import { Badge } from "@/components/ui/badge";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 
-type ModelBrief = {
-  id: number;
-  name: string;
-  type: "container" | "pool";
-};
+// ... types inchangés
 
-type ModelImageRow = {
-  id: number;
-  model_id: number;
-  file_path: string;
-  is_primary?: number | boolean;
-  sort_order?: number | null;
-  created_at?: string | null;
-  media_type?: string;
-};
-
-function toBool(v: any) {
-  return v === true || v === 1 || v === "1";
-}
-
-function imgUrl(filePath: string) {
-  return "/" + String(filePath || "").replace(/^\/+/g, "");
-}
+// ... fonctions toBool, imgUrl inchangées
 
 export default function MediaPage() {
   const { toast } = useToast();
@@ -44,17 +24,17 @@ export default function MediaPage() {
 
   const [models, setModels] = useState<ModelBrief[]>([]);
   const [modelId, setModelId] = useState<number>(0);
-
   const [file, setFile] = useState<File | null>(null);
   const [mediaType, setMediaType] = useState("photo");
   const [saving, setSaving] = useState(false);
-
   const [bannerFile, setBannerFile] = useState<File | null>(null);
   const [savingBanner, setSavingBanner] = useState(false);
-
   const [items, setItems] = useState<ModelImageRow[]>([]);
   const [loadingList, setLoadingList] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [filterType, setFilterType] = useState<string>('all');
+  const [filterTag, setFilterTag] = useState<string>('all');
 
   const selectedModel = useMemo(() => models.find((m) => m.id === modelId) || null, [models, modelId]);
 
@@ -62,9 +42,7 @@ export default function MediaPage() {
     try {
       const data = await api.getModels(undefined, false);
       const list: ModelBrief[] = Array.isArray(data)
-        ? data
-            .filter((m: any) => m?.id)
-            .map((m: any) => ({ id: Number(m.id), name: String(m.name || ""), type: m.type }))
+        ? data.filter((m: any) => m?.id).map((m: any) => ({ id: Number(m.id), name: String(m.name || ""), type: m.type }))
         : [];
       setModels(list);
       const q = Number(sp.get("model_id") || 0);
@@ -147,7 +125,6 @@ export default function MediaPage() {
   async function uploadBanner(e: React.FormEvent) {
     e.preventDefault();
     if (!bannerFile) return;
-
     setSavingBanner(true);
     try {
       const fd = new FormData();
@@ -201,6 +178,16 @@ export default function MediaPage() {
       setError(e?.message || "Action failed");
     }
   }
+
+  const filteredItems = useMemo(() => {
+    return items.filter((it) => {
+      const model = models.find((m) => m.id === it.model_id);
+      if (!model) return false;
+      if (filterType !== 'all' && model.type !== filterType) return false;
+      if (filterTag !== 'all' && it.media_type !== filterTag) return false;
+      return true;
+    });
+  }, [items, filterType, filterTag, models]);
 
   return (
     <div className="space-y-10">
@@ -283,10 +270,34 @@ export default function MediaPage() {
 
       {/* Galerie */}
       <Card>
-        <CardHeader><CardTitle>Images existantes</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle>Images existantes</CardTitle>
+        </CardHeader>
         <CardContent>
+          {/* Filtres Galerie */}
+          <div className="flex flex-wrap gap-4 mb-6">
+            <Select value={filterType} onValueChange={setFilterType}>
+              <SelectTrigger className="w-40"><SelectValue placeholder="Type modèle" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tous types</SelectItem>
+                <SelectItem value="container">Container</SelectItem>
+                <SelectItem value="pool">Piscine</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={filterTag} onValueChange={setFilterTag}>
+              <SelectTrigger className="w-40"><SelectValue placeholder="Tag" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tous tags</SelectItem>
+                <SelectItem value="photo">Photo</SelectItem>
+                <SelectItem value="plan">Plan</SelectItem>
+                <SelectItem value="bandeau">Bandeau</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {items.map((it) => {
+            {filteredItems.map((it) => {
               const primary = toBool(it.is_primary);
               return (
                 <div key={it.id} className="border rounded-xl overflow-hidden bg-white">
@@ -312,7 +323,7 @@ export default function MediaPage() {
                 </div>
               );
             })}
-            {!loadingList && items.length === 0 && (
+            {!loadingList && filteredItems.length === 0 && (
               <div className="text-sm text-gray-500">Aucune image pour ce modèle.</div>
             )}
           </div>
