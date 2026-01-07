@@ -218,6 +218,22 @@ try {
             break;
         }
 
+case 'get_banner_images': {
+    $stmt = $db->prepare("SELECT id, file_path FROM model_images WHERE media_type = 'bandeau' ORDER BY id DESC");
+    $stmt->execute();
+    $rows = $stmt->fetchAll();
+
+    $data = array_map(function ($r) {
+        return [
+            'id' => (int)$r['id'],
+            'url' => '/' . ltrim((string)$r['file_path'], '/'),
+        ];
+    }, $rows);
+
+    ok($data);
+    break;
+}
+        
         default:
             fail('Invalid action', 400);
     }
