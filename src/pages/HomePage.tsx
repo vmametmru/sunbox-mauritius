@@ -2,7 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { ArrowRight, Package, Phone, Home } from 'lucide-react';
-import PublicLayout from '@/components/layouts/PublicLayout';
+import PublicLayout from '@/layouts/PublicLayout'; // ✅ Corrigé ici
 import BannerCarousel from '@/components/public/BannerCarousel';
 
 export default function HomePage() {
