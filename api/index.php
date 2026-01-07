@@ -154,8 +154,10 @@ try {
                     name, type, description, base_price,
                     dimensions, bedrooms, bathrooms,
                     image_url, plan_image_url,
+                    container_20ft_count, container_40ft_count,
+                    pool_shape, has_overflow,
                     features, is_active, display_order
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ");
 
             $stmt->execute([
@@ -168,6 +170,10 @@ try {
                 (int)($body['bathrooms'] ?? 0),
                 sanitize($body['image_url'] ?? ''),
                 sanitize($body['plan_image_url'] ?? ''),
+                (int)($body['container_20ft_count'] ?? 0),
+                (int)($body['container_40ft_count'] ?? 0),
+                sanitize($body['pool_shape'] ?? ''),
+                (int)($body['has_overflow'] ?? 0),
                 json_encode($body['features'] ?? []),
                 (bool)($body['is_active'] ?? true),
                 (int)($body['display_order'] ?? 0),
@@ -183,6 +189,8 @@ try {
             $allowed = [
                 'name','type','description','base_price','dimensions',
                 'bedrooms','bathrooms','image_url','plan_image_url',
+                'container_20ft_count','container_40ft_count',
+                'pool_shape','has_overflow',
                 'features','is_active','display_order'
             ];
 
@@ -196,7 +204,10 @@ try {
                         $params[] = json_encode($body[$f]);
                     } elseif ($f === 'base_price') {
                         $params[] = (float)$body[$f];
-                    } elseif (in_array($f, ['bedrooms','bathrooms','display_order'])) {
+                    } elseif (in_array($f, [
+                        'bedrooms','bathrooms','display_order',
+                        'container_20ft_count','container_40ft_count','has_overflow'
+                    ])) {
                         $params[] = (int)$body[$f];
                     } elseif ($f === 'is_active') {
                         $params[] = (bool)$body[$f];
@@ -218,22 +229,22 @@ try {
             break;
         }
 
-case 'get_banner_images': {
-    $stmt = $db->prepare("SELECT id, file_path FROM model_images WHERE media_type = 'bandeau' ORDER BY id DESC");
-    $stmt->execute();
-    $rows = $stmt->fetchAll();
+        case 'get_banner_images': {
+            $stmt = $db->prepare("SELECT id, file_path FROM model_images WHERE media_type = 'bandeau' ORDER BY id DESC");
+            $stmt->execute();
+            $rows = $stmt->fetchAll();
 
-    $data = array_map(function ($r) {
-        return [
-            'id' => (int)$r['id'],
-            'url' => '/' . ltrim((string)$r['file_path'], '/'),
-        ];
-    }, $rows);
+            $data = array_map(function ($r) {
+                return [
+                    'id' => (int)$r['id'],
+                    'url' => '/' . ltrim((string)$r['file_path'], '/'),
+                ];
+            }, $rows);
 
-    ok($data);
-    break;
-}
-        
+            ok($data);
+            break;
+        }
+
         default:
             fail('Invalid action', 400);
     }
