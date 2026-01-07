@@ -1,6 +1,6 @@
 import React, { ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { useSiteSettings } from "@/hooks/use-site-settings";
+import { useSiteSettings } from "@/hooks/use-settings";
 
 export default function PublicLayout({ children }: { children: ReactNode }) {
   const { data: settings } = useSiteSettings();
