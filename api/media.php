@@ -1,9 +1,10 @@
 <?php
+declare(strict_types=1);
+
 /**
  * api/media.php
  * Fichier complet avec gestion des tags photo | plan | bandeau
  */
-declare(strict_types=1);
 
 require_once __DIR__ . '/config.php';
 
@@ -133,6 +134,16 @@ function syncModelImageUrl(PDO $db, int $modelId): void {
 
 try {
   switch ($action) {
+    case 'model_list': {
+      $modelId = (int)($_GET['model_id'] ?? 0);
+      if ($modelId <= 0) fail("model_id manquant.", 400);
+
+      $stmt = $db->prepare("SELECT * FROM model_images WHERE model_id = ? ORDER BY is_primary DESC, sort_order ASC, id DESC");
+      $stmt->execute([$modelId]);
+      ok(['items' => $stmt->fetchAll()]);
+      break;
+    }
+
     case 'model_upload': {
       $modelId = (int)($_GET['model_id'] ?? 0);
       $mediaType = $_POST['media_type'] ?? 'photo';
@@ -153,12 +164,51 @@ try {
       break;
     }
 
-    // autres actions (model_list, model_delete, etc.)
-    // ... non inclus ici pour la lisibilité
+    case 'model_delete': {
+      $id = (int)($_GET['id'] ?? 0);
+      if ($id <= 0) fail("id manquant.", 400);
+
+      $stmt = $db->prepare("SELECT model_id, file_path FROM model_images WHERE id = ?");
+      $stmt->execute([$id]);
+      $row = $stmt->fetch();
+      if (!$row) fail("Image introuvable.", 404);
+
+      $modelId = (int)$row['model_id'];
+      $filePath = (string)$row['file_path'];
+
+      $stmt = $db->prepare("DELETE FROM model_images WHERE id = ?");
+      $stmt->execute([$id]);
+
+      $abs = dirname(__DIR__) . '/' . ltrim($filePath, '/');
+      if (is_file($abs)) @unlink($abs);
+
+      syncModelImageUrl($db, $modelId);
+      ok(['deleted' => true]);
+      break;
+    }
+
+    case 'model_set_primary': {
+      $id = (int)($_GET['id'] ?? 0);
+      if ($id <= 0) fail("id manquant.", 400);
+
+      $stmt = $db->prepare("SELECT model_id FROM model_images WHERE id = ?");
+      $stmt->execute([$id]);
+      $row = $stmt->fetch();
+      if (!$row) fail("Image introuvable.", 404);
+
+      $modelId = (int)$row['model_id'];
+      $db->prepare("UPDATE model_images SET is_primary = 0 WHERE model_id = ?")->execute([$modelId]);
+      $db->prepare("UPDATE model_images SET is_primary = 1 WHERE id = ?")->execute([$id]);
+
+      syncModelImageUrl($db, $modelId);
+      ok(['primary' => true]);
+      break;
+    }
 
     default:
       fail("Action invalide.", 400);
   }
+
 } catch (Throwable $e) {
   error_log("media.php error: " . $e->getMessage());
   fail(API_DEBUG ? $e->getMessage() : "Server error", 500);
