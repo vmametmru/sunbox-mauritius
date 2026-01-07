@@ -1,8 +1,9 @@
+// 📁 src/pages/HomePage.tsx
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { ArrowRight, Package, Phone, Home } from 'lucide-react';
-import PublicLayout from '@/components/layouts/PublicLayout';
+import PublicLayout from '@/layouts/PublicLayout';
 
 export default function HomePage() {
   return (
