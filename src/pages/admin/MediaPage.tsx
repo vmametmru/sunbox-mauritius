@@ -49,6 +49,9 @@ export default function MediaPage() {
   const [mediaType, setMediaType] = useState("photo");
   const [saving, setSaving] = useState(false);
 
+  const [bannerFile, setBannerFile] = useState<File | null>(null);
+  const [savingBanner, setSavingBanner] = useState(false);
+
   const [items, setItems] = useState<ModelImageRow[]>([]);
   const [loadingList, setLoadingList] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -141,6 +144,35 @@ export default function MediaPage() {
     }
   }
 
+  async function uploadBanner(e: React.FormEvent) {
+    e.preventDefault();
+    if (!bannerFile) return;
+
+    setSavingBanner(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", bannerFile);
+      fd.append("media_type", "bandeau");
+      fd.append("model_id", "0");
+
+      const r = await fetch(`/api/media.php?action=model_upload&model_id=0`, {
+        method: "POST",
+        credentials: "include",
+        body: fd,
+      });
+
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j?.success) throw new Error(j?.error || "Upload bandeau échoué");
+
+      setBannerFile(null);
+      toast({ title: "OK", description: "Image bandeau uploadée" });
+    } catch (e: any) {
+      toast({ title: "Erreur", description: e?.message || "Erreur upload bandeau", variant: "destructive" });
+    } finally {
+      setSavingBanner(false);
+    }
+  }
+
   async function deleteOne(id: number) {
     if (!confirm("Supprimer cette image ?")) return;
     try {
@@ -171,62 +203,85 @@ export default function MediaPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-10">
       <div>
         <h1 className="text-3xl font-bold text-gray-900">Photos des modèles</h1>
-        <p className="text-gray-500 mt-1">Sélectionne un modèle, puis ajoute et gère ses images.</p>
+        <p className="text-gray-500 mt-1">Ajoute des images pour chaque modèle ou pour le bandeau d’accueil.</p>
       </div>
 
+      {/* Upload Bandeau */}
       <Card>
-        <CardHeader><CardTitle>Ajouter une image</CardTitle></CardHeader>
+        <CardHeader><CardTitle>Image de bandeau (carousel d’accueil)</CardTitle></CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-            <div>
-              <label className="text-sm text-gray-600">Modèle</label>
-              <Select value={String(modelId)} onValueChange={(v) => setModelId(Number(v))}>
-                <SelectTrigger><SelectValue placeholder="Choisir un modèle" /></SelectTrigger>
-                <SelectContent>
-                  {models.map((m) => (
-                    <SelectItem key={m.id} value={String(m.id)}>
-                      #{m.id} — {m.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {selectedModel && (
-                <div className="mt-2">
-                  <Badge>{selectedModel.type === "container" ? "Container" : "Piscine"}</Badge>
-                </div>
-              )}
+          <form onSubmit={uploadBanner}>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+              <div>
+                <label className="text-sm text-gray-600">Fichier image</label>
+                <Input type="file" accept="image/*" onChange={(e) => setBannerFile(e.target.files?.[0] || null)} />
+              </div>
+              <div>
+                <Button type="submit" disabled={savingBanner || !bannerFile} className="w-full bg-orange-500 hover:bg-orange-600">
+                  {savingBanner ? "Upload..." : "Uploader"}
+                </Button>
+              </div>
             </div>
-
-            <div>
-              <label className="text-sm text-gray-600">Type d'image</label>
-              <Select value={mediaType} onValueChange={setMediaType}>
-                <SelectTrigger><SelectValue placeholder="Type" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="photo">Photo</SelectItem>
-                  <SelectItem value="plan">Plan</SelectItem>
-                  <SelectItem value="bandeau">Bandeau</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div>
-              <label className="text-sm text-gray-600">Fichier image</label>
-              <Input type="file" accept="image/*" onChange={(e) => setFile(e.target.files?.[0] || null)} />
-            </div>
-
-            <div>
-              <Button onClick={uploadOne as any} disabled={saving || !modelId || !file} className="w-full bg-orange-500 hover:bg-orange-600">
-                {saving ? "Upload..." : "Uploader"}
-              </Button>
-            </div>
-          </div>
-          {error && <div className="text-red-600 text-sm">{error}</div>}
+          </form>
         </CardContent>
       </Card>
 
+      {/* Upload Model Images */}
+      <Card>
+        <CardHeader><CardTitle>Ajouter une image de modèle</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <form onSubmit={uploadOne}>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+              <div>
+                <label className="text-sm text-gray-600">Modèle</label>
+                <Select value={String(modelId)} onValueChange={(v) => setModelId(Number(v))}>
+                  <SelectTrigger><SelectValue placeholder="Choisir un modèle" /></SelectTrigger>
+                  <SelectContent>
+                    {models.map((m) => (
+                      <SelectItem key={m.id} value={String(m.id)}>
+                        #{m.id} — {m.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {selectedModel && (
+                  <div className="mt-2">
+                    <Badge>{selectedModel.type === "container" ? "Container" : "Piscine"}</Badge>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="text-sm text-gray-600">Type d'image</label>
+                <Select value={mediaType} onValueChange={setMediaType}>
+                  <SelectTrigger><SelectValue placeholder="Type" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="photo">Photo</SelectItem>
+                    <SelectItem value="plan">Plan</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <label className="text-sm text-gray-600">Fichier image</label>
+                <Input type="file" accept="image/*" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+              </div>
+
+              <div>
+                <Button type="submit" disabled={saving || !modelId || !file} className="w-full bg-orange-500 hover:bg-orange-600">
+                  {saving ? "Upload..." : "Uploader"}
+                </Button>
+              </div>
+            </div>
+            {error && <div className="text-red-600 text-sm mt-2">{error}</div>}
+          </form>
+        </CardContent>
+      </Card>
+
+      {/* Galerie */}
       <Card>
         <CardHeader><CardTitle>Images existantes</CardTitle></CardHeader>
         <CardContent>
