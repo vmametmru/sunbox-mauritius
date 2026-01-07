@@ -8,7 +8,7 @@ import {
 import { useQuote } from '@/contexts/QuoteContext';
 import { api } from '@/lib/api';
 import ConstructionBanner from "@/components/ConstructionBanner";
-import { useSiteSettings } from "@/hooks/use-site-settings";
+import { useSiteSettings } from "@/hooks/use-settings";
 
 
 const QuotePage: React.FC = () => {
