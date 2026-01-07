@@ -106,128 +106,130 @@ try {
         }
 
         case 'get_models': {
-            $type       = $body['type'] ?? null;
-            $activeOnly = $body['active_only'] ?? true;
+    $type       = $body['type'] ?? null;
+    $activeOnly = $body['active_only'] ?? true;
 
-            $sql = "SELECT * FROM models WHERE 1=1";
-            $params = [];
+    $sql = "SELECT * FROM models WHERE 1=1";
+    $params = [];
 
-            if ($type) {
-                $sql .= " AND type = ?";
-                $params[] = $type;
+    if ($type) {
+        $sql .= " AND type = ?";
+        $params[] = $type;
+    }
+
+    if ($activeOnly) {
+        $sql .= " AND is_active = 1";
+    }
+
+    $sql .= " ORDER BY display_order ASC, name ASC";
+
+    $stmt = $db->prepare($sql);
+    $stmt->execute($params);
+    $models = $stmt->fetchAll();
+
+    foreach ($models as &$m) {
+        $m['features'] = $m['features']
+            ? json_decode($m['features'], true)
+            : [];
+
+        // Plan depuis table model_images
+        $planStmt = $db->prepare("
+            SELECT file_path FROM model_images 
+            WHERE model_id = ? AND media_type = 'plan' 
+            ORDER BY id DESC LIMIT 1
+        ");
+        $planStmt->execute([$m['id']]);
+        $m['plan_url'] = ($row = $planStmt->fetch()) ? '/' . ltrim($row['file_path'], '/') : null;
+
+        // Convert bool pour has_overflow (si colonne présente)
+        $m['has_overflow'] = (bool)$m['has_overflow'];
+    }
+
+    ok($models);
+    break;
+}
+
+case 'create_model': {
+    validateRequired($body, ['name', 'type', 'base_price']);
+
+    $stmt = $db->prepare("
+        INSERT INTO models (
+            name, type, description, base_price,
+            surface_m2, bedrooms, bathrooms,
+            container_20ft_count, container_40ft_count,
+            pool_shape, has_overflow,
+            image_url, plan_image_url,
+            features, is_active, display_order
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ");
+
+    $stmt->execute([
+        sanitize($body['name']),
+        $body['type'],
+        sanitize($body['description'] ?? ''),
+        (float)$body['base_price'],
+        (float)($body['surface_m2'] ?? 0),
+        (int)($body['bedrooms'] ?? 0),
+        (int)($body['bathrooms'] ?? 0),
+        (int)($body['container_20ft_count'] ?? 0),
+        (int)($body['container_40ft_count'] ?? 0),
+        sanitize($body['pool_shape'] ?? ''),
+        isset($body['has_overflow']) ? (int)$body['has_overflow'] : 0,
+        sanitize($body['image_url'] ?? ''),
+        sanitize($body['plan_image_url'] ?? ''),
+        json_encode($body['features'] ?? []),
+        (bool)($body['is_active'] ?? true),
+        (int)($body['display_order'] ?? 0),
+    ]);
+
+    ok(['id' => $db->lastInsertId()]);
+    break;
+}
+
+case 'update_model': {
+    validateRequired($body, ['id']);
+
+    $allowed = [
+        'name','type','description','base_price','surface_m2',
+        'bedrooms','bathrooms',
+        'container_20ft_count','container_40ft_count',
+        'pool_shape','has_overflow',
+        'image_url','plan_image_url',
+        'features','is_active','display_order'
+    ];
+
+    $fields = [];
+    $params = [];
+
+    foreach ($allowed as $f) {
+        if (array_key_exists($f, $body)) {
+            $fields[] = "$f = ?";
+            if ($f === 'features') {
+                $params[] = json_encode($body[$f]);
+            } elseif (in_array($f, ['base_price', 'surface_m2'])) {
+                $params[] = (float)$body[$f];
+            } elseif (in_array($f, ['bedrooms', 'bathrooms', 'container_20ft_count', 'container_40ft_count', 'display_order'])) {
+                $params[] = (int)$body[$f];
+            } elseif ($f === 'has_overflow') {
+                $params[] = (int)$body[$f];
+            } elseif ($f === 'is_active') {
+                $params[] = (bool)$body[$f];
+            } else {
+                $params[] = sanitize($body[$f]);
             }
-
-            if ($activeOnly) {
-                $sql .= " AND is_active = 1";
-            }
-
-            $sql .= " ORDER BY display_order ASC, name ASC";
-
-            $stmt = $db->prepare($sql);
-            $stmt->execute($params);
-            $models = $stmt->fetchAll();
-
-            foreach ($models as &$m) {
-                $m['features'] = $m['features']
-                    ? json_decode($m['features'], true)
-                    : [];
-
-                // Ajout plan_url depuis la table images
-                $planStmt = $db->prepare("
-                    SELECT file_path FROM model_images 
-                    WHERE model_id = ? AND media_type = 'plan' 
-                    ORDER BY id DESC LIMIT 1
-                ");
-                $planStmt->execute([$m['id']]);
-                $m['plan_url'] = ($row = $planStmt->fetch()) ? '/' . ltrim($row['file_path'], '/') : null;
-            }
-
-            ok($models);
-            break;
         }
+    }
 
-        case 'create_model': {
-            validateRequired($body, ['name', 'type', 'base_price']);
+    if (!$fields) fail('Nothing to update');
 
-            $stmt = $db->prepare("
-                INSERT INTO models (
-                    name, type, description, base_price,
-                    dimensions, bedrooms, bathrooms,
-                    image_url, plan_image_url,
-                    container_20ft_count, container_40ft_count,
-                    pool_shape, has_overflow,
-                    features, is_active, display_order
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ");
+    $params[] = (int)$body['id'];
+    $sql = "UPDATE models SET ".implode(', ', $fields).", updated_at = NOW() WHERE id = ?";
+    $stmt = $db->prepare($sql);
+    $stmt->execute($params);
 
-            $stmt->execute([
-                sanitize($body['name']),
-                $body['type'],
-                sanitize($body['description'] ?? ''),
-                (float)$body['base_price'],
-                sanitize($body['dimensions'] ?? ''),
-                (int)($body['bedrooms'] ?? 0),
-                (int)($body['bathrooms'] ?? 0),
-                sanitize($body['image_url'] ?? ''),
-                sanitize($body['plan_image_url'] ?? ''),
-                (int)($body['container_20ft_count'] ?? 0),
-                (int)($body['container_40ft_count'] ?? 0),
-                sanitize($body['pool_shape'] ?? ''),
-                (int)($body['has_overflow'] ?? 0),
-                json_encode($body['features'] ?? []),
-                (bool)($body['is_active'] ?? true),
-                (int)($body['display_order'] ?? 0),
-            ]);
-
-            ok(['id' => $db->lastInsertId()]);
-            break;
-        }
-
-        case 'update_model': {
-            validateRequired($body, ['id']);
-
-            $allowed = [
-                'name','type','description','base_price','dimensions',
-                'bedrooms','bathrooms','image_url','plan_image_url',
-                'container_20ft_count','container_40ft_count',
-                'pool_shape','has_overflow',
-                'features','is_active','display_order'
-            ];
-
-            $fields = [];
-            $params = [];
-
-            foreach ($allowed as $f) {
-                if (array_key_exists($f, $body)) {
-                    $fields[] = "$f = ?";
-                    if ($f === 'features') {
-                        $params[] = json_encode($body[$f]);
-                    } elseif ($f === 'base_price') {
-                        $params[] = (float)$body[$f];
-                    } elseif (in_array($f, [
-                        'bedrooms','bathrooms','display_order',
-                        'container_20ft_count','container_40ft_count','has_overflow'
-                    ])) {
-                        $params[] = (int)$body[$f];
-                    } elseif ($f === 'is_active') {
-                        $params[] = (bool)$body[$f];
-                    } else {
-                        $params[] = sanitize($body[$f]);
-                    }
-                }
-            }
-
-            if (!$fields) fail('Nothing to update');
-
-            $params[] = (int)$body['id'];
-
-            $sql = "UPDATE models SET ".implode(', ', $fields).", updated_at = NOW() WHERE id = ?";
-            $stmt = $db->prepare($sql);
-            $stmt->execute($params);
-
-            ok();
-            break;
-        }
+    ok();
+    break;
+}
 
         case 'get_banner_images': {
             $stmt = $db->prepare("SELECT id, file_path FROM model_images WHERE media_type = 'bandeau' ORDER BY id DESC");
