@@ -7,10 +7,13 @@ export default defineConfig(({ mode }) => ({
   server: {
     host: "::",
     port: 8080,
+    // Important pour le dev en local avec React Router
+    historyApiFallback: true,
   },
-  plugins: [
-    react()
-  ].filter(Boolean),
+  build: {
+    outDir: "dist", // Assure que le build sort dans /dist
+  },
+  plugins: [react()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
