@@ -4,7 +4,7 @@ import { ArrowLeft, ArrowRight, Check, User, Mail, Phone, MapPin, MessageSquare,
 import { useQuote, GeneratedQuote } from '@/contexts/QuoteContext';
 import { api } from '@/lib/api';
 import ConstructionBanner from "@/components/ConstructionBanner";
-import { useSiteSettings } from "@/hooks/use-site-settings";
+import { useSiteSettings } from "@/hooks/use-settings";
 
 const DetailsPage: React.FC = () => {
   const navigate = useNavigate();
