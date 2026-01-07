@@ -16,7 +16,7 @@ import {
 import { useQuote, ModelOption } from '@/contexts/QuoteContext';
 import { getModelOptions } from '@/data/models';
 import ConstructionBanner from "@/components/ConstructionBanner";
-import { useSiteSettings } from "@/hooks/use-site-settings";
+import { useSiteSettings } from "@/hooks/use-settings";
 
 const ConfigurePage: React.FC = () => {
   const navigate = useNavigate();
