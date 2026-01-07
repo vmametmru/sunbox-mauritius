@@ -10,7 +10,7 @@ export default function HomePage() {
     <PublicLayout>
       <BannerCarousel />
 
-      <section className="py-16 px-6 max-w-5xl mx-auto text-center">
+      <section className="mt-12 py-16 px-6 max-w-5xl mx-auto text-center">
         <h2 className="text-3xl font-bold mb-4">Nos solutions</h2>
         <p className="text-gray-600 mb-10">
           Des containers aménagés pour tous les usages et des piscines modernes livrées prêtes à plonger.
