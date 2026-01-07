@@ -1,5 +1,7 @@
+// ✅ src/pages/admin/SiteSettingsPage.tsx
+
 import React, { useEffect, useState } from "react";
-import { Settings, Image } from "lucide-react";
+import { Settings } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -12,36 +14,31 @@ import { useToast } from "@/hooks/use-toast";
 interface SiteSettings {
   site_under_construction: string;
   under_construction_message: string;
-  site_logo_url?: string;
-  site_slogan?: string;
+  site_logo: string;
+  site_slogan: string;
 }
 
-const defaults: SiteSettings = {
-  site_under_construction: "true",
-  under_construction_message:
-    "🚧 Page en construction — merci de revenir ultérieurement. | Page under construction - please come back later",
-  site_logo_url: "",
+const defaultValues: SiteSettings = {
+  site_under_construction: "false",
+  under_construction_message: "",
+  site_logo: "",
   site_slogan: "container home - swimming-pools",
 };
 
 export default function SiteSettingsPage() {
   const { toast } = useToast();
+  const [settings, setSettings] = useState<SiteSettings>(defaultValues);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [settings, setSettings] = useState<SiteSettings>(defaults);
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     (async () => {
       try {
-        setLoading(true);
-        const s = await api.getSettings("site");
-        setSettings({ ...defaults, ...(s || {}) });
+        const result = await api.getSettings("site");
+        setSettings({ ...defaultValues, ...(result || {}) });
       } catch (err: any) {
-        toast({
-          title: "Erreur",
-          description: err.message,
-          variant: "destructive",
-        });
+        toast({ title: "Erreur", description: err.message, variant: "destructive" });
       } finally {
         setLoading(false);
       }
@@ -52,37 +49,44 @@ export default function SiteSettingsPage() {
     try {
       setSaving(true);
       await api.updateSettingsBulk([
-        {
-          key: "site_under_construction",
-          value: settings.site_under_construction,
-          group: "site",
-        },
-        {
-          key: "under_construction_message",
-          value: settings.under_construction_message || "",
-          group: "site",
-        },
-        {
-          key: "site_logo_url",
-          value: settings.site_logo_url || "",
-          group: "site",
-        },
-        {
-          key: "site_slogan",
-          value: settings.site_slogan || "",
-          group: "site",
-        },
+        { key: "site_under_construction", value: settings.site_under_construction, group: "site" },
+        { key: "under_construction_message", value: settings.under_construction_message, group: "site" },
+        { key: "site_logo", value: settings.site_logo, group: "site" },
+        { key: "site_slogan", value: settings.site_slogan, group: "site" },
       ]);
-
       toast({ title: "Succès", description: "Paramètres enregistrés." });
     } catch (err: any) {
-      toast({
-        title: "Erreur",
-        description: err.message,
-        variant: "destructive",
-      });
+      toast({ title: "Erreur", description: err.message, variant: "destructive" });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append("logo", file);
+
+    setUploading(true);
+    try {
+      const response = await fetch("/api/upload_logo.php", {
+        method: "POST",
+        body: formData,
+      });
+
+      const result = await response.json();
+      if (result.success) {
+        setSettings((prev) => ({ ...prev, site_logo: result.logo_url }));
+        toast({ title: "Logo mis à jour" });
+      } else {
+        throw new Error(result.error || "Upload échoué");
+      }
+    } catch (err: any) {
+      toast({ title: "Erreur Upload", description: err.message, variant: "destructive" });
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -96,7 +100,7 @@ export default function SiteSettingsPage() {
         </div>
         <div>
           <h1 className="text-2xl font-bold text-[#1A365D]">Site</h1>
-          <p className="text-gray-600">Paramètres publics du site</p>
+          <p className="text-gray-600">Maintenance, logo, slogan et message</p>
         </div>
       </div>
 
@@ -110,10 +114,9 @@ export default function SiteSettingsPage() {
                 <div className="space-y-1">
                   <Label className="text-base">Site en construction</Label>
                   <p className="text-sm text-gray-600">
-                    Affiche un bandeau sous le menu sur le site public.
+                    Affiche un bandeau sur le site public
                   </p>
                 </div>
-
                 <Switch
                   checked={enabled}
                   onCheckedChange={(v) =>
@@ -125,9 +128,10 @@ export default function SiteSettingsPage() {
                 />
               </div>
 
-              <div className="space-y-2">
+              <div>
                 <Label>Message</Label>
                 <Textarea
+                  rows={3}
                   value={settings.under_construction_message}
                   onChange={(e) =>
                     setSettings((prev) => ({
@@ -135,42 +139,30 @@ export default function SiteSettingsPage() {
                       under_construction_message: e.target.value,
                     }))
                   }
-                  rows={3}
                 />
               </div>
 
-              <div className="space-y-2">
-                <Label>Logo (URL)</Label>
-                <Input
-                  value={settings.site_logo_url || ""}
-                  onChange={(e) =>
-                    setSettings((prev) => ({
-                      ...prev,
-                      site_logo_url: e.target.value,
-                    }))
-                  }
-                  placeholder="https://..."
-                />
-                {settings.site_logo_url && (
-                  <img
-                    src={settings.site_logo_url}
-                    alt="Logo preview"
-                    className="mt-2 h-16"
-                  />
-                )}
-              </div>
-
-              <div className="space-y-2">
+              <div>
                 <Label>Slogan</Label>
                 <Input
-                  value={settings.site_slogan || ""}
-                  onChange={(e) =>
-                    setSettings((prev) => ({
-                      ...prev,
-                      site_slogan: e.target.value,
-                    }))
-                  }
+                  value={settings.site_slogan}
+                  onChange={(e) => setSettings({ ...settings, site_slogan: e.target.value })}
                 />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Logo du site</Label>
+                {settings.site_logo && (
+                  <img
+                    src={settings.site_logo}
+                    alt="Logo actuel"
+                    className="h-12 mb-2 border rounded"
+                  />
+                )}
+                <Input type="file" accept="image/*" onChange={handleLogoUpload} disabled={uploading} />
+                <p className="text-sm text-gray-500">
+                  Le logo sera automatiquement redimensionné pour le bandeau et les PDF.
+                </p>
               </div>
 
               <div className="flex justify-end">
