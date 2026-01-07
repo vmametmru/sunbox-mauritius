@@ -1,6 +1,6 @@
 import React from "react";
 import { Mail, Phone, MapPin } from "lucide-react";
-import PublicLayout from "@/components/layouts/PublicLayout";
+import PublicLayout from "@/layouts/PublicLayout";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -16,8 +16,9 @@ export default function ContactPage() {
             <div className="flex items-start gap-3">
               <Phone className="text-orange-500 mt-1" />
               <div>
-                <p className="font-medium text-gray-800">Téléphone</p>
-                <p className="text-gray-600">+230 1234 5678</p>
+                <p className="font-medium text-gray-800">Téléphones</p>
+                <p className="text-gray-600">+230 5 422 1025</p>
+                <p className="text-gray-600">+230 5 254 4544</p>
               </div>
             </div>
 
