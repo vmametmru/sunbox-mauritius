@@ -1,5 +1,3 @@
-// ✅ src/pages/admin/SiteSettingsPage.tsx
-
 import React, { useEffect, useState } from "react";
 import { Settings } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -15,6 +13,7 @@ interface SiteSettings {
   site_under_construction: string;
   under_construction_message: string;
   site_logo: string;
+  pdf_logo: string;
   site_slogan: string;
 }
 
@@ -22,6 +21,7 @@ const defaultValues: SiteSettings = {
   site_under_construction: "false",
   under_construction_message: "",
   site_logo: "",
+  pdf_logo: "",
   site_slogan: "container home - swimming-pools",
 };
 
@@ -52,6 +52,7 @@ export default function SiteSettingsPage() {
         { key: "site_under_construction", value: settings.site_under_construction, group: "site" },
         { key: "under_construction_message", value: settings.under_construction_message, group: "site" },
         { key: "site_logo", value: settings.site_logo, group: "site" },
+        { key: "pdf_logo", value: settings.pdf_logo, group: "site" },
         { key: "site_slogan", value: settings.site_slogan, group: "site" },
       ]);
       toast({ title: "Succès", description: "Paramètres enregistrés." });
@@ -67,7 +68,7 @@ export default function SiteSettingsPage() {
     if (!file) return;
 
     const formData = new FormData();
-    formData.append("logo", file);
+    formData.append("file", file); // doit être "file", pas "logo"
 
     setUploading(true);
     try {
@@ -78,7 +79,11 @@ export default function SiteSettingsPage() {
 
       const result = await response.json();
       if (result.success) {
-        setSettings((prev) => ({ ...prev, site_logo: result.logo_url }));
+        setSettings((prev) => ({
+          ...prev,
+          site_logo: result.menu_logo_url,
+          pdf_logo: result.pdf_logo_url,
+        }));
         toast({ title: "Logo mis à jour" });
       } else {
         throw new Error(result.error || "Upload échoué");
@@ -110,6 +115,7 @@ export default function SiteSettingsPage() {
             <div className="text-gray-600">Chargement…</div>
           ) : (
             <>
+              {/* Maintenance */}
               <div className="flex items-center justify-between gap-6">
                 <div className="space-y-1">
                   <Label className="text-base">Site en construction</Label>
@@ -128,6 +134,7 @@ export default function SiteSettingsPage() {
                 />
               </div>
 
+              {/* Message */}
               <div>
                 <Label>Message</Label>
                 <Textarea
@@ -142,6 +149,7 @@ export default function SiteSettingsPage() {
                 />
               </div>
 
+              {/* Slogan */}
               <div>
                 <Label>Slogan</Label>
                 <Input
@@ -150,24 +158,26 @@ export default function SiteSettingsPage() {
                 />
               </div>
 
+              {/* Logo upload */}
               <div className="space-y-2">
                 <Label>Logo du site</Label>
                 {settings.site_logo && (
                   <img
                     src={settings.site_logo}
                     alt="Logo actuel"
-                    className="h-12 mb-2 border rounded"
+                    className="h-12 mb-2 border rounded bg-white"
                   />
                 )}
                 <Input type="file" accept="image/*" onChange={handleLogoUpload} disabled={uploading} />
                 <p className="text-sm text-gray-500">
-                  Le logo sera automatiquement redimensionné pour le bandeau et les PDF.
+                  Le logo sera redimensionné pour l’entête et les documents PDF.
                 </p>
               </div>
 
+              {/* Enregistrer */}
               <div className="flex justify-end">
                 <Button onClick={save} disabled={saving}>
-                  {saving ? "Enregistrement..." : "Enregistrer"}
+                  {saving ? "Enregistrement…" : "Enregistrer"}
                 </Button>
               </div>
             </>
