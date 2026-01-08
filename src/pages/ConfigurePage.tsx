@@ -13,20 +13,6 @@ import { useSiteSettings } from '@/hooks/use-site-settings';
 import { Switch } from '@/components/ui/switch';
 import { api } from '@/lib/api';
 
-/* ======================================================
-   TYPES API
-====================================================== */
-interface ApiOption {
-  id: number;
-  name: string;
-  description: string;
-  price: number;
-  category_name: string;
-}
-
-/* ======================================================
-   COMPONENT
-====================================================== */
 const ConfigurePage: React.FC = () => {
   const navigate = useNavigate();
   const { quoteData, toggleOption, calculateTotal } = useQuote();
@@ -42,9 +28,6 @@ const ConfigurePage: React.FC = () => {
     siteSettings?.constructionMessage ||
     '🚧 Page en construction';
 
-  /* ======================================================
-     GUARD
-  ====================================================== */
   useEffect(() => {
     if (!quoteData.model) navigate('/');
   }, [quoteData.model, navigate]);
@@ -56,21 +39,19 @@ const ConfigurePage: React.FC = () => {
      LOAD OPTIONS FROM DB
   ====================================================== */
   useEffect(() => {
-    loadOptions();
+    if (model.id) loadOptions();
   }, [model.id]);
 
   const loadOptions = async () => {
     try {
-      const data: ApiOption[] = await api.getModelOptions(model.id);
-
-      const mapped: ModelOption[] = data.map(o => ({
-        id: String(o.id),
-        label: o.name,
+      const data = await api.getModelOptions(model.id);
+      const mapped = data.map((o: any) => ({
+        id: o.id,
+        name: o.name,
         description: o.description,
-        price: Number(o.price),
+        price: o.price,
         category: o.category_name
       }));
-
       setOptions(mapped);
     } catch (err) {
       console.error(err);
@@ -94,20 +75,14 @@ const ConfigurePage: React.FC = () => {
     );
   };
 
-  const isSelected = (id: string) =>
+  const isSelected = (id: number) =>
     quoteData.selectedOptions.some(o => o.id === id);
 
-  /* ======================================================
-     LIGHTBOX
-  ====================================================== */
   const openLightbox = (url: string, title: string) => {
     setLightboxImage(url);
     setLightboxTitle(title);
   };
 
-  /* ======================================================
-     RENDER
-  ====================================================== */
   return (
     <div className="min-h-screen bg-gray-50">
       {/* LIGHTBOX */}
@@ -244,7 +219,7 @@ const ConfigurePage: React.FC = () => {
                         className="flex justify-between items-center px-4 py-3 hover:bg-gray-50 cursor-pointer"
                       >
                         <div>
-                          <p className="font-medium">{opt.label}</p>
+                          <p className="font-medium">{opt.name}</p>
                           <p className="text-sm text-gray-500">
                             Rs {opt.price.toLocaleString()}
                           </p>
