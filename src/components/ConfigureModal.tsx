@@ -1,27 +1,129 @@
-import React from 'react';
-import { X } from 'lucide-react';
-import ConfigurePage from '@/pages/ConfigurePage';
+import React, { useEffect, useState } from 'react';
+import { X, ChevronUp, ChevronDown } from 'lucide-react';
+import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Switch } from '@/components/ui/switch';
+import { useQuote, ModelOption } from '@/contexts/QuoteContext';
+import { api } from '@/lib/api';
 
-interface Props {
-  isOpen: boolean;
+interface ConfigureModalProps {
+  open: boolean;
   onClose: () => void;
 }
 
-const ConfigureModal: React.FC<Props> = ({ isOpen, onClose }) => {
-  if (!isOpen) return null;
+const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
+  const { quoteData, toggleOption, calculateTotal } = useQuote();
+  const [expandedCategories, setExpandedCategories] = useState<string[]>([]);
+  const [options, setOptions] = useState<ModelOption[]>([]);
+
+  const model = quoteData.model;
+
+  useEffect(() => {
+    if (model?.id) loadOptions();
+  }, [model?.id]);
+
+  const loadOptions = async () => {
+    try {
+      const data = await api.getModelOptions(model!.id);
+
+      const mapped: ModelOption[] = data.map((o: any) => ({
+        id: Number(o.id),
+        model_id: Number(o.model_id),
+        category_id: Number(o.category_id),
+        category_name: o.category_name,
+        name: o.name,
+        description: o.description,
+        price: Number(o.price),
+        is_active: Boolean(o.is_active),
+      }));
+
+      setOptions(mapped);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const groupedOptions = options.reduce((acc, opt) => {
+    const category = opt.category_name || 'Autres';
+    if (!acc[category]) acc[category] = [];
+    acc[category].push(opt);
+    return acc;
+  }, {} as Record<string, ModelOption[]>);
+
+  const toggleCategory = (cat: string) => {
+    setExpandedCategories(prev =>
+      prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]
+    );
+  };
+
+  const isSelected = (id: number) =>
+    quoteData.selectedOptions.some(o => o.id === id);
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex justify-end">
-      <div className="w-full max-w-5xl bg-white shadow-lg h-full overflow-y-auto relative animate-slide-in-right">
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 z-50 text-gray-500 hover:text-black"
-        >
-          <X className="w-6 h-6" />
-        </button>
-        <ConfigurePage />
-      </div>
-    </div>
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="w-full max-w-3xl h-[90vh] overflow-y-auto">
+        {model && (
+          <div className="space-y-6">
+            <div className="flex justify-between items-start border-b pb-4">
+              <div>
+                <h2 className="text-2xl font-bold">{model.name}</h2>
+                <p className="text-gray-600">{model.description}</p>
+              </div>
+              <button onClick={onClose}>
+                <X className="w-6 h-6 text-gray-500" />
+              </button>
+            </div>
+
+            <div className="bg-gray-50 rounded-lg p-4 flex justify-between items-center">
+              <p className="text-sm text-gray-500">Total estimé</p>
+              <p className="text-xl font-bold text-gray-800">
+                Rs {calculateTotal().toLocaleString()}
+              </p>
+            </div>
+
+            {Object.entries(groupedOptions).map(([category, opts]) => {
+              const isOpen = expandedCategories.includes(category);
+              return (
+                <div key={category} className="border rounded bg-white">
+                  <button
+                    className="w-full flex justify-between items-center px-4 py-3 font-semibold border-b hover:bg-gray-50"
+                    onClick={() => toggleCategory(category)}
+                  >
+                    <span>{category}</span>
+                    {isOpen ? (
+                      <ChevronUp className="w-5 h-5" />
+                    ) : (
+                      <ChevronDown className="w-5 h-5" />
+                    )}
+                  </button>
+
+                  {isOpen && (
+                    <div className="divide-y">
+                      {opts.map(opt => (
+                        <label
+                          key={opt.id}
+                          className="flex justify-between items-center px-4 py-3 hover:bg-gray-50 cursor-pointer"
+                        >
+                          <div>
+                            <p className="font-medium">{opt.name}</p>
+                            <p className="text-sm text-gray-500">
+                              Rs {opt.price.toLocaleString()}
+                            </p>
+                          </div>
+                          <Switch
+                            checked={isSelected(opt.id)}
+                            onCheckedChange={() => toggleOption(opt)}
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 };
 
