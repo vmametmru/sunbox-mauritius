@@ -43,20 +43,25 @@ const ConfigurePage: React.FC = () => {
   }, [model.id]);
 
   const loadOptions = async () => {
-    try {
-      const data = await api.getModelOptions(model.id);
-      const mapped = data.map((o: any) => ({
-        id: o.id,
-        name: o.name,
-        description: o.description,
-        price: o.price,
-        category: o.category_name
-      }));
-      setOptions(mapped);
-    } catch (err) {
-      console.error(err);
-    }
-  };
+  try {
+    const data = await api.getModelOptions(model.id);
+
+    const mapped: ModelOption[] = data.map((o: any) => ({
+      id: Number(o.id),
+      model_id: Number(o.model_id),
+      category_id: Number(o.category_id),
+      category_name: o.category_name,
+      name: o.name,
+      description: o.description,
+      price: Number(o.price),   // 🔥 FIX CRITIQUE
+      is_active: Boolean(o.is_active),
+    }));
+
+    setOptions(mapped);
+  } catch (err) {
+    console.error(err);
+  }
+};
 
   /* ======================================================
      GROUP OPTIONS
