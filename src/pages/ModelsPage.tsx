@@ -1,7 +1,3 @@
-// CONTENU COMPLÉTEMENT MIS À JOUR
-// Inclut : ouverture de modal latérale, setQuoteModel, configuration dynamique
-// ...
-
 import React, { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -57,7 +53,7 @@ export default function ModelsPage() {
     price: [0, 0]
   });
 
-  const { setSelectedModel, quoteData } = useQuote();
+  const { setSelectedModel } = useQuote();
   const [showConfigurator, setShowConfigurator] = useState(false);
 
   useEffect(() => {
@@ -79,6 +75,11 @@ export default function ModelsPage() {
     });
   }, []);
 
+  const openConfigurator = (model: Model) => {
+    setSelectedModel(model);
+    setShowConfigurator(true);
+  };
+
   const filtered = models.filter((m) => {
     if (filterType !== 'all' && m.type !== filterType) return false;
     if (filterType === 'container') {
@@ -97,27 +98,19 @@ export default function ModelsPage() {
 
   const formatPrice = (price: number) => `Rs ${price.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 
-  const openConfigurator = (model: Model) => {
-    setSelectedModel(model);
-    setShowConfigurator(true);
-  };
-
   return (
     <PublicLayout>
       <div className="max-w-6xl mx-auto px-4 py-12">
         <h1 className="text-3xl font-bold mb-6 text-center">Nos Modèles</h1>
 
-        {/* Filtres type */}
         <div className="flex justify-center gap-4 mb-4">
           <Button variant={filterType === 'all' ? 'default' : 'outline'} onClick={() => setFilterType('all')}>Tous</Button>
           <Button variant={filterType === 'container' ? 'default' : 'outline'} onClick={() => setFilterType('container')}>Conteneurs</Button>
           <Button variant={filterType === 'pool' ? 'default' : 'outline'} onClick={() => setFilterType('pool')}>Piscines</Button>
         </div>
 
-        {/* Filtres spécifiques */}
-        {/* ... (code inchangé pour les filtres) ... */}
+        {/* ... tes filtres ... */}
 
-        {/* Grille */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filtered.map((model) => (
             <div key={model.id} className="border rounded-lg overflow-hidden shadow-sm bg-white">
@@ -141,9 +134,10 @@ export default function ModelsPage() {
                 <h2 className="text-xl font-bold">{model.name}</h2>
                 <p className="text-gray-600 text-sm">{model.surface_m2} m²</p>
                 <p className="text-orange-600 font-semibold">{formatPrice(model.base_price)} TTC</p>
-                <p className="text-sm text-gray-700">{model.description}</p>
                 <div className="pt-3">
-                  <Button variant="outline" onClick={() => openConfigurator(model)}>Configurer</Button>
+                  <Button variant="outline" onClick={() => openConfigurator(model)}>
+                    Configurer
+                  </Button>
                 </div>
               </div>
             </div>
@@ -151,7 +145,7 @@ export default function ModelsPage() {
         </div>
       </div>
 
-      {/* Lightbox image */}
+      {/* Modal image zoom */}
       {modalImage && (
         <Dialog open onOpenChange={() => setModalImage(null)}>
           <DialogContent className="max-w-4xl">
@@ -160,9 +154,9 @@ export default function ModelsPage() {
         </Dialog>
       )}
 
-      {/* MODAL CONFIGURATEUR */}
-      {quoteData.model && (
-        <ConfigureModal isOpen={showConfigurator} onClose={() => setShowConfigurator(false)} />
+      {/* Modal configurateur */}
+      {showConfigurator && (
+        <ConfigureModal onClose={() => setShowConfigurator(false)} />
       )}
     </PublicLayout>
   );
