@@ -26,19 +26,21 @@ const ConfigurePage: React.FC = () => {
   const underConstruction = siteSettings?.siteUnderConstruction === true;
   const ucMessage = siteSettings?.constructionMessage || '🚧 Page en construction';
 
-  /* ======================================================
-     GUARD
-  ====================================================== */
   useEffect(() => {
-    if (!quoteData.model) navigate('/models');
+    if (!quoteData.model) navigate('/');
   }, [quoteData.model, navigate]);
 
   if (!quoteData.model) return null;
   const model = quoteData.model;
 
-  /* ======================================================
-     LOAD OPTIONS FROM DB
-  ====================================================== */
+  // 🔧 Fix BUG calcul total : s'assurer que .price est bien un number
+  const calculateSafeTotal = () => {
+    const base = model.base_price ?? 0;
+    const optionsTotal = quoteData.selectedOptions.reduce((sum, opt) => sum + Number(opt.price || 0), 0);
+    return base + optionsTotal;
+  };
+
+  /* Load Options */
   useEffect(() => {
     if (model.id) loadOptions();
   }, [model.id]);
@@ -46,39 +48,33 @@ const ConfigurePage: React.FC = () => {
   const loadOptions = async () => {
     try {
       const data = await api.getModelOptions(model.id);
-
       const mapped: ModelOption[] = data.map((o: any) => ({
         id: Number(o.id),
         model_id: Number(o.model_id),
         category_id: Number(o.category_id),
-        category_name: o.category_name ?? 'Autres',
+        category_name: o.category_name || 'Autres',
         name: o.name,
         description: o.description,
-        price: Number(o.price),          // 🔥 clé du bug du total
+        price: Number(o.price),
         is_active: Boolean(o.is_active),
       }));
-
       setOptions(mapped);
     } catch (err) {
       console.error(err);
     }
   };
 
-  /* ======================================================
-     GROUP OPTIONS
-  ====================================================== */
+  /* Regrouper par catégorie */
   const groupedOptions = options.reduce((acc, opt) => {
-    const cat = opt.category_name || 'Autres';
-    if (!acc[cat]) acc[cat] = [];
-    acc[cat].push(opt);
+    const category = opt.category_name || 'Autres';
+    if (!acc[category]) acc[category] = [];
+    acc[category].push(opt);
     return acc;
   }, {} as Record<string, ModelOption[]>);
 
   const toggleCategory = (cat: string) => {
     setExpandedCategories(prev =>
-      prev.includes(cat)
-        ? prev.filter(c => c !== cat)
-        : [...prev, cat]
+      prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]
     );
   };
 
@@ -90,9 +86,6 @@ const ConfigurePage: React.FC = () => {
     setLightboxTitle(title);
   };
 
-  /* ======================================================
-     RENDER
-  ====================================================== */
   return (
     <div className="min-h-screen bg-gray-50">
       {/* LIGHTBOX */}
@@ -124,7 +117,7 @@ const ConfigurePage: React.FC = () => {
       <header className="bg-white shadow sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
           <button
-            onClick={() => navigate('/models')}
+            onClick={() => navigate('/models')} // ✅ correct for HashRouter
             className="flex items-center gap-2 text-gray-600 hover:text-gray-900"
           >
             <ArrowLeft className="w-5 h-5" />
@@ -134,7 +127,7 @@ const ConfigurePage: React.FC = () => {
           <div className="text-right">
             <p className="text-xs text-gray-500">Total estimé</p>
             <p className="text-lg font-bold text-gray-800">
-              Rs {calculateTotal().toLocaleString()}
+              Rs {calculateSafeTotal().toLocaleString()}
             </p>
           </div>
         </div>
@@ -188,10 +181,7 @@ const ConfigurePage: React.FC = () => {
             {model.type === 'container' && (
               <>
                 <li>{model.bedrooms} chambre(s)</li>
-                <li>
-                  {model.container_20ft_count} × 20’ •{' '}
-                  {model.container_40ft_count} × 40’
-                </li>
+                <li>{model.container_20ft_count} × 20’ • {model.container_40ft_count} × 40’</li>
               </>
             )}
             {model.type === 'pool' && (
@@ -227,7 +217,7 @@ const ConfigurePage: React.FC = () => {
                         <div>
                           <p className="font-medium">{opt.name}</p>
                           <p className="text-sm text-gray-500">
-                            Rs {opt.price.toLocaleString()}
+                            Rs {Number(opt.price).toLocaleString()}
                           </p>
                         </div>
                         <Switch
