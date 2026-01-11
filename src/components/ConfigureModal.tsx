@@ -18,8 +18,10 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
   const model = quoteData.model;
 
   useEffect(() => {
-    if (model?.id) loadOptions();
-  }, [model?.id]);
+    if (open && model?.id) {
+      loadOptions();
+    }
+  }, [open, model?.id]);
 
   const loadOptions = async () => {
     try {
@@ -29,10 +31,10 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
         id: Number(o.id),
         model_id: Number(o.model_id),
         category_id: Number(o.category_id),
-        category_name: o.category_name,
+        category_name: o.category_name || 'Autres',
         name: o.name,
         description: o.description,
-        price: Number(o.price),
+        price: Number(o.price),       // 🔥 FORCE number
         is_active: Boolean(o.is_active),
       }));
 
@@ -43,9 +45,9 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
   };
 
   const groupedOptions = options.reduce((acc, opt) => {
-    const category = opt.category_name || 'Autres';
-    if (!acc[category]) acc[category] = [];
-    acc[category].push(opt);
+    const cat = opt.category_name || 'Autres';
+    if (!acc[cat]) acc[cat] = [];
+    acc[cat].push(opt);
     return acc;
   }, {} as Record<string, ModelOption[]>);
 
@@ -63,6 +65,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
       <DialogContent className="w-full max-w-3xl h-[90vh] overflow-y-auto">
         {model && (
           <div className="space-y-6">
+            {/* Header */}
             <div className="flex justify-between items-start border-b pb-4">
               <div>
                 <h2 className="text-2xl font-bold">{model.name}</h2>
@@ -73,6 +76,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
               </button>
             </div>
 
+            {/* Total */}
             <div className="bg-gray-50 rounded-lg p-4 flex justify-between items-center">
               <p className="text-sm text-gray-500">Total estimé</p>
               <p className="text-xl font-bold text-gray-800">
@@ -80,6 +84,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
               </p>
             </div>
 
+            {/* Options */}
             {Object.entries(groupedOptions).map(([category, opts]) => {
               const isOpen = expandedCategories.includes(category);
               return (
@@ -89,11 +94,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                     onClick={() => toggleCategory(category)}
                   >
                     <span>{category}</span>
-                    {isOpen ? (
-                      <ChevronUp className="w-5 h-5" />
-                    ) : (
-                      <ChevronDown className="w-5 h-5" />
-                    )}
+                    {isOpen ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
                   </button>
 
                   {isOpen && (
