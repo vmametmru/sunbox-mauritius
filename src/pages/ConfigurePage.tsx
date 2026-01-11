@@ -24,12 +24,13 @@ const ConfigurePage: React.FC = () => {
 
   const { data: siteSettings } = useSiteSettings();
   const underConstruction = siteSettings?.siteUnderConstruction === true;
-  const ucMessage =
-    siteSettings?.constructionMessage ||
-    '🚧 Page en construction';
+  const ucMessage = siteSettings?.constructionMessage || '🚧 Page en construction';
 
+  /* ======================================================
+     GUARD
+  ====================================================== */
   useEffect(() => {
-    if (!quoteData.model) navigate('/');
+    if (!quoteData.model) navigate('/models');
   }, [quoteData.model, navigate]);
 
   if (!quoteData.model) return null;
@@ -43,32 +44,33 @@ const ConfigurePage: React.FC = () => {
   }, [model.id]);
 
   const loadOptions = async () => {
-  try {
-    const data = await api.getModelOptions(model.id);
+    try {
+      const data = await api.getModelOptions(model.id);
 
-    const mapped: ModelOption[] = data.map((o: any) => ({
-      id: Number(o.id),
-      model_id: Number(o.model_id),
-      category_id: Number(o.category_id),
-      category_name: o.category_name,
-      name: o.name,
-      description: o.description,
-      price: Number(o.price),   // 🔥 FIX CRITIQUE
-      is_active: Boolean(o.is_active),
-    }));
+      const mapped: ModelOption[] = data.map((o: any) => ({
+        id: Number(o.id),
+        model_id: Number(o.model_id),
+        category_id: Number(o.category_id),
+        category_name: o.category_name ?? 'Autres',
+        name: o.name,
+        description: o.description,
+        price: Number(o.price),          // 🔥 clé du bug du total
+        is_active: Boolean(o.is_active),
+      }));
 
-    setOptions(mapped);
-  } catch (err) {
-    console.error(err);
-  }
-};
+      setOptions(mapped);
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   /* ======================================================
      GROUP OPTIONS
   ====================================================== */
   const groupedOptions = options.reduce((acc, opt) => {
-    if (!acc[opt.category]) acc[opt.category] = [];
-    acc[opt.category].push(opt);
+    const cat = opt.category_name || 'Autres';
+    if (!acc[cat]) acc[cat] = [];
+    acc[cat].push(opt);
     return acc;
   }, {} as Record<string, ModelOption[]>);
 
@@ -88,6 +90,9 @@ const ConfigurePage: React.FC = () => {
     setLightboxTitle(title);
   };
 
+  /* ======================================================
+     RENDER
+  ====================================================== */
   return (
     <div className="min-h-screen bg-gray-50">
       {/* LIGHTBOX */}
@@ -119,7 +124,7 @@ const ConfigurePage: React.FC = () => {
       <header className="bg-white shadow sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
           <button
-            onClick={() => navigate('/')}
+            onClick={() => navigate('/models')}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-900"
           >
             <ArrowLeft className="w-5 h-5" />
@@ -209,11 +214,7 @@ const ConfigurePage: React.FC = () => {
                   onClick={() => toggleCategory(category)}
                 >
                   <span>{category}</span>
-                  {isOpen ? (
-                    <ChevronUp className="w-5 h-5" />
-                  ) : (
-                    <ChevronDown className="w-5 h-5" />
-                  )}
+                  {isOpen ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
                 </button>
 
                 {isOpen && (
