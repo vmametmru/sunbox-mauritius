@@ -95,12 +95,15 @@ const ConfigurePage: React.FC = () => {
           onClick={() => setLightboxImage(null)}
         >
           <button
-            className="absolute top-4 right-4 text-white"
-            onClick={() => setLightboxImage(null)}
+            className="absolute top-4 right-4 text-white hover:text-gray-300 transition-colors"
+            onClick={(e) => {
+              e.stopPropagation();
+              setLightboxImage(null);
+            }}
           >
             <X className="w-8 h-8" />
           </button>
-          <div className="max-w-5xl w-full">
+          <div className="max-w-5xl w-full" onClick={(e) => e.stopPropagation()}>
             <p className="text-white text-center mb-4 text-lg font-medium">
               {lightboxTitle}
             </p>
