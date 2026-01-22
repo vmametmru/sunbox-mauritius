@@ -34,10 +34,13 @@ const ConfigurePage: React.FC = () => {
   const model = quoteData.model;
 
   // 🔧 Fix BUG calcul total : s'assurer que .price est bien un number
+  const calculateOptionsTotal = () => {
+    return quoteData.selectedOptions.reduce((sum, opt) => sum + Number(opt.price || 0), 0);
+  };
+
   const calculateSafeTotal = () => {
-    const base = model.base_price ?? 0;
-    const optionsTotal = quoteData.selectedOptions.reduce((sum, opt) => sum + Number(opt.price || 0), 0);
-    return base + optionsTotal;
+    const base = Number(model.base_price ?? 0);
+    return base + calculateOptionsTotal();
   };
 
   /* Load Options */
@@ -95,12 +98,15 @@ const ConfigurePage: React.FC = () => {
           onClick={() => setLightboxImage(null)}
         >
           <button
-            className="absolute top-4 right-4 text-white"
-            onClick={() => setLightboxImage(null)}
+            className="absolute top-4 right-4 text-white hover:text-gray-300 transition-colors"
+            onClick={(e) => {
+              e.stopPropagation();
+              setLightboxImage(null);
+            }}
           >
             <X className="w-8 h-8" />
           </button>
-          <div className="max-w-5xl w-full">
+          <div className="max-w-5xl w-full" onClick={(e) => e.stopPropagation()}>
             <p className="text-white text-center mb-4 text-lg font-medium">
               {lightboxTitle}
             </p>
@@ -124,11 +130,25 @@ const ConfigurePage: React.FC = () => {
             Retour aux Modèles
           </button>
 
-          <div className="text-right">
-            <p className="text-xs text-gray-500">Total estimé</p>
-            <p className="text-lg font-bold text-gray-800">
-              Rs {calculateSafeTotal().toLocaleString()}
-            </p>
+          <div className="text-right space-y-1">
+            <div className="flex justify-between items-center gap-8">
+              <p className="text-xs text-gray-500">Prix de base</p>
+              <p className="text-sm font-medium text-gray-700">
+                Rs {Number(model.base_price ?? 0).toLocaleString()}
+              </p>
+            </div>
+            <div className="flex justify-between items-center gap-8">
+              <p className="text-xs text-gray-500">Total options</p>
+              <p className="text-sm font-medium text-gray-700">
+                Rs {calculateOptionsTotal().toLocaleString()}
+              </p>
+            </div>
+            <div className="flex justify-between items-center gap-8 pt-1 border-t">
+              <p className="text-xs text-gray-500">Total général</p>
+              <p className="text-lg font-bold text-gray-800">
+                Rs {calculateSafeTotal().toLocaleString()}
+              </p>
+            </div>
           </div>
         </div>
       </header>
@@ -142,7 +162,7 @@ const ConfigurePage: React.FC = () => {
             <img
               src={model.image_url}
               alt={model.name}
-              className="w-full rounded shadow cursor-pointer"
+              className="w-full h-64 md:h-80 object-cover rounded shadow cursor-pointer"
               onClick={() => openLightbox(model.image_url, model.name)}
             />
             <button
@@ -158,7 +178,7 @@ const ConfigurePage: React.FC = () => {
               <img
                 src={model.plan_url}
                 alt="Plan"
-                className="w-full rounded shadow cursor-pointer"
+                className="w-full h-64 md:h-80 object-cover rounded shadow cursor-pointer"
                 onClick={() => openLightbox(model.plan_url!, 'Plan du modèle')}
               />
               <button
