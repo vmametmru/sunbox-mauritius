@@ -34,14 +34,13 @@ const ConfigurePage: React.FC = () => {
   const model = quoteData.model;
 
   // 🔧 Fix BUG calcul total : s'assurer que .price est bien un number
-  const calculateSafeTotal = () => {
-    const base = Number(model.base_price ?? 0);
-    const optionsTotal = quoteData.selectedOptions.reduce((sum, opt) => sum + Number(opt.price || 0), 0);
-    return base + optionsTotal;
-  };
-
   const calculateOptionsTotal = () => {
     return quoteData.selectedOptions.reduce((sum, opt) => sum + Number(opt.price || 0), 0);
+  };
+
+  const calculateSafeTotal = () => {
+    const base = Number(model.base_price ?? 0);
+    return base + calculateOptionsTotal();
   };
 
   /* Load Options */
