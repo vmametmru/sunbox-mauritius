@@ -40,6 +40,10 @@ const ConfigurePage: React.FC = () => {
     return base + optionsTotal;
   };
 
+  const calculateOptionsTotal = () => {
+    return quoteData.selectedOptions.reduce((sum, opt) => sum + Number(opt.price || 0), 0);
+  };
+
   /* Load Options */
   useEffect(() => {
     if (model.id) loadOptions();
@@ -127,11 +131,25 @@ const ConfigurePage: React.FC = () => {
             Retour aux Modèles
           </button>
 
-          <div className="text-right">
-            <p className="text-xs text-gray-500">Total estimé</p>
-            <p className="text-lg font-bold text-gray-800">
-              Rs {calculateSafeTotal().toLocaleString()}
-            </p>
+          <div className="text-right space-y-1">
+            <div className="flex justify-between items-center gap-8">
+              <p className="text-xs text-gray-500">Prix de base</p>
+              <p className="text-sm font-medium text-gray-700">
+                Rs {Number(model.base_price ?? 0).toLocaleString()}
+              </p>
+            </div>
+            <div className="flex justify-between items-center gap-8">
+              <p className="text-xs text-gray-500">Total options</p>
+              <p className="text-sm font-medium text-gray-700">
+                Rs {calculateOptionsTotal().toLocaleString()}
+              </p>
+            </div>
+            <div className="flex justify-between items-center gap-8 pt-1 border-t">
+              <p className="text-xs text-gray-500">Total général</p>
+              <p className="text-lg font-bold text-gray-800">
+                Rs {calculateSafeTotal().toLocaleString()}
+              </p>
+            </div>
           </div>
         </div>
       </header>
