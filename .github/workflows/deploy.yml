@@ -1,0 +1,49 @@
+name: Build & Deploy to A2 Hosting (FTP/FTPS)
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Build
+      run: npm run build
+
+    - name: Install lftp
+      run: sudo apt-get update && sudo apt-get install -y lftp
+
+    - name: Deploy via lftp (FTPS/FTP)
+      env:
+        FTP_HOST: ${{ secrets.FTP_HOST }}
+        FTP_USER: ${{ secrets.FTP_USER }}
+        FTP_PASS: ${{ secrets.FTP_PASS }}
+        FTP_PORT: ${{ secrets.FTP_PORT }}
+        REMOTE_DIR: ${{ secrets.REMOTE_DIR }}
+      run: |
+        echo "Deploying dist/ -> ${FTP_HOST}:${REMOTE_DIR} (port ${FTP_PORT})"
+        # Use explicit FTPS if the server supports it; disable cert verification if required
+        # Remove or change the ftp:ssl-force settings if you only use plain FTP.
+        lftp -c "
+          set ftp:ssl-allow true;
+          set ftp:ssl-force true;
+          set ftp:ssl-protect-data true;
+          set ssl:verify-certificate false;
+          open -u '${FTP_USER}','${FTP_PASS}' -p ${FTP_PORT} ${FTP_HOST};
+          mirror -R --delete --verbose dist/ ${REMOTE_DIR};
+          bye
+        "
