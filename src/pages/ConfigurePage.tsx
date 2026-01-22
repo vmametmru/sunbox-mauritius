@@ -35,7 +35,7 @@ const ConfigurePage: React.FC = () => {
 
   // 🔧 Fix BUG calcul total : s'assurer que .price est bien un number
   const calculateSafeTotal = () => {
-    const base = model.base_price ?? 0;
+    const base = Number(model.base_price ?? 0);
     const optionsTotal = quoteData.selectedOptions.reduce((sum, opt) => sum + Number(opt.price || 0), 0);
     return base + optionsTotal;
   };

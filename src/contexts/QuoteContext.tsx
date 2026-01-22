@@ -168,7 +168,7 @@ export const QuoteProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   };
 
   const calculateTotal = () => {
-    const base = quoteData.model?.base_price ?? 0;
+    const base = Number(quoteData.model?.base_price ?? 0);
     return base + calculateOptionsTotal();
   };
 
