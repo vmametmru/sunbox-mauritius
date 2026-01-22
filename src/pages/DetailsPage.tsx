@@ -23,7 +23,7 @@ const DetailsPage: React.FC = () => {
   }
 
   const model = quoteData.model;
-  const optionsTotal = quoteData.selectedOptions.reduce((sum, opt) => sum + opt.price, 0);
+  const optionsTotal = quoteData.selectedOptions.reduce((sum, opt) => sum + Number(opt.price || 0), 0);
   const { data: siteSettings } = useSiteSettings();
 const underConstruction = siteSettings?.site_under_construction === "true";
 const ucMessage =

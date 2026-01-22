@@ -164,7 +164,7 @@ export const QuoteProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   ============================ */
 
   const calculateOptionsTotal = () => {
-    return quoteData.selectedOptions.reduce((sum, opt) => sum + opt.price, 0);
+    return quoteData.selectedOptions.reduce((sum, opt) => sum + Number(opt.price || 0), 0);
   };
 
   const calculateTotal = () => {
