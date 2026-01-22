@@ -1,15 +1,16 @@
 import React, { useEffect, useState } from 'react';
-import { X, ChevronUp, ChevronDown, ZoomIn } from 'lucide-react';
+import { ChevronUp, ChevronDown, ZoomIn } from 'lucide-react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import { useQuote, ModelOption } from '@/contexts/QuoteContext';
 import { api } from '@/lib/api';
 
 interface ConfigureModalProps {
+  open: boolean;
   onClose: () => void;
 }
 
-const ConfigureModal: React.FC<ConfigureModalProps> = ({ onClose }) => {
+const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
   const { quoteData, toggleOption, calculateTotal } = useQuote();
   const [expandedCategories, setExpandedCategories] = useState<string[]>([]);
   const [options, setOptions] = useState<ModelOption[]>([]);
@@ -59,7 +60,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ onClose }) => {
   if (!model) return null;
 
   return (
-    <Dialog open onOpenChange={onClose}>
+    <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="w-full max-w-4xl h-[90vh] overflow-y-auto">
         {/* Lightbox */}
         {lightbox && (
@@ -75,9 +76,6 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ onClose }) => {
               <h2 className="text-2xl font-bold">{model.name}</h2>
               <p className="text-gray-600">{model.description}</p>
             </div>
-            <button onClick={onClose}>
-              <X className="w-6 h-6 text-gray-500" />
-            </button>
           </div>
 
           {/* Images */}
