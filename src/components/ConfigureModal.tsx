@@ -84,7 +84,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
               <img
                 src={model.image_url}
                 alt="Photo principale"
-                className="w-full rounded shadow cursor-pointer"
+                className="w-full h-64 md:h-80 object-cover rounded shadow cursor-pointer"
                 onClick={() => setLightbox(model.image_url)}
               />
               <ZoomIn className="absolute top-2 right-2 w-5 h-5 text-white bg-black/60 p-1 rounded-full" />
@@ -94,7 +94,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                 <img
                   src={model.plan_url}
                   alt="Plan"
-                  className="w-full rounded shadow cursor-pointer"
+                  className="w-full h-64 md:h-80 object-cover rounded shadow cursor-pointer"
                   onClick={() => setLightbox(model.plan_url!)}
                 />
                 <ZoomIn className="absolute top-2 right-2 w-5 h-5 text-white bg-black/60 p-1 rounded-full" />

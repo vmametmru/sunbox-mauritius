@@ -145,7 +145,7 @@ const ConfigurePage: React.FC = () => {
             <img
               src={model.image_url}
               alt={model.name}
-              className="w-full rounded shadow cursor-pointer"
+              className="w-full h-64 md:h-80 object-cover rounded shadow cursor-pointer"
               onClick={() => openLightbox(model.image_url, model.name)}
             />
             <button
@@ -161,7 +161,7 @@ const ConfigurePage: React.FC = () => {
               <img
                 src={model.plan_url}
                 alt="Plan"
-                className="w-full rounded shadow cursor-pointer"
+                className="w-full h-64 md:h-80 object-cover rounded shadow cursor-pointer"
                 onClick={() => openLightbox(model.plan_url!, 'Plan du modèle')}
               />
               <button
