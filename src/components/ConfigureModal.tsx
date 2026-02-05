@@ -1,9 +1,21 @@
 import React, { useEffect, useState } from 'react';
-import { ChevronUp, ChevronDown, ZoomIn } from 'lucide-react';
+import { ChevronUp, ChevronDown, ZoomIn, Check } from 'lucide-react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import { useQuote, ModelOption } from '@/contexts/QuoteContext';
 import { api } from '@/lib/api';
+
+interface BOQLine {
+  id: number;
+  description: string;
+}
+
+interface BOQBaseCategory {
+  id: number;
+  name: string;
+  display_order: number;
+  lines: BOQLine[];
+}
 
 interface ConfigureModalProps {
   open: boolean;
@@ -14,12 +26,16 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
   const { quoteData, toggleOption, calculateTotal } = useQuote();
   const [expandedCategories, setExpandedCategories] = useState<string[]>([]);
   const [options, setOptions] = useState<ModelOption[]>([]);
+  const [baseCategories, setBaseCategories] = useState<BOQBaseCategory[]>([]);
   const [lightbox, setLightbox] = useState<string | null>(null);
 
   const model = quoteData.model;
 
   useEffect(() => {
-    if (open && model?.id) loadOptions();
+    if (open && model?.id) {
+      loadOptions();
+      loadBaseCategories();
+    }
   }, [open, model?.id]);
 
   const loadOptions = async () => {
@@ -36,6 +52,15 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
         is_active: Boolean(o.is_active),
       }));
       setOptions(mapped);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const loadBaseCategories = async () => {
+    try {
+      const data = await api.getBOQBaseCategories(model!.id);
+      setBaseCategories(data);
     } catch (err) {
       console.error(err);
     }
@@ -102,6 +127,30 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
             )}
           </div>
 
+          {/* INCLUS DANS LE PRIX DE BASE */}
+          {baseCategories.length > 0 && (
+            <div className="bg-green-50 border border-green-200 p-4 rounded">
+              <h3 className="text-base font-semibold text-green-800 mb-3 flex items-center gap-2">
+                <Check className="w-4 h-4" />
+                Inclus dans le prix de base
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {baseCategories.map(cat => (
+                  <div key={cat.id} className="space-y-1">
+                    <p className="font-medium text-green-700 text-sm">{cat.name}</p>
+                    {cat.lines.length > 0 && (
+                      <ul className="text-xs text-gray-600 list-disc list-inside pl-2 space-y-0.5">
+                        {cat.lines.map(line => (
+                          <li key={line.id}>{line.description}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Total */}
           <div className="bg-gray-50 rounded-lg p-4 flex justify-between items-center">
             <p className="text-sm text-gray-500">Total estimé TTC</p>
@@ -133,9 +182,14 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                         key={opt.id}
                         className="flex justify-between items-center px-4 py-3 hover:bg-gray-50 cursor-pointer"
                       >
-                        <div>
+                        <div className="flex-1 mr-4">
                           <p className="font-medium">{opt.name}</p>
-                          <p className="text-sm text-gray-500">
+                          {opt.description && (
+                            <p className="text-sm text-gray-500 whitespace-pre-line mt-1">
+                              {opt.description}
+                            </p>
+                          )}
+                          <p className="text-sm text-orange-600 font-medium mt-1">
                             Rs {opt.price.toLocaleString()}
                           </p>
                         </div>

@@ -661,6 +661,54 @@ try {
             break;
         }
 
+        // === GET BOQ BASE CATEGORIES WITH LINES (Non-option categories included in base price)
+        case 'get_boq_base_categories': {
+            $modelId = (int)($body['model_id'] ?? 0);
+            if ($modelId <= 0) fail("model_id manquant");
+            
+            // Get categories that are NOT options (included in base price)
+            $stmt = $db->prepare("
+                SELECT bc.id, bc.name, bc.display_order
+                FROM boq_categories bc
+                WHERE bc.model_id = ? AND bc.is_option = FALSE
+                ORDER BY bc.display_order ASC, bc.name ASC
+            ");
+            $stmt->execute([$modelId]);
+            $categories = $stmt->fetchAll();
+            
+            // For each category, get its lines
+            $lineStmt = $db->prepare("
+                SELECT id, description
+                FROM boq_lines
+                WHERE category_id = ?
+                ORDER BY display_order ASC, id ASC
+            ");
+            
+            foreach ($categories as &$cat) {
+                $lineStmt->execute([$cat['id']]);
+                $cat['lines'] = $lineStmt->fetchAll();
+            }
+            
+            ok($categories);
+            break;
+        }
+
+        // === GET BOQ CATEGORY LINES (Get lines for a specific category)
+        case 'get_boq_category_lines': {
+            $categoryId = (int)($body['category_id'] ?? 0);
+            if ($categoryId <= 0) fail("category_id manquant");
+            
+            $stmt = $db->prepare("
+                SELECT id, description
+                FROM boq_lines
+                WHERE category_id = ?
+                ORDER BY display_order ASC, id ASC
+            ");
+            $stmt->execute([$categoryId]);
+            ok($stmt->fetchAll());
+            break;
+        }
+
         default:
             fail('Invalid action', 400);
     }
