@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { useQuote, ModelOption } from '@/contexts/QuoteContext';
 import ConstructionBanner from '@/components/ConstructionBanner';
-import { useSiteSettings } from '@/hooks/use-site-settings';
+import { useSiteSettings, calculateTTC } from '@/hooks/use-site-settings';
 import { Switch } from '@/components/ui/switch';
 import { api } from '@/lib/api';
 
@@ -37,12 +37,15 @@ const ConfigurePage: React.FC = () => {
   const [baseCategories, setBaseCategories] = useState<BOQBaseCategory[]>([]);
 
   const { data: siteSettings } = useSiteSettings();
-  const underConstruction = siteSettings?.siteUnderConstruction === true;
-  const ucMessage = siteSettings?.constructionMessage || '🚧 Page en construction';
+  const underConstruction = siteSettings?.site_under_construction === 'true';
+  const ucMessage = siteSettings?.under_construction_message || '🚧 Page en construction';
+  const vatRate = Number(siteSettings?.vat_rate) || 15;
+  
+  const model = quoteData.model;
 
   useEffect(() => {
-    if (!quoteData.model) navigate('/');
-  }, [quoteData.model, navigate]);
+    if (!model) navigate('/');
+  }, [model, navigate]);
 
   /* Load Options and Base Categories */
   useEffect(() => {

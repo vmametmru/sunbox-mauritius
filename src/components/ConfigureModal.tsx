@@ -4,6 +4,7 @@ import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import { useQuote, ModelOption } from '@/contexts/QuoteContext';
 import { api } from '@/lib/api';
+import { useSiteSettings, calculateTTC } from '@/hooks/use-site-settings';
 
 interface BOQLine {
   id: number;
@@ -28,6 +29,9 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
   const [options, setOptions] = useState<ModelOption[]>([]);
   const [baseCategories, setBaseCategories] = useState<BOQBaseCategory[]>([]);
   const [lightbox, setLightbox] = useState<string | null>(null);
+  
+  const { data: siteSettings } = useSiteSettings();
+  const vatRate = Number(siteSettings?.vat_rate) || 15;
 
   const model = quoteData.model;
 
