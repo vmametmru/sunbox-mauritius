@@ -248,7 +248,7 @@ try {
         }
 
         case 'update_option_category': {
-            validateRequired($body, ['id']);
+            validateRequired($body, ['id', 'name']);
             $stmt = $db->prepare("UPDATE option_categories SET name = ?, description = ?, display_order = ?, updated_at = NOW() WHERE id = ?");
             $stmt->execute([
                 sanitize($body['name']),
