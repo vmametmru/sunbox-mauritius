@@ -286,7 +286,7 @@ const ConfigurePage: React.FC = () => {
                               {opt.description}
                             </p>
                           )}
-                          <p className="text-sm text-orange-600 font-medium mt-1">
+                          <p className={`text-sm text-orange-600 font-medium ${opt.description ? 'mt-2' : 'mt-1'}`}>
                             Rs {Number(opt.price).toLocaleString()}
                           </p>
                         </div>

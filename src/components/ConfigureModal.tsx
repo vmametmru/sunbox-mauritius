@@ -189,7 +189,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                               {opt.description}
                             </p>
                           )}
-                          <p className="text-sm text-orange-600 font-medium mt-1">
+                          <p className={`text-sm text-orange-600 font-medium ${opt.description ? 'mt-2' : 'mt-1'}`}>
                             Rs {opt.price.toLocaleString()}
                           </p>
                         </div>
