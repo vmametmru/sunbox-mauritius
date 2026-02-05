@@ -10,6 +10,8 @@ export interface Model {
   type: 'container' | 'pool';
   description: string;
   base_price: number;
+  calculated_base_price?: number; // BOQ-calculated price if available
+  price_source?: 'boq' | 'manual';
   surface_m2: number;
   bedrooms?: number;
   bathrooms?: number;

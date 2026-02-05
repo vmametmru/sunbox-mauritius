@@ -91,6 +91,8 @@ try {
         case 'get_models': {
             $type       = $body['type'] ?? null;
             $activeOnly = $body['active_only'] ?? true;
+            $includeBOQPrice = $body['include_boq_price'] ?? true;
+            
             $sql = "SELECT * FROM models WHERE 1=1";
             $params = [];
             if ($type) {
@@ -111,6 +113,33 @@ try {
                 $planStmt->execute([$m['id']]);
                 $m['plan_url'] = ($row = $planStmt->fetch()) ? '/' . ltrim($row['file_path'], '/') : null;
                 $m['has_overflow'] = (bool)$m['has_overflow'];
+                
+                // Calculate BOQ price if requested
+                if ($includeBOQPrice) {
+                    $boqStmt = $db->prepare("
+                        SELECT 
+                            COALESCE(SUM(ROUND(bl.quantity * bl.unit_cost_ht * (1 + bl.margin_percent / 100), 2)), 0) AS boq_base_price_ht,
+                            COALESCE(SUM(ROUND(bl.quantity * bl.unit_cost_ht, 2)), 0) AS boq_cost_ht
+                        FROM boq_categories bc
+                        LEFT JOIN boq_lines bl ON bc.id = bl.category_id
+                        WHERE bc.model_id = ? AND bc.is_option = FALSE
+                    ");
+                    $boqStmt->execute([$m['id']]);
+                    $boqResult = $boqStmt->fetch();
+                    
+                    $boqPrice = (float)($boqResult['boq_base_price_ht'] ?? 0);
+                    $m['boq_base_price_ht'] = $boqPrice;
+                    $m['boq_cost_ht'] = (float)($boqResult['boq_cost_ht'] ?? 0);
+                    
+                    // Use BOQ price if available, otherwise use manual base_price
+                    if ($boqPrice > 0) {
+                        $m['calculated_base_price'] = $boqPrice;
+                        $m['price_source'] = 'boq';
+                    } else {
+                        $m['calculated_base_price'] = (float)$m['base_price'];
+                        $m['price_source'] = 'manual';
+                    }
+                }
             }
 
             ok($models);
@@ -332,6 +361,303 @@ try {
                 ];
             }, $rows);
             ok($data);
+            break;
+        }
+
+        // === SUPPLIERS (Fournisseurs)
+        case 'get_suppliers': {
+            $activeOnly = $body['active_only'] ?? true;
+            $sql = "SELECT * FROM suppliers";
+            if ($activeOnly) {
+                $sql .= " WHERE is_active = 1";
+            }
+            $sql .= " ORDER BY name ASC";
+            $stmt = $db->query($sql);
+            ok($stmt->fetchAll());
+            break;
+        }
+
+        case 'create_supplier': {
+            validateRequired($body, ['name']);
+            $stmt = $db->prepare("
+                INSERT INTO suppliers (name, city, phone, email, is_active)
+                VALUES (?, ?, ?, ?, ?)
+            ");
+            $stmt->execute([
+                sanitize($body['name']),
+                sanitize($body['city'] ?? ''),
+                sanitize($body['phone'] ?? ''),
+                sanitize($body['email'] ?? ''),
+                (bool)($body['is_active'] ?? true),
+            ]);
+            ok(['id' => $db->lastInsertId()]);
+            break;
+        }
+
+        case 'update_supplier': {
+            validateRequired($body, ['id']);
+            $stmt = $db->prepare("
+                UPDATE suppliers SET
+                    name = ?, city = ?, phone = ?, email = ?, is_active = ?, updated_at = NOW()
+                WHERE id = ?
+            ");
+            $stmt->execute([
+                sanitize($body['name']),
+                sanitize($body['city'] ?? ''),
+                sanitize($body['phone'] ?? ''),
+                sanitize($body['email'] ?? ''),
+                (bool)($body['is_active'] ?? true),
+                (int)$body['id'],
+            ]);
+            ok();
+            break;
+        }
+
+        case 'delete_supplier': {
+            validateRequired($body, ['id']);
+            $stmt = $db->prepare("DELETE FROM suppliers WHERE id = ?");
+            $stmt->execute([(int)$body['id']]);
+            ok();
+            break;
+        }
+
+        // === BOQ CATEGORIES
+        case 'get_boq_categories': {
+            $modelId = (int)($body['model_id'] ?? 0);
+            if ($modelId <= 0) fail("model_id manquant");
+            
+            $stmt = $db->prepare("
+                SELECT bc.*, 
+                    COALESCE(SUM(ROUND(bl.quantity * bl.unit_cost_ht, 2)), 0) AS total_cost_ht,
+                    COALESCE(SUM(ROUND(bl.quantity * bl.unit_cost_ht * (1 + bl.margin_percent / 100), 2)), 0) AS total_sale_price_ht
+                FROM boq_categories bc
+                LEFT JOIN boq_lines bl ON bc.id = bl.category_id
+                WHERE bc.model_id = ?
+                GROUP BY bc.id
+                ORDER BY bc.display_order ASC, bc.name ASC
+            ");
+            $stmt->execute([$modelId]);
+            $categories = $stmt->fetchAll();
+            
+            foreach ($categories as &$cat) {
+                $cat['is_option'] = (bool)$cat['is_option'];
+                $cat['total_profit_ht'] = round((float)$cat['total_sale_price_ht'] - (float)$cat['total_cost_ht'], 2);
+            }
+            
+            ok($categories);
+            break;
+        }
+
+        case 'create_boq_category': {
+            validateRequired($body, ['model_id', 'name']);
+            $stmt = $db->prepare("
+                INSERT INTO boq_categories (model_id, name, is_option, display_order)
+                VALUES (?, ?, ?, ?)
+            ");
+            $stmt->execute([
+                (int)$body['model_id'],
+                sanitize($body['name']),
+                (bool)($body['is_option'] ?? false),
+                (int)($body['display_order'] ?? 0),
+            ]);
+            ok(['id' => $db->lastInsertId()]);
+            break;
+        }
+
+        case 'update_boq_category': {
+            validateRequired($body, ['id']);
+            $stmt = $db->prepare("
+                UPDATE boq_categories SET
+                    name = ?, is_option = ?, display_order = ?, updated_at = NOW()
+                WHERE id = ?
+            ");
+            $stmt->execute([
+                sanitize($body['name']),
+                (bool)($body['is_option'] ?? false),
+                (int)($body['display_order'] ?? 0),
+                (int)$body['id'],
+            ]);
+            ok();
+            break;
+        }
+
+        case 'delete_boq_category': {
+            validateRequired($body, ['id']);
+            // Lines are deleted via CASCADE
+            $stmt = $db->prepare("DELETE FROM boq_categories WHERE id = ?");
+            $stmt->execute([(int)$body['id']]);
+            ok();
+            break;
+        }
+
+        // === BOQ LINES
+        case 'get_boq_lines': {
+            $categoryId = (int)($body['category_id'] ?? 0);
+            if ($categoryId <= 0) fail("category_id manquant");
+            
+            $stmt = $db->prepare("
+                SELECT bl.*, s.name AS supplier_name,
+                    ROUND(bl.quantity * bl.unit_cost_ht, 2) AS total_cost_ht,
+                    ROUND(bl.quantity * bl.unit_cost_ht * (1 + bl.margin_percent / 100), 2) AS sale_price_ht
+                FROM boq_lines bl
+                LEFT JOIN suppliers s ON bl.supplier_id = s.id
+                WHERE bl.category_id = ?
+                ORDER BY bl.display_order ASC, bl.id ASC
+            ");
+            $stmt->execute([$categoryId]);
+            ok($stmt->fetchAll());
+            break;
+        }
+
+        case 'create_boq_line': {
+            validateRequired($body, ['category_id', 'description']);
+            $stmt = $db->prepare("
+                INSERT INTO boq_lines (category_id, description, quantity, unit, unit_cost_ht, supplier_id, margin_percent, display_order)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ");
+            $stmt->execute([
+                (int)$body['category_id'],
+                sanitize($body['description']),
+                (float)($body['quantity'] ?? 1),
+                sanitize($body['unit'] ?? 'unité'),
+                (float)($body['unit_cost_ht'] ?? 0),
+                !empty($body['supplier_id']) ? (int)$body['supplier_id'] : null,
+                (float)($body['margin_percent'] ?? 30),
+                (int)($body['display_order'] ?? 0),
+            ]);
+            ok(['id' => $db->lastInsertId()]);
+            break;
+        }
+
+        case 'update_boq_line': {
+            validateRequired($body, ['id']);
+            $stmt = $db->prepare("
+                UPDATE boq_lines SET
+                    description = ?, quantity = ?, unit = ?, unit_cost_ht = ?,
+                    supplier_id = ?, margin_percent = ?, display_order = ?, updated_at = NOW()
+                WHERE id = ?
+            ");
+            $stmt->execute([
+                sanitize($body['description']),
+                (float)($body['quantity'] ?? 1),
+                sanitize($body['unit'] ?? 'unité'),
+                (float)($body['unit_cost_ht'] ?? 0),
+                !empty($body['supplier_id']) ? (int)$body['supplier_id'] : null,
+                (float)($body['margin_percent'] ?? 30),
+                (int)($body['display_order'] ?? 0),
+                (int)$body['id'],
+            ]);
+            ok();
+            break;
+        }
+
+        case 'delete_boq_line': {
+            validateRequired($body, ['id']);
+            $stmt = $db->prepare("DELETE FROM boq_lines WHERE id = ?");
+            $stmt->execute([(int)$body['id']]);
+            ok();
+            break;
+        }
+
+        // === BOQ CLONE (Clone entire BOQ from one model to another)
+        case 'clone_boq': {
+            validateRequired($body, ['from_model_id', 'to_model_id']);
+            $fromId = (int)$body['from_model_id'];
+            $toId = (int)$body['to_model_id'];
+            
+            // Get all categories from source model
+            $stmt = $db->prepare("SELECT * FROM boq_categories WHERE model_id = ?");
+            $stmt->execute([$fromId]);
+            $categories = $stmt->fetchAll();
+            
+            $clonedCategories = 0;
+            $clonedLines = 0;
+            
+            foreach ($categories as $cat) {
+                // Create new category for target model
+                $insertCat = $db->prepare("
+                    INSERT INTO boq_categories (model_id, name, is_option, display_order)
+                    VALUES (?, ?, ?, ?)
+                ");
+                $insertCat->execute([
+                    $toId,
+                    $cat['name'],
+                    $cat['is_option'],
+                    $cat['display_order'],
+                ]);
+                $newCatId = $db->lastInsertId();
+                $clonedCategories++;
+                
+                // Get all lines from source category
+                $stmtLines = $db->prepare("SELECT * FROM boq_lines WHERE category_id = ?");
+                $stmtLines->execute([$cat['id']]);
+                $lines = $stmtLines->fetchAll();
+                
+                foreach ($lines as $line) {
+                    $insertLine = $db->prepare("
+                        INSERT INTO boq_lines (category_id, description, quantity, unit, unit_cost_ht, supplier_id, margin_percent, display_order)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ");
+                    $insertLine->execute([
+                        $newCatId,
+                        $line['description'],
+                        $line['quantity'],
+                        $line['unit'],
+                        $line['unit_cost_ht'],
+                        $line['supplier_id'],
+                        $line['margin_percent'],
+                        $line['display_order'],
+                    ]);
+                    $clonedLines++;
+                }
+            }
+            
+            ok(['cloned_categories' => $clonedCategories, 'cloned_lines' => $clonedLines]);
+            break;
+        }
+
+        // === GET MODEL WITH BOQ PRICE
+        case 'get_model_boq_price': {
+            $modelId = (int)($body['model_id'] ?? 0);
+            if ($modelId <= 0) fail("model_id manquant");
+            
+            // Get base price from non-option BOQ categories
+            $stmt = $db->prepare("
+                SELECT 
+                    COALESCE(SUM(ROUND(bl.quantity * bl.unit_cost_ht * (1 + bl.margin_percent / 100), 2)), 0) AS base_price_ht,
+                    COALESCE(SUM(ROUND(bl.quantity * bl.unit_cost_ht, 2)), 0) AS total_cost_ht
+                FROM boq_categories bc
+                LEFT JOIN boq_lines bl ON bc.id = bl.category_id
+                WHERE bc.model_id = ? AND bc.is_option = FALSE
+            ");
+            $stmt->execute([$modelId]);
+            $result = $stmt->fetch();
+            
+            ok([
+                'model_id' => $modelId,
+                'base_price_ht' => (float)$result['base_price_ht'],
+                'total_cost_ht' => (float)$result['total_cost_ht'],
+                'profit_ht' => round((float)$result['base_price_ht'] - (float)$result['total_cost_ht'], 2),
+            ]);
+            break;
+        }
+
+        // === GET BOQ OPTIONS (Categories marked as options for a model)
+        case 'get_boq_options': {
+            $modelId = (int)($body['model_id'] ?? 0);
+            if ($modelId <= 0) fail("model_id manquant");
+            
+            $stmt = $db->prepare("
+                SELECT bc.id, bc.name, bc.display_order,
+                    COALESCE(SUM(ROUND(bl.quantity * bl.unit_cost_ht * (1 + bl.margin_percent / 100), 2)), 0) AS price_ht
+                FROM boq_categories bc
+                LEFT JOIN boq_lines bl ON bc.id = bl.category_id
+                WHERE bc.model_id = ? AND bc.is_option = TRUE
+                GROUP BY bc.id
+                ORDER BY bc.display_order ASC
+            ");
+            $stmt->execute([$modelId]);
+            ok($stmt->fetchAll());
             break;
         }
 

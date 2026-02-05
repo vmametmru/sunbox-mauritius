@@ -12,6 +12,8 @@ import {
   Home,
   Activity,
   Image as ImageIcon,
+  Calculator,
+  Building2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -24,6 +26,12 @@ const menuItems = [
 
   // ✅ NEW: Gestion photos (modèles + plans)
   { icon: ImageIcon, label: 'Photos', path: '/admin/media' },
+
+  // ✅ NEW: BOQ Management
+  { icon: Calculator, label: 'BOQ', path: '/admin/boq' },
+
+  // ✅ NEW: Suppliers Management  
+  { icon: Building2, label: 'Fournisseurs', path: '/admin/suppliers' },
 
   { icon: Settings, label: 'Options', path: '/admin/options' },
   { icon: Users, label: 'Contacts', path: '/admin/contacts' },
