@@ -79,7 +79,6 @@ const ConfigurePage: React.FC = () => {
   };
 
   if (!quoteData.model) return null;
-  const model = quoteData.model;
 
   // 🔧 Fix BUG calcul total : s'assurer que .price est bien un number
   const calculateOptionsTotal = () => {
@@ -225,7 +224,7 @@ const ConfigurePage: React.FC = () => {
             {model.type === 'container' && (
               <>
                 <li>{model.bedrooms} chambre(s)</li>
-                <li>{model.container_20ft_count} × 20’ • {model.container_40ft_count} × 40’</li>
+                <li>{model.container_20ft_count} × 20' • {model.container_40ft_count} × 40'</li>
               </>
             )}
             {model.type === 'pool' && (
@@ -289,9 +288,7 @@ const ConfigurePage: React.FC = () => {
                               {opt.description}
                             </p>
                           )}
-                          <p className={`text-sm text-orange-600 font-medium ${opt.description ? 'mt-2' : 'mt-1'}`}>
-                            Rs {Number(opt.price).toLocaleString()}
-                          </p>
+                          <p className={`text-sm text-orange-600 font-medium ${opt.description ? 'mt-2' : 'mt-1'}`}>Rs {Number(opt.price).toLocaleString()}</p>
                         </div>
                         <Switch
                           checked={isSelected(opt.id)}
