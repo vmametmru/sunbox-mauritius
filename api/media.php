@@ -182,15 +182,17 @@ try {
       $modelId   = (int)($_GET['model_id'] ?? 0);
       $mediaType = $_POST['media_type'] ?? 'photo';
 
-      if (!in_array($mediaType, ['photo','plan','bandeau'], true)) {
+      if (!in_array($mediaType, ['photo','plan','bandeau','category_image'], true)) {
         $mediaType = 'photo';
       }
 
-      if ($mediaType !== 'bandeau' && $modelId <= 0) {
+      // category_image and bandeau don't need model_id
+      if (!in_array($mediaType, ['bandeau', 'category_image'], true) && $modelId <= 0) {
         fail("model_id requis.");
       }
 
-      if ($mediaType === 'bandeau') {
+      // category_image and bandeau have model_id = 0
+      if (in_array($mediaType, ['bandeau', 'category_image'], true)) {
         $modelId = 0;
       }
 
@@ -211,8 +213,9 @@ try {
         $mediaType
       ]);
 
+      $insertedId = $db->lastInsertId();
       syncModelImageUrl($db, $modelId);
-      ok(['file' => $up]);
+      ok(['file' => $up, 'id' => (int)$insertedId]);
       break;
     }
 

@@ -64,6 +64,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
         category_id: Number(o.category_id),
         category_name: o.category_name,
         category_description: o.category_description || '',
+        category_image_url: o.category_image_url || null,
         name: o.name,
         description: o.description,
         price: parseFloat(o.price), // 🔧 Corrigé ici
@@ -252,6 +253,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
           {Object.entries(groupedOptions).map(([category, opts]) => {
             const isOpen = expandedCategories.includes(category);
             const categoryDescription = opts[0]?.category_description;
+            const categoryImageUrl = opts[0]?.category_image_url;
             return (
               <div key={category} className="border rounded bg-white">
                 <button
@@ -272,28 +274,43 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                         {categoryDescription}
                       </div>
                     )}
-                    {opts.map(opt => (
-                      <label
-                        key={opt.id}
-                        className="flex justify-between items-center px-4 py-3 hover:bg-gray-50 cursor-pointer"
-                      >
-                        <div className="flex-1 mr-4">
-                          <p className="font-medium">{opt.name}</p>
-                          {opt.description && (
-                            <p className="text-sm text-gray-500 whitespace-pre-line mt-1">
-                              {opt.description}
-                            </p>
-                          )}
-                          <p className={`text-sm text-orange-600 font-medium ${opt.description ? 'mt-2' : 'mt-1'}`}>
-                            Rs {calculateTTC(opt.price, vatRate).toLocaleString()}
-                          </p>
+                    <div className="flex">
+                      {/* Category Image */}
+                      {categoryImageUrl && (
+                        <div className="flex-shrink-0 p-4 border-r">
+                          <img 
+                            src={categoryImageUrl} 
+                            alt={category}
+                            className="w-[100px] h-[100px] object-cover rounded"
+                          />
                         </div>
-                        <Switch
-                          checked={isSelected(opt.id)}
-                          onCheckedChange={() => toggleOption(opt)}
-                        />
-                      </label>
-                    ))}
+                      )}
+                      {/* Options List */}
+                      <div className="flex-1 divide-y">
+                        {opts.map(opt => (
+                          <label
+                            key={opt.id}
+                            className="flex justify-between items-center px-4 py-3 hover:bg-gray-50 cursor-pointer"
+                          >
+                            <div className="flex-1 mr-4">
+                              <p className="font-medium">{opt.name}</p>
+                              {opt.description && (
+                                <p className="text-sm text-gray-500 whitespace-pre-line mt-1">
+                                  {opt.description}
+                                </p>
+                              )}
+                              <p className={`text-sm text-orange-600 font-medium ${opt.description ? 'mt-2' : 'mt-1'}`}>
+                                Rs {calculateTTC(opt.price, vatRate).toLocaleString()}
+                              </p>
+                            </div>
+                            <Switch
+                              checked={isSelected(opt.id)}
+                              onCheckedChange={() => toggleOption(opt)}
+                            />
+                          </label>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>

@@ -29,6 +29,8 @@ export default function MediaPage() {
   const [saving, setSaving] = useState(false);
   const [bannerFile, setBannerFile] = useState<File | null>(null);
   const [savingBanner, setSavingBanner] = useState(false);
+  const [categoryImageFile, setCategoryImageFile] = useState<File | null>(null);
+  const [savingCategoryImage, setSavingCategoryImage] = useState(false);
   const [items, setItems] = useState<ModelImageRow[]>([]);
   const [loadingList, setLoadingList] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -150,6 +152,34 @@ export default function MediaPage() {
     }
   }
 
+  async function uploadCategoryImage(e: React.FormEvent) {
+    e.preventDefault();
+    if (!categoryImageFile) return;
+    setSavingCategoryImage(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", categoryImageFile);
+      fd.append("media_type", "category_image");
+      fd.append("model_id", "0");
+
+      const r = await fetch(`/api/media.php?action=model_upload&model_id=0`, {
+        method: "POST",
+        credentials: "include",
+        body: fd,
+      });
+
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j?.success) throw new Error(j?.error || "Upload image catégorie échoué");
+
+      setCategoryImageFile(null);
+      toast({ title: "OK", description: "Image de catégorie uploadée" });
+    } catch (e: any) {
+      toast({ title: "Erreur", description: e?.message || "Erreur upload image catégorie", variant: "destructive" });
+    } finally {
+      setSavingCategoryImage(false);
+    }
+  }
+
   async function deleteOne(id: number) {
     if (!confirm("Supprimer cette image ?")) return;
     try {
@@ -209,6 +239,30 @@ export default function MediaPage() {
               <div>
                 <Button type="submit" disabled={savingBanner || !bannerFile} className="w-full bg-orange-500 hover:bg-orange-600">
                   {savingBanner ? "Upload..." : "Uploader"}
+                </Button>
+              </div>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+
+      {/* Upload Category Image */}
+      <Card>
+        <CardHeader><CardTitle>Image de catégorie d'option (100px × 100px)</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-gray-600">
+            Ces images seront utilisées pour illustrer les catégories d'options dans le configurateur.
+            L'image sera affichée en format carré (100px × 100px).
+          </p>
+          <form onSubmit={uploadCategoryImage}>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+              <div>
+                <label className="text-sm text-gray-600">Fichier image</label>
+                <Input type="file" accept="image/*" onChange={(e) => setCategoryImageFile(e.target.files?.[0] || null)} />
+              </div>
+              <div>
+                <Button type="submit" disabled={savingCategoryImage || !categoryImageFile} className="w-full bg-orange-500 hover:bg-orange-600">
+                  {savingCategoryImage ? "Upload..." : "Uploader"}
                 </Button>
               </div>
             </div>
@@ -292,6 +346,7 @@ export default function MediaPage() {
                 <SelectItem value="photo">Photo</SelectItem>
                 <SelectItem value="plan">Plan</SelectItem>
                 <SelectItem value="bandeau">Bandeau</SelectItem>
+                <SelectItem value="category_image">Image Catégorie</SelectItem>
               </SelectContent>
             </Select>
           </div>

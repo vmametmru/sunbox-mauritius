@@ -29,6 +29,7 @@ export interface ModelOption {
   category_id: number;
   category_name?: string; // jointure API
   category_description?: string; // jointure API
+  category_image_url?: string; // image de la catégorie (100px x 100px)
   name: string;
   description?: string;
   price: number;
