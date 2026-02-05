@@ -191,6 +191,7 @@ export const api = {
     name: string;
     is_option?: boolean;
     display_order?: number;
+    image_id?: number | null;
   }) {
     return this.query('create_boq_category', category);
   },
@@ -200,6 +201,7 @@ export const api = {
     name: string;
     is_option?: boolean;
     display_order?: number;
+    image_id?: number | null;
   }) {
     return this.query('update_boq_category', category);
   },

@@ -9,7 +9,8 @@ import {
   Calculator,
   Package,
   Tag,
-  Settings
+  Settings,
+  Image as ImageIcon
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -59,12 +60,19 @@ interface Supplier {
   name: string;
 }
 
+interface CategoryImage {
+  id: number;
+  url: string;
+}
+
 interface BOQCategory {
   id: number;
   model_id: number;
   name: string;
   is_option: boolean;
   display_order: number;
+  image_id: number | null;
+  image_url: string | null;
   total_cost_ht: number;
   total_sale_price_ht: number;
   total_profit_ht: number;
@@ -89,6 +97,8 @@ const emptyCategory: Partial<BOQCategory> = {
   name: '',
   is_option: false,
   display_order: 0,
+  image_id: null,
+  image_url: null,
 };
 
 const emptyLine: Partial<BOQLine> = {
@@ -115,6 +125,7 @@ export default function BOQPage() {
   const [categories, setCategories] = useState<BOQCategory[]>([]);
   const [expandedCategories, setExpandedCategories] = useState<number[]>([]);
   const [categoryLines, setCategoryLines] = useState<Record<number, BOQLine[]>>({});
+  const [categoryImages, setCategoryImages] = useState<CategoryImage[]>([]);
   
   // Modals
   const [editingCategory, setEditingCategory] = useState<Partial<BOQCategory> | null>(null);
@@ -122,6 +133,7 @@ export default function BOQPage() {
   const [editingCategoryId, setEditingCategoryId] = useState<number | null>(null);
   const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false);
   const [isLineDialogOpen, setIsLineDialogOpen] = useState(false);
+  const [isImageSelectorOpen, setIsImageSelectorOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   
   // Clone modal
@@ -141,12 +153,14 @@ export default function BOQPage() {
 
   const loadInitialData = async () => {
     try {
-      const [modelsData, suppliersData] = await Promise.all([
+      const [modelsData, suppliersData, categoryImagesData] = await Promise.all([
         api.getModels(undefined, false),
         api.getSuppliers(true),
+        api.getCategoryImages(),
       ]);
       setModels(modelsData);
       setSuppliers(suppliersData);
+      setCategoryImages(Array.isArray(categoryImagesData) ? categoryImagesData : []);
       if (modelsData.length > 0) setSelectedModelId(modelsData[0].id);
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
@@ -194,7 +208,13 @@ export default function BOQPage() {
     try {
       setSaving(true);
       if (editingCategory.id) {
-        await api.updateBOQCategory(editingCategory as { id: number; name: string });
+        await api.updateBOQCategory({
+          id: editingCategory.id,
+          name: editingCategory.name!,
+          is_option: editingCategory.is_option,
+          display_order: editingCategory.display_order,
+          image_id: editingCategory.image_id,
+        });
         toast({ title: 'Succès', description: 'Catégorie mise à jour' });
       } else {
         await api.createBOQCategory({
@@ -202,6 +222,7 @@ export default function BOQPage() {
           name: editingCategory.name!,
           is_option: editingCategory.is_option,
           display_order: editingCategory.display_order,
+          image_id: editingCategory.image_id,
         });
         toast({ title: 'Succès', description: 'Catégorie créée' });
       }
@@ -212,6 +233,17 @@ export default function BOQPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const selectCategoryImage = (image: CategoryImage | null) => {
+    if (editingCategory) {
+      setEditingCategory({
+        ...editingCategory,
+        image_id: image?.id || null,
+        image_url: image?.url || null,
+      });
+    }
+    setIsImageSelectorOpen(false);
   };
 
   const deleteCategory = async (id: number) => {
@@ -707,6 +739,46 @@ export default function BOQPage() {
                 <Label>Catégorie Option (visible dans les options du configurateur)</Label>
               </div>
 
+              {/* Image picker - only shown when is_option is checked */}
+              {editingCategory.is_option && (
+                <div>
+                  <Label>Image de la catégorie (100px × 100px)</Label>
+                  <div className="mt-2 flex items-center gap-4">
+                    {editingCategory.image_url ? (
+                      <img
+                        src={editingCategory.image_url}
+                        alt="Preview"
+                        className="w-[100px] h-[100px] rounded object-cover border"
+                      />
+                    ) : (
+                      <div className="w-[100px] h-[100px] bg-gray-100 rounded flex items-center justify-center border">
+                        <ImageIcon className="h-8 w-8 text-gray-400" />
+                      </div>
+                    )}
+                    <div className="flex flex-col gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setIsImageSelectorOpen(true)}
+                      >
+                        <ImageIcon className="h-4 w-4 mr-2" />
+                        Choisir une image
+                      </Button>
+                      {editingCategory.image_url && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="text-red-600"
+                          onClick={() => setEditingCategory({ ...editingCategory, image_id: null, image_url: null })}
+                        >
+                          Supprimer l'image
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="flex justify-end gap-2 pt-4">
                 <Button variant="outline" onClick={() => setIsCategoryDialogOpen(false)}>
                   Annuler
@@ -721,6 +793,62 @@ export default function BOQPage() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* IMAGE SELECTOR MODAL */}
+      <Dialog open={isImageSelectorOpen} onOpenChange={setIsImageSelectorOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Choisir une image</DialogTitle>
+            <DialogDescription>
+              Sélectionnez une image de catégorie depuis la galerie. 
+              Vous pouvez uploader de nouvelles images dans <strong>Photos &gt; Image de catégorie d'option</strong>.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid grid-cols-4 gap-4 max-h-[400px] overflow-y-auto py-4">
+            {categoryImages.map(image => (
+              <button
+                key={image.id}
+                onClick={() => selectCategoryImage(image)}
+                className={`
+                  relative aspect-square rounded overflow-hidden border-2 transition-all
+                  hover:border-orange-500 hover:shadow-md
+                  ${editingCategory?.image_id === image.id ? 'border-orange-500 ring-2 ring-orange-200' : 'border-gray-200'}
+                `}
+              >
+                <img
+                  src={image.url}
+                  alt=""
+                  className="w-full h-full object-cover"
+                />
+              </button>
+            ))}
+          </div>
+
+          {categoryImages.length === 0 && (
+            <div className="text-center py-8 text-gray-500">
+              <ImageIcon className="h-12 w-12 mx-auto text-gray-300 mb-4" />
+              <p>Aucune image de catégorie disponible.</p>
+              <p className="text-sm mt-2">
+                Uploadez des images dans <strong>Photos &gt; Image de catégorie d'option</strong>
+              </p>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-4 border-t">
+            <Button variant="outline" onClick={() => setIsImageSelectorOpen(false)}>
+              Annuler
+            </Button>
+            <Button
+              variant="ghost"
+              className="text-red-600"
+              onClick={() => selectCategoryImage(null)}
+            >
+              Sans image
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
 
