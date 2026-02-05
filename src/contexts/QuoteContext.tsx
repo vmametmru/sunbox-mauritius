@@ -28,6 +28,7 @@ export interface ModelOption {
   model_id: number;
   category_id: number;
   category_name?: string; // jointure API
+  category_description?: string; // jointure API
   name: string;
   description?: string;
   price: number;

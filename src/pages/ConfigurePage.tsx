@@ -66,6 +66,7 @@ const ConfigurePage: React.FC = () => {
         model_id: Number(o.model_id),
         category_id: Number(o.category_id),
         category_name: o.category_name || 'Autres',
+        category_description: o.category_description || '',
         name: o.name,
         description: o.description,
         price: Number(o.price),
@@ -80,9 +81,9 @@ const ConfigurePage: React.FC = () => {
 
   if (!quoteData.model) return null;
 
-  // 🔧 Fix BUG calcul total : s'assurer que .price est bien un number
+  // 🔧 Fix BUG calcul total : s'assurer que .price est bien un number et appliquer TTC
   const calculateOptionsTotal = () => {
-    return quoteData.selectedOptions.reduce((sum, opt) => sum + Number(opt.price || 0), 0);
+    return quoteData.selectedOptions.reduce((sum, opt) => sum + calculateTTC(Number(opt.price || 0), vatRate), 0);
   };
 
   const calculateSafeTotal = () => {
@@ -266,6 +267,7 @@ const ConfigurePage: React.FC = () => {
         <div className="space-y-6">
           {Object.entries(groupedOptions).map(([category, opts]) => {
             const isOpen = expandedCategories.includes(category);
+            const categoryDescription = opts[0]?.category_description;
             return (
               <div key={category} className="border rounded bg-white">
                 <button
@@ -278,6 +280,11 @@ const ConfigurePage: React.FC = () => {
 
                 {isOpen && (
                   <div className="divide-y">
+                    {categoryDescription && (
+                      <div className="px-4 py-3 bg-gray-50 text-sm text-gray-600 whitespace-pre-line">
+                        {categoryDescription}
+                      </div>
+                    )}
                     {opts.map(opt => (
                       <label
                         key={opt.id}
@@ -290,7 +297,7 @@ const ConfigurePage: React.FC = () => {
                               {opt.description}
                             </p>
                           )}
-                          <p className={`text-sm text-orange-600 font-medium ${opt.description ? 'mt-2' : 'mt-1'}`}>Rs {Number(opt.price).toLocaleString()}</p>
+                          <p className={`text-sm text-orange-600 font-medium ${opt.description ? 'mt-2' : 'mt-1'}`}>Rs {calculateTTC(Number(opt.price), vatRate).toLocaleString()}</p>
                         </div>
                         <Switch
                           checked={isSelected(opt.id)}
