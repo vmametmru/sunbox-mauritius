@@ -13,6 +13,7 @@ import {
 import { Slider } from '@/components/ui/slider';
 import { useQuote } from '@/contexts/QuoteContext';
 import ConfigureModal from '@/components/ConfigureModal';
+import { useSiteSettings, calculateTTC } from '@/hooks/use-site-settings';
 
 interface Model {
   id: number;
@@ -37,6 +38,8 @@ export default function ModelsPage() {
   const [models, setModels] = useState<Model[]>([]);
   const [filterType, setFilterType] = useState<'all' | 'container' | 'pool'>('all');
   const [modalImage, setModalImage] = useState<string | null>(null);
+  const { data: siteSettings } = useSiteSettings();
+  const vatRate = Number(siteSettings?.vat_rate) || 15;
 
   const [filters, setFilters] = useState({
     bedrooms: '',
@@ -58,9 +61,14 @@ export default function ModelsPage() {
   const { setSelectedModel } = useQuote();
   const [showConfigurator, setShowConfigurator] = useState(false);
 
-  // Helper to get the display price (BOQ price if available, otherwise manual base_price)
-  const getDisplayPrice = (model: Model) => {
+  // Helper to get the display price HT (BOQ price if available, otherwise manual base_price)
+  const getDisplayPriceHT = (model: Model) => {
     return Number(model.calculated_base_price ?? model.base_price ?? 0);
+  };
+
+  // Helper to get TTC price
+  const getDisplayPriceTTC = (model: Model) => {
+    return calculateTTC(getDisplayPriceHT(model), vatRate);
   };
 
   useEffect(() => {
@@ -91,10 +99,10 @@ export default function ModelsPage() {
   }, []);
 
   const openConfigurator = (model: Model) => {
-    // Update the model with calculated price before sending to configurator
+    // Update the model with calculated TTC price before sending to configurator
     const modelWithPrice = {
       ...model,
-      base_price: getDisplayPrice(model),
+      base_price: getDisplayPriceTTC(model),
     };
     setSelectedModel(modelWithPrice);
     setShowConfigurator(true);
@@ -117,7 +125,7 @@ export default function ModelsPage() {
     if (m.surface_m2 < filters.surfaceMin || m.surface_m2 > filters.surfaceMax) return false;
     
     // Use calculated price for filtering
-    const modelPrice = getDisplayPrice(m);
+    const modelPrice = getDisplayPriceHT(m);
     if (modelPrice < filters.priceMin || modelPrice > filters.priceMax) return false;
 
     return true;
@@ -167,7 +175,7 @@ export default function ModelsPage() {
               <div className="p-4 space-y-1">
                 <h2 className="text-xl font-bold">{model.name}</h2>
                 <p className="text-gray-600 text-sm">{model.surface_m2} m²</p>
-                <p className="text-orange-600 font-semibold">{formatPrice(getDisplayPrice(model))} TTC</p>
+                <p className="text-orange-600 font-semibold">{formatPrice(getDisplayPriceTTC(model))} TTC</p>
 
                 <div className="pt-3">
                   <Button variant="outline" onClick={() => openConfigurator(model)}>

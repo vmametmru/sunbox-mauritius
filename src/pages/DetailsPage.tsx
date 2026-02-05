@@ -11,6 +11,12 @@ const DetailsPage: React.FC = () => {
   const { quoteData, setCustomerDetails, calculateTotal, setGeneratedQuote } = useQuote();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  
+  const { data: siteSettings } = useSiteSettings();
+  const underConstruction = siteSettings?.site_under_construction === "true";
+  const ucMessage =
+    siteSettings?.under_construction_message ||
+    "🚧 Page en construction — merci de revenir ultérieurement.";
 
   useEffect(() => {
     if (!quoteData.model) {
@@ -24,11 +30,6 @@ const DetailsPage: React.FC = () => {
 
   const model = quoteData.model;
   const optionsTotal = quoteData.selectedOptions.reduce((sum, opt) => sum + Number(opt.price || 0), 0);
-  const { data: siteSettings } = useSiteSettings();
-const underConstruction = siteSettings?.site_under_construction === "true";
-const ucMessage =
-  siteSettings?.under_construction_message ||
-  "🚧 Page en construction — merci de revenir ultérieurement.";
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
