@@ -167,7 +167,7 @@ export default function ModelsPage() {
               <div className="p-4 space-y-1">
                 <h2 className="text-xl font-bold">{model.name}</h2>
                 <p className="text-gray-600 text-sm">{model.surface_m2} m²</p>
-                <p className="text-orange-600 font-semibold">{formatPrice(getDisplayPrice(model))} HT</p>
+                <p className="text-orange-600 font-semibold">{formatPrice(getDisplayPrice(model))} TTC</p>
 
                 <div className="pt-3">
                   <Button variant="outline" onClick={() => openConfigurator(model)}>
