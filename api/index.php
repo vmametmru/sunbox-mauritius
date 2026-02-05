@@ -466,7 +466,7 @@ try {
             
             $stmt = $db->prepare("
                 SELECT bc.*, 
-                    mi.url AS image_url,
+                    mi.file_path AS image_path,
                     COALESCE(SUM(ROUND(bl.quantity * bl.unit_cost_ht, 2)), 0) AS total_cost_ht,
                     COALESCE(SUM(ROUND(bl.quantity * bl.unit_cost_ht * (1 + bl.margin_percent / 100), 2)), 0) AS total_sale_price_ht
                 FROM boq_categories bc
@@ -482,6 +482,8 @@ try {
             foreach ($categories as &$cat) {
                 $cat['is_option'] = (bool)$cat['is_option'];
                 $cat['total_profit_ht'] = round((float)$cat['total_sale_price_ht'] - (float)$cat['total_cost_ht'], 2);
+                $cat['image_url'] = $cat['image_path'] ? '/' . ltrim($cat['image_path'], '/') : null;
+                unset($cat['image_path']);
             }
             
             ok($categories);
