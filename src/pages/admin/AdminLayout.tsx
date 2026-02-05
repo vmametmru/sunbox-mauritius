@@ -33,7 +33,6 @@ const menuItems = [
   // ✅ NEW: Suppliers Management  
   { icon: Building2, label: 'Fournisseurs', path: '/admin/suppliers' },
 
-  { icon: Settings, label: 'Options', path: '/admin/options' },
   { icon: Users, label: 'Contacts', path: '/admin/contacts' },
   { icon: Mail, label: 'Email', path: '/admin/email' },
   { icon: Settings, label: 'Site', path: '/admin/site' },

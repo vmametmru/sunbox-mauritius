@@ -25,7 +25,6 @@ import AdminLayout from "./pages/admin/AdminLayout";
 import DashboardPage from "./pages/admin/DashboardPage";
 import QuotesPage from "./pages/admin/QuotesPage";
 import AdminModelsPage from "./pages/admin/ModelsPage";
-import OptionsPage from "./pages/admin/OptionsPage";
 import EmailSettingsPage from "./pages/admin/EmailSettingsPage";
 import RequireAdmin from "./components/RequireAdmin";
 import SiteSettingsPage from "./pages/admin/SiteSettingsPage";
@@ -62,7 +61,6 @@ const App = () => (
                   <Route path="quotes" element={<QuotesPage />} />
                   <Route path="models" element={<AdminModelsPage />} />
                   <Route path="media" element={<MediaPage />} />
-                  <Route path="options" element={<OptionsPage />} />
                   <Route path="boq" element={<BOQPage />} />
                   <Route path="suppliers" element={<SuppliersPage />} />
                   <Route path="email" element={<EmailSettingsPage />} />
