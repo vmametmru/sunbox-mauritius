@@ -17,6 +17,7 @@ import { Badge } from '@/components/ui/badge';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle
 } from '@/components/ui/dialog';
@@ -527,6 +528,11 @@ export default function BOQPage() {
             <DialogTitle>
               {editingCategory?.id ? 'Modifier la Catégorie' : 'Nouvelle Catégorie'}
             </DialogTitle>
+            <DialogDescription>
+              {editingCategory?.id 
+                ? 'Modifiez les informations de la catégorie BOQ.'
+                : 'Créez une nouvelle catégorie pour organiser les lignes BOQ.'}
+            </DialogDescription>
           </DialogHeader>
 
           {editingCategory && (
@@ -587,6 +593,11 @@ export default function BOQPage() {
             <DialogTitle>
               {editingLine?.id ? 'Modifier la Ligne' : 'Nouvelle Ligne'}
             </DialogTitle>
+            <DialogDescription>
+              {editingLine?.id
+                ? 'Modifiez les détails de cette ligne BOQ.'
+                : 'Ajoutez une nouvelle ligne à cette catégorie BOQ.'}
+            </DialogDescription>
           </DialogHeader>
 
           {editingLine && (
@@ -668,16 +679,16 @@ export default function BOQPage() {
               <div>
                 <Label>Fournisseur</Label>
                 <Select
-                  value={editingLine.supplier_id?.toString() || ''}
+                  value={editingLine.supplier_id ? editingLine.supplier_id.toString() : "_none"}
                   onValueChange={(v) =>
-                    setEditingLine({ ...editingLine, supplier_id: v ? Number(v) : null })
+                    setEditingLine({ ...editingLine, supplier_id: v === "_none" ? null : Number(v) })
                   }
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Sélectionner un fournisseur" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Aucun</SelectItem>
+                    <SelectItem value="_none">Aucun</SelectItem>
                     {suppliers.map(s => (
                       <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>
                     ))}
@@ -725,6 +736,9 @@ export default function BOQPage() {
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Cloner le BOQ d'un autre modèle</DialogTitle>
+            <DialogDescription>
+              Copiez toutes les catégories et lignes BOQ d'un modèle vers celui actuellement sélectionné.
+            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">
@@ -735,8 +749,8 @@ export default function BOQPage() {
             <div>
               <Label>Modèle source</Label>
               <Select
-                value={cloneSourceModelId?.toString() || ''}
-                onValueChange={(v) => setCloneSourceModelId(Number(v))}
+                value={cloneSourceModelId ? cloneSourceModelId.toString() : undefined}
+                onValueChange={(v) => setCloneSourceModelId(v ? Number(v) : null)}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Sélectionner un modèle source" />
