@@ -223,25 +223,32 @@ try {
             if ($modelId <= 0) fail("model_id manquant");
 
             $stmt = $db->prepare("
-                SELECT mo.*, oc.name as category_name, oc.description as category_description
+                SELECT mo.*, oc.name as category_name, oc.description as category_description,
+                       oc.image_id as category_image_id, mi.file_path as category_image_path
                 FROM model_options mo
                 LEFT JOIN option_categories oc ON mo.category_id = oc.id
+                LEFT JOIN model_images mi ON oc.image_id = mi.id
                 WHERE mo.model_id = ?
                 ORDER BY oc.display_order ASC, mo.display_order ASC
             ");
             $stmt->execute([$modelId]);
             $options = $stmt->fetchAll();
+            foreach ($options as &$opt) {
+                $opt['category_image_url'] = $opt['category_image_path'] ? '/' . ltrim($opt['category_image_path'], '/') : null;
+                unset($opt['category_image_path']);
+            }
             ok($options);
             break;
         }
 
         case 'create_option_category': {
             validateRequired($body, ['name']);
-            $stmt = $db->prepare("INSERT INTO option_categories (name, description, display_order) VALUES (?, ?, ?)");
+            $stmt = $db->prepare("INSERT INTO option_categories (name, description, display_order, image_id) VALUES (?, ?, ?, ?)");
             $stmt->execute([
                 sanitize($body['name']),
                 sanitize($body['description'] ?? ''),
-                (int)($body['display_order'] ?? 0)
+                (int)($body['display_order'] ?? 0),
+                !empty($body['image_id']) ? (int)$body['image_id'] : null
             ]);
             ok(['id' => $db->lastInsertId()]);
             break;
@@ -249,11 +256,12 @@ try {
 
         case 'update_option_category': {
             validateRequired($body, ['id', 'name']);
-            $stmt = $db->prepare("UPDATE option_categories SET name = ?, description = ?, display_order = ?, updated_at = NOW() WHERE id = ?");
+            $stmt = $db->prepare("UPDATE option_categories SET name = ?, description = ?, display_order = ?, image_id = ?, updated_at = NOW() WHERE id = ?");
             $stmt->execute([
                 sanitize($body['name']),
                 sanitize($body['description'] ?? ''),
                 (int)($body['display_order'] ?? 0),
+                !empty($body['image_id']) ? (int)$body['image_id'] : null,
                 (int)$body['id']
             ]);
             ok();
@@ -269,8 +277,18 @@ try {
         }
 
         case 'get_option_categories': {
-            $stmt = $db->query("SELECT * FROM option_categories ORDER BY display_order ASC");
-            ok($stmt->fetchAll());
+            $stmt = $db->query("
+                SELECT oc.*, mi.file_path as image_path
+                FROM option_categories oc
+                LEFT JOIN model_images mi ON oc.image_id = mi.id
+                ORDER BY oc.display_order ASC
+            ");
+            $categories = $stmt->fetchAll();
+            foreach ($categories as &$cat) {
+                $cat['image_url'] = $cat['image_path'] ? '/' . ltrim($cat['image_path'], '/') : null;
+                unset($cat['image_path']);
+            }
+            ok($categories);
             break;
         }
 
@@ -357,6 +375,21 @@ try {
         // === BANDEAU
         case 'get_banner_images': {
             $stmt = $db->prepare("SELECT id, file_path FROM model_images WHERE media_type = 'bandeau' ORDER BY id DESC");
+            $stmt->execute();
+            $rows = $stmt->fetchAll();
+            $data = array_map(function ($r) {
+                return [
+                    'id' => (int)$r['id'],
+                    'url' => '/' . ltrim((string)$r['file_path'], '/'),
+                ];
+            }, $rows);
+            ok($data);
+            break;
+        }
+
+        // === CATEGORY IMAGES
+        case 'get_category_images': {
+            $stmt = $db->prepare("SELECT id, file_path FROM model_images WHERE media_type = 'category_image' ORDER BY id DESC");
             $stmt->execute();
             $rows = $stmt->fetchAll();
             $data = array_map(function ($r) {
