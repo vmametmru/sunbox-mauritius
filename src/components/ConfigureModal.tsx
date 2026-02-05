@@ -35,7 +35,7 @@ interface ConfigureModalProps {
 }
 
 const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
-  const { quoteData, toggleOption, calculateTotal, calculateOptionsTotal } = useQuote();
+  const { quoteData, toggleOption } = useQuote();
   const [expandedCategories, setExpandedCategories] = useState<string[]>([]);
   const [options, setOptions] = useState<ModelOption[]>([]);
   const [boqOptions, setBOQOptions] = useState<ModelOption[]>([]);
@@ -63,6 +63,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
         model_id: Number(o.model_id),
         category_id: Number(o.category_id),
         category_name: o.category_name,
+        category_description: o.category_description || '',
         name: o.name,
         description: o.description,
         price: parseFloat(o.price), // 🔧 Corrigé ici
@@ -124,6 +125,16 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
 
   const isSelected = (id: number) =>
     quoteData.selectedOptions.some(o => o.id === id);
+
+  // Local TTC calculations
+  const calculateOptionsTotalTTC = () => {
+    return quoteData.selectedOptions.reduce((sum, opt) => sum + calculateTTC(Number(opt.price || 0), vatRate), 0);
+  };
+
+  const calculateTotalTTC = () => {
+    const base = Number(model?.base_price ?? 0);
+    return base + calculateOptionsTotalTTC();
+  };
 
   if (!model) return null;
 
@@ -205,13 +216,13 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
             <div className="flex justify-between items-center">
               <p className="text-sm text-gray-500">Total options TTC</p>
               <p className="text-sm font-medium text-gray-700">
-                Rs {calculateOptionsTotal().toLocaleString()}
+                Rs {calculateOptionsTotalTTC().toLocaleString()}
               </p>
             </div>
             <div className="flex justify-between items-center pt-2 border-t border-gray-200">
               <p className="text-sm text-gray-500">Total général TTC</p>
               <p className="text-xl font-bold text-gray-800">
-                Rs {calculateTotal().toLocaleString()}
+                Rs {calculateTotalTTC().toLocaleString()}
               </p>
             </div>
           </div>
@@ -219,6 +230,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
           {/* Options */}
           {Object.entries(groupedOptions).map(([category, opts]) => {
             const isOpen = expandedCategories.includes(category);
+            const categoryDescription = opts[0]?.category_description;
             return (
               <div key={category} className="border rounded bg-white">
                 <button
@@ -234,6 +246,11 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                 </button>
                 {isOpen && (
                   <div className="divide-y">
+                    {categoryDescription && (
+                      <div className="px-4 py-3 bg-gray-50 text-sm text-gray-600 whitespace-pre-line">
+                        {categoryDescription}
+                      </div>
+                    )}
                     {opts.map(opt => (
                       <label
                         key={opt.id}
@@ -247,7 +264,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                             </p>
                           )}
                           <p className={`text-sm text-orange-600 font-medium ${opt.description ? 'mt-2' : 'mt-1'}`}>
-                            Rs {opt.price.toLocaleString()}
+                            Rs {calculateTTC(opt.price, vatRate).toLocaleString()}
                           </p>
                         </div>
                         <Switch

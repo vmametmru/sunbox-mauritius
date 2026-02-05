@@ -223,7 +223,7 @@ try {
             if ($modelId <= 0) fail("model_id manquant");
 
             $stmt = $db->prepare("
-                SELECT mo.*, oc.name as category_name
+                SELECT mo.*, oc.name as category_name, oc.description as category_description
                 FROM model_options mo
                 LEFT JOIN option_categories oc ON mo.category_id = oc.id
                 WHERE mo.model_id = ?
@@ -237,17 +237,22 @@ try {
 
         case 'create_option_category': {
             validateRequired($body, ['name']);
-            $stmt = $db->prepare("INSERT INTO option_categories (name, display_order) VALUES (?, ?)");
-            $stmt->execute([sanitize($body['name']), (int)($body['display_order'] ?? 0)]);
+            $stmt = $db->prepare("INSERT INTO option_categories (name, description, display_order) VALUES (?, ?, ?)");
+            $stmt->execute([
+                sanitize($body['name']),
+                sanitize($body['description'] ?? ''),
+                (int)($body['display_order'] ?? 0)
+            ]);
             ok(['id' => $db->lastInsertId()]);
             break;
         }
 
         case 'update_option_category': {
-            validateRequired($body, ['id']);
-            $stmt = $db->prepare("UPDATE option_categories SET name = ?, display_order = ?, updated_at = NOW() WHERE id = ?");
+            validateRequired($body, ['id', 'name']);
+            $stmt = $db->prepare("UPDATE option_categories SET name = ?, description = ?, display_order = ?, updated_at = NOW() WHERE id = ?");
             $stmt->execute([
                 sanitize($body['name']),
+                sanitize($body['description'] ?? ''),
                 (int)($body['display_order'] ?? 0),
                 (int)$body['id']
             ]);
