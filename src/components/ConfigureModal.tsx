@@ -4,6 +4,7 @@ import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import { useQuote, ModelOption } from '@/contexts/QuoteContext';
 import { api } from '@/lib/api';
+import { useSiteSettings, calculateTTC } from '@/hooks/use-site-settings';
 
 interface ConfigureModalProps {
   open: boolean;
@@ -15,31 +16,36 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
   const [expandedCategories, setExpandedCategories] = useState<string[]>([]);
   const [options, setOptions] = useState<ModelOption[]>([]);
   const [lightbox, setLightbox] = useState<string | null>(null);
+  
+  const { data: siteSettings } = useSiteSettings();
+  const vatRate = Number(siteSettings?.vat_rate) || 15;
 
   const model = quoteData.model;
 
   useEffect(() => {
-    if (open && model?.id) loadOptions();
-  }, [open, model?.id]);
-
-  const loadOptions = async () => {
-    try {
-      const data = await api.getModelOptions(model!.id);
-      const mapped: ModelOption[] = data.map((o: any) => ({
-        id: Number(o.id),
-        model_id: Number(o.model_id),
-        category_id: Number(o.category_id),
-        category_name: o.category_name,
-        name: o.name,
-        description: o.description,
-        price: parseFloat(o.price), // 🔧 Corrigé ici
-        is_active: Boolean(o.is_active),
-      }));
-      setOptions(mapped);
-    } catch (err) {
-      console.error(err);
-    }
-  };
+    const loadOptions = async () => {
+      if (!open || !model?.id) return;
+      try {
+        // Load options from BOQ categories marked as is_option=true
+        const data = await api.getBOQOptions(model.id);
+        const mapped: ModelOption[] = data.map((o: Record<string, unknown>) => ({
+          id: Number(o.id),
+          model_id: model.id,
+          category_id: Number(o.id), // BOQ category id
+          category_name: String(o.name), // BOQ category name
+          name: String(o.name),
+          description: '',
+          // Calculate TTC from HT price
+          price: calculateTTC(Number(o.price_ht || 0), vatRate),
+          is_active: true,
+        }));
+        setOptions(mapped);
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    loadOptions();
+  }, [open, model?.id, vatRate]);
 
   const groupedOptions = options.reduce((acc, opt) => {
     const category = opt.category_name || 'Autres';

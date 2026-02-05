@@ -15,6 +15,7 @@ interface SiteSettings {
   site_logo: string;
   pdf_logo: string;
   site_slogan: string;
+  vat_rate: string;
 }
 
 const defaultValues: SiteSettings = {
@@ -23,6 +24,7 @@ const defaultValues: SiteSettings = {
   site_logo: "",
   pdf_logo: "",
   site_slogan: "container home - swimming-pools",
+  vat_rate: "15",
 };
 
 export default function SiteSettingsPage() {
@@ -54,6 +56,7 @@ export default function SiteSettingsPage() {
         { key: "site_logo", value: settings.site_logo, group: "site" },
         { key: "pdf_logo", value: settings.pdf_logo, group: "site" },
         { key: "site_slogan", value: settings.site_slogan, group: "site" },
+        { key: "vat_rate", value: settings.vat_rate, group: "site" },
       ]);
       toast({ title: "Succès", description: "Paramètres enregistrés." });
     } catch (err: any) {
@@ -156,6 +159,22 @@ export default function SiteSettingsPage() {
                   value={settings.site_slogan}
                   onChange={(e) => setSettings({ ...settings, site_slogan: e.target.value })}
                 />
+              </div>
+
+              {/* TVA Rate */}
+              <div>
+                <Label>Taux de TVA (%)</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  value={settings.vat_rate}
+                  onChange={(e) => setSettings({ ...settings, vat_rate: e.target.value })}
+                />
+                <p className="text-sm text-gray-500 mt-1">
+                  Taux de TVA appliqué pour calculer les prix TTC (ex: 15 pour Maurice)
+                </p>
               </div>
 
               {/* Logo upload */}

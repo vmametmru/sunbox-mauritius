@@ -8,7 +8,8 @@ import {
   Copy,
   Calculator,
   Package,
-  Tag
+  Tag,
+  Settings
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -41,6 +42,7 @@ import {
 } from '@/components/ui/table';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
+import { useSiteSettings, calculateTTC } from '@/hooks/use-site-settings';
 
 /* ======================================================
    TYPES
@@ -104,6 +106,8 @@ const emptyLine: Partial<BOQLine> = {
 ====================================================== */
 export default function BOQPage() {
   const { toast } = useToast();
+  const { data: siteSettings } = useSiteSettings();
+  const vatRate = Number(siteSettings?.vat_rate) || 15;
   
   const [models, setModels] = useState<Model[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -316,17 +320,130 @@ export default function BOQPage() {
   /* ======================================================
      CALCULATIONS
   ====================================================== */
-  const totalBasePriceHT = categories
-    .filter(c => !c.is_option)
+  // Base categories (non-options)
+  const baseCategories = categories.filter(c => !c.is_option);
+  const optionCategories = categories.filter(c => c.is_option);
+  
+  const totalBasePriceHT = baseCategories
     .reduce((sum, c) => sum + Number(c.total_sale_price_ht || 0), 0);
 
-  const totalCostHT = categories
-    .filter(c => !c.is_option)
+  const totalBaseCostHT = baseCategories
     .reduce((sum, c) => sum + Number(c.total_cost_ht || 0), 0);
 
-  const totalProfitHT = totalBasePriceHT - totalCostHT;
+  const totalBaseProfitHT = totalBasePriceHT - totalBaseCostHT;
+  const totalBasePriceTTC = calculateTTC(totalBasePriceHT, vatRate);
 
-  const formatPrice = (price: number) => `Rs ${Number(price).toLocaleString()}`;
+  // Options
+  const totalOptionsPriceHT = optionCategories
+    .reduce((sum, c) => sum + Number(c.total_sale_price_ht || 0), 0);
+
+  const totalOptionsCostHT = optionCategories
+    .reduce((sum, c) => sum + Number(c.total_cost_ht || 0), 0);
+
+  const totalOptionsProfitHT = totalOptionsPriceHT - totalOptionsCostHT;
+  const totalOptionsPriceTTC = calculateTTC(totalOptionsPriceHT, vatRate);
+
+  const formatPrice = (price: number) => `Rs ${Number(price).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+
+  /* ======================================================
+     RENDER CATEGORY CARD
+  ====================================================== */
+  const renderCategoryCard = (category: BOQCategory) => (
+    <Card key={category.id}>
+      <CardHeader
+        className="cursor-pointer hover:bg-gray-50"
+        onClick={() => toggleCategory(category.id)}
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            {expandedCategories.includes(category.id) ? (
+              <ChevronDown className="h-5 w-5 text-gray-500" />
+            ) : (
+              <ChevronRight className="h-5 w-5 text-gray-500" />
+            )}
+            <CardTitle className="text-lg">{category.name}</CardTitle>
+            {category.is_option && (
+              <Badge variant="secondary">Option</Badge>
+            )}
+          </div>
+          
+          <div className="flex items-center gap-4">
+            <div className="text-right">
+              <p className="text-sm text-gray-500">Coût HT: {formatPrice(category.total_cost_ht)}</p>
+              <p className="text-sm text-green-600">Profit HT: {formatPrice(category.total_profit_ht)}</p>
+              <p className="font-bold text-orange-600">Vente HT: {formatPrice(category.total_sale_price_ht)}</p>
+              <p className="text-sm font-semibold text-blue-600">Vente TTC: {formatPrice(calculateTTC(category.total_sale_price_ht, vatRate))}</p>
+            </div>
+            
+            <div className="flex gap-1" onClick={e => e.stopPropagation()}>
+              <Button size="sm" variant="ghost" onClick={() => openEditCategory(category)}>
+                <Edit className="h-4 w-4" />
+              </Button>
+              <Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteCategory(category.id)}>
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </div>
+      </CardHeader>
+
+      {expandedCategories.includes(category.id) && (
+        <CardContent className="pt-0">
+          <div className="mb-4">
+            <Button size="sm" onClick={() => openNewLine(category.id)}>
+              <Plus className="h-4 w-4 mr-1" /> Ajouter une ligne
+            </Button>
+          </div>
+
+          {categoryLines[category.id] && categoryLines[category.id].length > 0 ? (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Description</TableHead>
+                  <TableHead className="text-right">Qté</TableHead>
+                  <TableHead>Unité</TableHead>
+                  <TableHead className="text-right">Coût Unit. HT</TableHead>
+                  <TableHead>Fournisseur</TableHead>
+                  <TableHead className="text-right">Marge %</TableHead>
+                  <TableHead className="text-right">Coût Total HT</TableHead>
+                  <TableHead className="text-right">Prix Vente HT</TableHead>
+                  <TableHead></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {categoryLines[category.id].map(line => (
+                  <TableRow key={line.id}>
+                    <TableCell className="font-medium whitespace-pre-line">{line.description}</TableCell>
+                    <TableCell className="text-right">{line.quantity}</TableCell>
+                    <TableCell>{line.unit}</TableCell>
+                    <TableCell className="text-right">{formatPrice(line.unit_cost_ht)}</TableCell>
+                    <TableCell>{line.supplier_name || '-'}</TableCell>
+                    <TableCell className="text-right">{line.margin_percent}%</TableCell>
+                    <TableCell className="text-right">{formatPrice(line.total_cost_ht)}</TableCell>
+                    <TableCell className="text-right font-semibold text-orange-600">
+                      {formatPrice(line.sale_price_ht)}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex gap-1">
+                        <Button size="sm" variant="ghost" onClick={() => openEditLine(line)}>
+                          <Edit className="h-3 w-3" />
+                        </Button>
+                        <Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteLine(line)}>
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          ) : (
+            <p className="text-gray-500 text-sm italic">Aucune ligne dans cette catégorie</p>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  );
 
   /* ======================================================
      RENDER
@@ -337,7 +454,7 @@ export default function BOQPage() {
       <div className="flex flex-col md:flex-row justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">BOQ - Bill of Quantities</h1>
-          <p className="text-gray-500 mt-1">Gestion des prix de base par modèle</p>
+          <p className="text-gray-500 mt-1">Gestion des prix de base et options par modèle (TVA: {vatRate}%)</p>
         </div>
 
         <div className="flex gap-2">
@@ -367,149 +484,169 @@ export default function BOQPage() {
         </div>
       </div>
 
-      {/* SUMMARY CARDS */}
+      {/* BLOCK A: PRIX DE BASE (non-options) */}
       {selectedModelId && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                  <Calculator className="h-5 w-5 text-blue-600" />
+        <div className="space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center">
+              <Calculator className="h-4 w-4 text-white" />
+            </div>
+            <h2 className="text-xl font-bold text-gray-900">A. Prix de Base</h2>
+          </div>
+          
+          {/* Summary cards for base prices */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center">
+                    <Package className="h-5 w-5 text-gray-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">Coût Total HT</p>
+                    <p className="text-xl font-bold text-gray-700">{formatPrice(totalBaseCostHT)}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm text-gray-500">Prix de Base HT</p>
-                  <p className="text-xl font-bold text-blue-600">{formatPrice(totalBasePriceHT)}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
 
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center">
-                  <Package className="h-5 w-5 text-gray-600" />
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
+                    <Tag className="h-5 w-5 text-green-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">Profit HT</p>
+                    <p className="text-xl font-bold text-green-600">{formatPrice(totalBaseProfitHT)}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm text-gray-500">Coût Total HT</p>
-                  <p className="text-xl font-bold text-gray-700">{formatPrice(totalCostHT)}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
 
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
-                  <Tag className="h-5 w-5 text-green-600" />
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center">
+                    <Calculator className="h-5 w-5 text-orange-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">Prix Vente HT</p>
+                    <p className="text-xl font-bold text-orange-600">{formatPrice(totalBasePriceHT)}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm text-gray-500">Profit HT</p>
-                  <p className="text-xl font-bold text-green-600">{formatPrice(totalProfitHT)}</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                    <Calculator className="h-5 w-5 text-blue-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">Prix Vente TTC</p>
+                    <p className="text-xl font-bold text-blue-600">{formatPrice(totalBasePriceTTC)}</p>
+                  </div>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Base categories list */}
+          {baseCategories.map(category => renderCategoryCard(category))}
+
+          {baseCategories.length === 0 && (
+            <Card>
+              <CardContent className="p-6 text-center">
+                <p className="text-gray-500 italic">Aucune catégorie de base pour ce modèle.</p>
+              </CardContent>
+            </Card>
+          )}
         </div>
       )}
 
-      {/* CATEGORIES LIST */}
-      {categories.map(category => (
-        <Card key={category.id}>
-          <CardHeader
-            className="cursor-pointer hover:bg-gray-50"
-            onClick={() => toggleCategory(category.id)}
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                {expandedCategories.includes(category.id) ? (
-                  <ChevronDown className="h-5 w-5 text-gray-500" />
-                ) : (
-                  <ChevronRight className="h-5 w-5 text-gray-500" />
-                )}
-                <CardTitle className="text-lg">{category.name}</CardTitle>
-                {category.is_option && (
-                  <Badge variant="secondary">Option</Badge>
-                )}
-              </div>
-              
-              <div className="flex items-center gap-4">
-                <div className="text-right">
-                  <p className="text-sm text-gray-500">Coût: {formatPrice(category.total_cost_ht)}</p>
-                  <p className="font-bold text-orange-600">Vente HT: {formatPrice(category.total_sale_price_ht)}</p>
-                  <p className="text-sm text-green-600">Profit: {formatPrice(category.total_profit_ht)}</p>
-                </div>
-                
-                <div className="flex gap-1" onClick={e => e.stopPropagation()}>
-                  <Button size="sm" variant="ghost" onClick={() => openEditCategory(category)}>
-                    <Edit className="h-4 w-4" />
-                  </Button>
-                  <Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteCategory(category.id)}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
+      {/* BLOCK B: OPTIONS */}
+      {selectedModelId && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-purple-500 rounded-lg flex items-center justify-center">
+              <Settings className="h-4 w-4 text-white" />
             </div>
-          </CardHeader>
+            <h2 className="text-xl font-bold text-gray-900">B. Options</h2>
+          </div>
+          
+          {/* Summary cards for options */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center">
+                    <Package className="h-5 w-5 text-gray-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">Coût Total HT</p>
+                    <p className="text-xl font-bold text-gray-700">{formatPrice(totalOptionsCostHT)}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
 
-          {expandedCategories.includes(category.id) && (
-            <CardContent className="pt-0">
-              <div className="mb-4">
-                <Button size="sm" onClick={() => openNewLine(category.id)}>
-                  <Plus className="h-4 w-4 mr-1" /> Ajouter une ligne
-                </Button>
-              </div>
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
+                    <Tag className="h-5 w-5 text-green-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">Profit HT</p>
+                    <p className="text-xl font-bold text-green-600">{formatPrice(totalOptionsProfitHT)}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
 
-              {categoryLines[category.id] && categoryLines[category.id].length > 0 ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Description</TableHead>
-                      <TableHead className="text-right">Qté</TableHead>
-                      <TableHead>Unité</TableHead>
-                      <TableHead className="text-right">Coût Unit. HT</TableHead>
-                      <TableHead>Fournisseur</TableHead>
-                      <TableHead className="text-right">Marge %</TableHead>
-                      <TableHead className="text-right">Coût Total HT</TableHead>
-                      <TableHead className="text-right">Prix Vente HT</TableHead>
-                      <TableHead></TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {categoryLines[category.id].map(line => (
-                      <TableRow key={line.id}>
-                        <TableCell className="font-medium whitespace-pre-line">{line.description}</TableCell>
-                        <TableCell className="text-right">{line.quantity}</TableCell>
-                        <TableCell>{line.unit}</TableCell>
-                        <TableCell className="text-right">{formatPrice(line.unit_cost_ht)}</TableCell>
-                        <TableCell>{line.supplier_name || '-'}</TableCell>
-                        <TableCell className="text-right">{line.margin_percent}%</TableCell>
-                        <TableCell className="text-right">{formatPrice(line.total_cost_ht)}</TableCell>
-                        <TableCell className="text-right font-semibold text-orange-600">
-                          {formatPrice(line.sale_price_ht)}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex gap-1">
-                            <Button size="sm" variant="ghost" onClick={() => openEditLine(line)}>
-                              <Edit className="h-3 w-3" />
-                            </Button>
-                            <Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteLine(line)}>
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              ) : (
-                <p className="text-gray-500 text-sm italic">Aucune ligne dans cette catégorie</p>
-              )}
-            </CardContent>
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center">
+                    <Calculator className="h-5 w-5 text-orange-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">Prix Vente HT</p>
+                    <p className="text-xl font-bold text-orange-600">{formatPrice(totalOptionsPriceHT)}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
+                    <Calculator className="h-5 w-5 text-purple-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">Prix Vente TTC</p>
+                    <p className="text-xl font-bold text-purple-600">{formatPrice(totalOptionsPriceTTC)}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Options categories list */}
+          {optionCategories.map(category => renderCategoryCard(category))}
+
+          {optionCategories.length === 0 && (
+            <Card>
+              <CardContent className="p-6 text-center">
+                <p className="text-gray-500 italic">Aucune option pour ce modèle. Créez une catégorie avec "Option" activé.</p>
+              </CardContent>
+            </Card>
           )}
-        </Card>
-      ))}
+        </div>
+      )}
 
       {categories.length === 0 && selectedModelId && (
         <Card>

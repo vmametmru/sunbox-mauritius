@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { useQuote, ModelOption } from '@/contexts/QuoteContext';
 import ConstructionBanner from '@/components/ConstructionBanner';
-import { useSiteSettings } from '@/hooks/use-site-settings';
+import { useSiteSettings, calculateTTC } from '@/hooks/use-site-settings';
 import { Switch } from '@/components/ui/switch';
 import { api } from '@/lib/api';
 
@@ -23,15 +23,43 @@ const ConfigurePage: React.FC = () => {
   const [options, setOptions] = useState<ModelOption[]>([]);
 
   const { data: siteSettings } = useSiteSettings();
-  const underConstruction = siteSettings?.siteUnderConstruction === true;
-  const ucMessage = siteSettings?.constructionMessage || '🚧 Page en construction';
+  const underConstruction = siteSettings?.site_under_construction === 'true';
+  const ucMessage = siteSettings?.under_construction_message || '🚧 Page en construction';
+  const vatRate = Number(siteSettings?.vat_rate) || 15;
+  
+  const model = quoteData.model;
 
   useEffect(() => {
-    if (!quoteData.model) navigate('/');
-  }, [quoteData.model, navigate]);
+    if (!model) navigate('/');
+  }, [model, navigate]);
 
-  if (!quoteData.model) return null;
-  const model = quoteData.model;
+  /* Load Options */
+  useEffect(() => {
+    const loadOptions = async () => {
+      if (!model?.id) return;
+      try {
+        // Load options from BOQ categories marked as is_option=true
+        const data = await api.getBOQOptions(model.id);
+        const mapped: ModelOption[] = data.map((o: Record<string, unknown>) => ({
+          id: Number(o.id),
+          model_id: model.id,
+          category_id: Number(o.id), // BOQ category id
+          category_name: String(o.name), // BOQ category name
+          name: String(o.name),
+          description: '',
+          // Calculate TTC from HT price
+          price: calculateTTC(Number(o.price_ht || 0), vatRate),
+          is_active: true,
+        }));
+        setOptions(mapped);
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    loadOptions();
+  }, [model?.id, vatRate]);
+
+  if (!model) return null;
 
   // 🔧 Fix BUG calcul total : s'assurer que .price est bien un number
   const calculateOptionsTotal = () => {
@@ -41,30 +69,6 @@ const ConfigurePage: React.FC = () => {
   const calculateSafeTotal = () => {
     const base = Number(model.base_price ?? 0);
     return base + calculateOptionsTotal();
-  };
-
-  /* Load Options */
-  useEffect(() => {
-    if (model.id) loadOptions();
-  }, [model.id]);
-
-  const loadOptions = async () => {
-    try {
-      const data = await api.getModelOptions(model.id);
-      const mapped: ModelOption[] = data.map((o: any) => ({
-        id: Number(o.id),
-        model_id: Number(o.model_id),
-        category_id: Number(o.category_id),
-        category_name: o.category_name || 'Autres',
-        name: o.name,
-        description: o.description,
-        price: Number(o.price),
-        is_active: Boolean(o.is_active),
-      }));
-      setOptions(mapped);
-    } catch (err) {
-      console.error(err);
-    }
   };
 
   /* Regrouper par catégorie */
