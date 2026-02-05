@@ -18,6 +18,17 @@ interface BOQBaseCategory {
   lines: BOQLine[];
 }
 
+interface BOQOption {
+  id: number;
+  name: string;
+  display_order: number;
+  price_ht: string;
+}
+
+// Constants for BOQ options handling
+const BOQ_OPTION_ID_OFFSET = 1000000;
+const BOQ_OPTIONS_CATEGORY_ID = -1;
+
 interface ConfigureModalProps {
   open: boolean;
   onClose: () => void;
@@ -27,6 +38,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
   const { quoteData, toggleOption, calculateTotal, calculateOptionsTotal } = useQuote();
   const [expandedCategories, setExpandedCategories] = useState<string[]>([]);
   const [options, setOptions] = useState<ModelOption[]>([]);
+  const [boqOptions, setBOQOptions] = useState<ModelOption[]>([]);
   const [baseCategories, setBaseCategories] = useState<BOQBaseCategory[]>([]);
   const [lightbox, setLightbox] = useState<string | null>(null);
   
@@ -38,6 +50,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
   useEffect(() => {
     if (open && model?.id) {
       loadOptions();
+      loadBOQOptions();
       loadBaseCategories();
     }
   }, [open, model?.id]);
@@ -61,6 +74,27 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
     }
   };
 
+  const loadBOQOptions = async () => {
+    if (!model?.id) return;
+    try {
+      const data = await api.getBOQOptions(model.id);
+      // Map BOQ options to ModelOption format with offset ID to avoid conflicts
+      const mapped: ModelOption[] = data.map((o: BOQOption) => ({
+        id: Number(o.id) + BOQ_OPTION_ID_OFFSET,
+        model_id: model.id,
+        category_id: BOQ_OPTIONS_CATEGORY_ID,
+        category_name: 'Options BOQ',
+        name: o.name,
+        description: '',
+        price: parseFloat(o.price_ht),
+        is_active: true,
+      }));
+      setBOQOptions(mapped);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const loadBaseCategories = async () => {
     try {
       const data = await api.getBOQBaseCategories(model!.id);
@@ -70,7 +104,10 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
     }
   };
 
-  const groupedOptions = options
+  // Combine regular options and BOQ options
+  const allOptions = [...options, ...boqOptions];
+
+  const groupedOptions = allOptions
     .filter(opt => opt.is_active)
     .reduce((acc, opt) => {
       const category = opt.category_name || 'Autres';
