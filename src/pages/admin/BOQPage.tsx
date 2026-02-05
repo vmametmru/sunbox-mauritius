@@ -343,7 +343,7 @@ export default function BOQPage() {
   const totalOptionsProfitHT = totalOptionsPriceHT - totalOptionsCostHT;
   const totalOptionsPriceTTC = calculateTTC(totalOptionsPriceHT, vatRate);
 
-  const formatPrice = (price: number) => `Rs ${Number(price).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  const formatPrice = (price: number) => `Rs ${price.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 
   /* ======================================================
      RENDER CATEGORY CARD
