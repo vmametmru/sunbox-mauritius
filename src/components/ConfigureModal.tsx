@@ -24,7 +24,7 @@ interface ConfigureModalProps {
 }
 
 const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
-  const { quoteData, toggleOption, calculateTotal } = useQuote();
+  const { quoteData, toggleOption, calculateTotal, calculateOptionsTotal } = useQuote();
   const [expandedCategories, setExpandedCategories] = useState<string[]>([]);
   const [options, setOptions] = useState<ModelOption[]>([]);
   const [baseCategories, setBaseCategories] = useState<BOQBaseCategory[]>([]);
@@ -156,11 +156,25 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
           )}
 
           {/* Total */}
-          <div className="bg-gray-50 rounded-lg p-4 flex justify-between items-center">
-            <p className="text-sm text-gray-500">Total estimé TTC</p>
-            <p className="text-xl font-bold text-gray-800">
-              Rs {calculateTotal().toLocaleString()}
-            </p>
+          <div className="bg-gray-50 rounded-lg p-4 space-y-2">
+            <div className="flex justify-between items-center">
+              <p className="text-sm text-gray-500">Prix de base TTC</p>
+              <p className="text-sm font-medium text-gray-700">
+                Rs {Number(model.base_price ?? 0).toLocaleString()}
+              </p>
+            </div>
+            <div className="flex justify-between items-center">
+              <p className="text-sm text-gray-500">Total options TTC</p>
+              <p className="text-sm font-medium text-gray-700">
+                Rs {calculateOptionsTotal().toLocaleString()}
+              </p>
+            </div>
+            <div className="flex justify-between items-center pt-2 border-t border-gray-200">
+              <p className="text-sm text-gray-500">Total général TTC</p>
+              <p className="text-xl font-bold text-gray-800">
+                Rs {calculateTotal().toLocaleString()}
+              </p>
+            </div>
           </div>
 
           {/* Options */}
