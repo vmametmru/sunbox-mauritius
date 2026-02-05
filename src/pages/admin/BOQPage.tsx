@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
   SelectContent,
@@ -478,7 +479,7 @@ export default function BOQPage() {
                   <TableBody>
                     {categoryLines[category.id].map(line => (
                       <TableRow key={line.id}>
-                        <TableCell className="font-medium">{line.description}</TableCell>
+                        <TableCell className="font-medium whitespace-pre-line">{line.description}</TableCell>
                         <TableCell className="text-right">{line.quantity}</TableCell>
                         <TableCell>{line.unit}</TableCell>
                         <TableCell className="text-right">{formatPrice(line.unit_cost_ht)}</TableCell>
@@ -604,12 +605,13 @@ export default function BOQPage() {
             <div className="space-y-4">
               <div>
                 <Label>Description *</Label>
-                <Input
+                <Textarea
                   value={editingLine.description || ''}
                   onChange={(e) =>
                     setEditingLine({ ...editingLine, description: e.target.value })
                   }
                   placeholder="Ex: Location machine, Ciment, Main d'oeuvre..."
+                  rows={3}
                 />
               </div>
 

@@ -261,7 +261,7 @@ export default function OptionsPage() {
               <div key={opt.id} className="px-6 py-3 flex justify-between items-center hover:bg-gray-50">
                 <div>
                   <p className="font-medium">{opt.name}</p>
-                  {opt.description && <p className="text-sm text-gray-500">{opt.description}</p>}
+                  {opt.description && <p className="text-sm text-gray-500 whitespace-pre-line">{opt.description}</p>}
                 </div>
                 <div className="flex items-center gap-4">
                   <span className="font-semibold text-orange-600">{formatPrice(opt.price)}</span>
