@@ -80,16 +80,31 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
     try {
       const data = await api.getBOQOptions(model.id);
       // Map BOQ options to ModelOption format with offset ID to avoid conflicts
-      const mapped: ModelOption[] = data.map((o: BOQOption) => ({
-        id: Number(o.id) + BOQ_OPTION_ID_OFFSET,
-        model_id: model.id,
-        category_id: BOQ_OPTIONS_CATEGORY_ID,
-        category_name: 'Options BOQ',
-        name: o.name,
-        description: '',
-        price: parseFloat(o.price_ht),
-        is_active: true,
-      }));
+      // Also fetch lines for each option category to build the description
+      const mapped: ModelOption[] = await Promise.all(
+        data.map(async (o: BOQOption) => {
+          // Fetch lines for this option category
+          let description = '';
+          try {
+            const lines = await api.getBOQCategoryLines(o.id);
+            if (lines && lines.length > 0) {
+              description = lines.map((line: BOQLine) => `• ${line.description}`).join('\n');
+            }
+          } catch (e) {
+            console.error('Error loading BOQ lines for option', o.id, e);
+          }
+          return {
+            id: Number(o.id) + BOQ_OPTION_ID_OFFSET,
+            model_id: model.id,
+            category_id: BOQ_OPTIONS_CATEGORY_ID,
+            category_name: 'Options BOQ',
+            name: o.name,
+            description,
+            price: parseFloat(o.price_ht),
+            is_active: true,
+          };
+        })
+      );
       setBOQOptions(mapped);
     } catch (err) {
       console.error(err);
@@ -188,16 +203,22 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                 <Check className="w-4 h-4" />
                 Inclus dans le prix de base
               </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="columns-1 md:columns-2 gap-4">
                 {baseCategories.map(cat => (
-                  <div key={cat.id} className="space-y-1">
-                    <p className="font-medium text-green-700 text-sm">{cat.name}</p>
+                  <div key={cat.id} className="inline-block w-full mb-2 break-inside-avoid">
+                    <span className="font-medium text-green-700 text-sm">{cat.name}</span>
                     {cat.lines.length > 0 && (
-                      <ul className="text-xs text-gray-600 list-disc list-inside pl-2 space-y-0.5">
-                        {cat.lines.map(line => (
-                          <li key={line.id}>{line.description}</li>
-                        ))}
-                      </ul>
+                      <>
+                        <span className="text-gray-600 text-xs">: </span>
+                        <span className="text-xs text-gray-600">
+                          {cat.lines.map((line, idx) => (
+                            <React.Fragment key={line.id}>
+                              {line.description}
+                              {idx < cat.lines.length - 1 && ', '}
+                            </React.Fragment>
+                          ))}
+                        </span>
+                      </>
                     )}
                   </div>
                 ))}
