@@ -226,9 +226,11 @@ export default function OptionCategoriesPage() {
                   <Button size="sm" variant="ghost" onClick={() => openEditCategory(category)}>
                     <Edit className="h-4 w-4" />
                   </Button>
-                  <Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteCategory(category.id!)}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  {category.id && (
+                    <Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteCategory(category.id!)}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
                 </div>
               </div>
               
