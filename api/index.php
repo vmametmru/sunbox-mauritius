@@ -466,10 +466,12 @@ try {
             
             $stmt = $db->prepare("
                 SELECT bc.*, 
+                    mi.url AS image_url,
                     COALESCE(SUM(ROUND(bl.quantity * bl.unit_cost_ht, 2)), 0) AS total_cost_ht,
                     COALESCE(SUM(ROUND(bl.quantity * bl.unit_cost_ht * (1 + bl.margin_percent / 100), 2)), 0) AS total_sale_price_ht
                 FROM boq_categories bc
                 LEFT JOIN boq_lines bl ON bc.id = bl.category_id
+                LEFT JOIN model_images mi ON bc.image_id = mi.id
                 WHERE bc.model_id = ?
                 GROUP BY bc.id
                 ORDER BY bc.display_order ASC, bc.name ASC
@@ -489,14 +491,15 @@ try {
         case 'create_boq_category': {
             validateRequired($body, ['model_id', 'name']);
             $stmt = $db->prepare("
-                INSERT INTO boq_categories (model_id, name, is_option, display_order)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO boq_categories (model_id, name, is_option, display_order, image_id)
+                VALUES (?, ?, ?, ?, ?)
             ");
             $stmt->execute([
                 (int)$body['model_id'],
                 sanitize($body['name']),
                 (bool)($body['is_option'] ?? false),
                 (int)($body['display_order'] ?? 0),
+                !empty($body['image_id']) ? (int)$body['image_id'] : null,
             ]);
             ok(['id' => $db->lastInsertId()]);
             break;
@@ -506,13 +509,14 @@ try {
             validateRequired($body, ['id']);
             $stmt = $db->prepare("
                 UPDATE boq_categories SET
-                    name = ?, is_option = ?, display_order = ?, updated_at = NOW()
+                    name = ?, is_option = ?, display_order = ?, image_id = ?, updated_at = NOW()
                 WHERE id = ?
             ");
             $stmt->execute([
                 sanitize($body['name']),
                 (bool)($body['is_option'] ?? false),
                 (int)($body['display_order'] ?? 0),
+                !empty($body['image_id']) ? (int)$body['image_id'] : null,
                 (int)$body['id'],
             ]);
             ok();
