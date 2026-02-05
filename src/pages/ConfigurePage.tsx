@@ -90,13 +90,15 @@ const ConfigurePage: React.FC = () => {
     return base + calculateOptionsTotal();
   };
 
-  /* Regrouper par catégorie */
-  const groupedOptions = options.reduce((acc, opt) => {
-    const category = opt.category_name || 'Autres';
-    if (!acc[category]) acc[category] = [];
-    acc[category].push(opt);
-    return acc;
-  }, {} as Record<string, ModelOption[]>);
+  /* Regrouper par catégorie - afficher uniquement les options actives */
+  const groupedOptions = options
+    .filter(opt => opt.is_active)
+    .reduce((acc, opt) => {
+      const category = opt.category_name || 'Autres';
+      if (!acc[category]) acc[category] = [];
+      acc[category].push(opt);
+      return acc;
+    }, {} as Record<string, ModelOption[]>);
 
   const toggleCategory = (cat: string) => {
     setExpandedCategories(prev =>
