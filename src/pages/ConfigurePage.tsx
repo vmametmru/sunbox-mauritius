@@ -132,19 +132,19 @@ const ConfigurePage: React.FC = () => {
 
           <div className="text-right space-y-1">
             <div className="flex justify-between items-center gap-8">
-              <p className="text-xs text-gray-500">Prix de base</p>
+              <p className="text-xs text-gray-500">Prix de base TTC</p>
               <p className="text-sm font-medium text-gray-700">
                 Rs {Number(model.base_price ?? 0).toLocaleString()}
               </p>
             </div>
             <div className="flex justify-between items-center gap-8">
-              <p className="text-xs text-gray-500">Total options</p>
+              <p className="text-xs text-gray-500">Total options TTC</p>
               <p className="text-sm font-medium text-gray-700">
                 Rs {calculateOptionsTotal().toLocaleString()}
               </p>
             </div>
             <div className="flex justify-between items-center gap-8 pt-1 border-t">
-              <p className="text-xs text-gray-500">Total général</p>
+              <p className="text-xs text-gray-500">Total général TTC</p>
               <p className="text-lg font-bold text-gray-800">
                 Rs {calculateSafeTotal().toLocaleString()}
               </p>

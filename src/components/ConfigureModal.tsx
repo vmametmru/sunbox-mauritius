@@ -19,8 +19,8 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
   const model = quoteData.model;
 
   useEffect(() => {
-    if (model?.id) loadOptions();
-  }, [model?.id]);
+    if (open && model?.id) loadOptions();
+  }, [open, model?.id]);
 
   const loadOptions = async () => {
     try {
@@ -104,7 +104,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
 
           {/* Total */}
           <div className="bg-gray-50 rounded-lg p-4 flex justify-between items-center">
-            <p className="text-sm text-gray-500">Total estimé</p>
+            <p className="text-sm text-gray-500">Total estimé TTC</p>
             <p className="text-xl font-bold text-gray-800">
               Rs {calculateTotal().toLocaleString()}
             </p>
