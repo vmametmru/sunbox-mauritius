@@ -141,6 +141,122 @@ export const api = {
   },
 
   /* =====================================================
+     SUPPLIERS (Fournisseurs)
+  ===================================================== */
+  getSuppliers(activeOnly: boolean = true) {
+    return this.query('get_suppliers', { active_only: activeOnly });
+  },
+
+  createSupplier(supplier: {
+    name: string;
+    city?: string;
+    phone?: string;
+    email?: string;
+    is_active?: boolean;
+  }) {
+    return this.query('create_supplier', supplier);
+  },
+
+  updateSupplier(supplier: {
+    id: number;
+    name: string;
+    city?: string;
+    phone?: string;
+    email?: string;
+    is_active?: boolean;
+  }) {
+    return this.query('update_supplier', supplier);
+  },
+
+  deleteSupplier(id: number) {
+    return this.query('delete_supplier', { id });
+  },
+
+  /* =====================================================
+     BOQ CATEGORIES
+  ===================================================== */
+  getBOQCategories(modelId: number) {
+    return this.query('get_boq_categories', { model_id: modelId });
+  },
+
+  createBOQCategory(category: {
+    model_id: number;
+    name: string;
+    is_option?: boolean;
+    display_order?: number;
+  }) {
+    return this.query('create_boq_category', category);
+  },
+
+  updateBOQCategory(category: {
+    id: number;
+    name: string;
+    is_option?: boolean;
+    display_order?: number;
+  }) {
+    return this.query('update_boq_category', category);
+  },
+
+  deleteBOQCategory(id: number) {
+    return this.query('delete_boq_category', { id });
+  },
+
+  /* =====================================================
+     BOQ LINES
+  ===================================================== */
+  getBOQLines(categoryId: number) {
+    return this.query('get_boq_lines', { category_id: categoryId });
+  },
+
+  createBOQLine(line: {
+    category_id: number;
+    description: string;
+    quantity?: number;
+    unit?: string;
+    unit_cost_ht?: number;
+    supplier_id?: number | null;
+    margin_percent?: number;
+    display_order?: number;
+  }) {
+    return this.query('create_boq_line', line);
+  },
+
+  updateBOQLine(line: {
+    id: number;
+    description: string;
+    quantity?: number;
+    unit?: string;
+    unit_cost_ht?: number;
+    supplier_id?: number | null;
+    margin_percent?: number;
+    display_order?: number;
+  }) {
+    return this.query('update_boq_line', line);
+  },
+
+  deleteBOQLine(id: number) {
+    return this.query('delete_boq_line', { id });
+  },
+
+  /* =====================================================
+     BOQ UTILITIES
+  ===================================================== */
+  cloneBOQ(fromModelId: number, toModelId: number) {
+    return this.query('clone_boq', {
+      from_model_id: fromModelId,
+      to_model_id: toModelId,
+    });
+  },
+
+  getModelBOQPrice(modelId: number) {
+    return this.query('get_model_boq_price', { model_id: modelId });
+  },
+
+  getBOQOptions(modelId: number) {
+    return this.query('get_boq_options', { model_id: modelId });
+  },
+
+  /* =====================================================
      SETTINGS
   ===================================================== */
   getSettings(group?: string) {

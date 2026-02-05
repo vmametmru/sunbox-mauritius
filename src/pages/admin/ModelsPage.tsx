@@ -41,6 +41,10 @@ interface Model {
   type: 'container' | 'pool';
   description: string;
   base_price: number;
+  calculated_base_price?: number; // BOQ-calculated price if available
+  boq_base_price_ht?: number;
+  boq_cost_ht?: number;
+  price_source?: 'boq' | 'manual';
   surface_m2: number;
   bedrooms?: number;
   bathrooms?: number;
@@ -264,11 +268,23 @@ export default function ModelsPage() {
               <p className="text-sm text-gray-500 mt-1 line-clamp-2">
                 {model.description}
               </p>
-              <div className="flex items-center justify-between mt-4">
-                <span className="text-xl font-bold text-orange-600">
-                  {formatPrice(model.base_price)}
-                </span>
-                <div className="flex gap-2">
+              <div className="mt-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xl font-bold text-orange-600">
+                    {formatPrice(model.calculated_base_price ?? model.base_price)}
+                  </span>
+                  {model.price_source === 'boq' ? (
+                    <Badge className="bg-green-500 text-xs">BOQ</Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-xs">Manuel</Badge>
+                  )}
+                </div>
+                {model.price_source === 'boq' && model.boq_cost_ht && (
+                  <p className="text-xs text-gray-500">
+                    Coût: {formatPrice(model.boq_cost_ht)} | Profit: {formatPrice((model.boq_base_price_ht || 0) - model.boq_cost_ht)}
+                  </p>
+                )}
+                <div className="flex gap-2 mt-3">
                   <Button size="sm" variant="outline" onClick={() => navigate(`/configure?id=${model.id}`)}>
                     <Settings className="h-4 w-4" />
                   </Button>

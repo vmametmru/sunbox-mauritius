@@ -20,6 +20,8 @@ interface Model {
   type: 'container' | 'pool';
   description: string;
   base_price: number;
+  calculated_base_price?: number; // BOQ-calculated price if available
+  price_source?: 'boq' | 'manual';
   surface_m2: number;
   bedrooms?: number;
   bathrooms?: number;
@@ -56,12 +58,17 @@ export default function ModelsPage() {
   const { setSelectedModel } = useQuote();
   const [showConfigurator, setShowConfigurator] = useState(false);
 
+  // Helper to get the display price (BOQ price if available, otherwise manual base_price)
+  const getDisplayPrice = (model: Model) => {
+    return Number(model.calculated_base_price ?? model.base_price ?? 0);
+  };
+
   useEffect(() => {
     api.getModels(undefined, true).then((data) => {
       setModels(data);
 
       const surfaces = data.map((m: any) => Number(m.surface_m2) || 0);
-      const prices = data.map((m: any) => Number(m.base_price) || 0);
+      const prices = data.map((m: any) => Number(m.calculated_base_price ?? m.base_price) || 0);
 
       const minSurface = Math.min(...surfaces);
       const maxSurface = Math.max(...surfaces);
@@ -84,7 +91,12 @@ export default function ModelsPage() {
   }, []);
 
   const openConfigurator = (model: Model) => {
-    setSelectedModel(model);
+    // Update the model with calculated price before sending to configurator
+    const modelWithPrice = {
+      ...model,
+      base_price: getDisplayPrice(model),
+    };
+    setSelectedModel(modelWithPrice);
     setShowConfigurator(true);
   };
 
@@ -103,7 +115,10 @@ export default function ModelsPage() {
     }
 
     if (m.surface_m2 < filters.surfaceMin || m.surface_m2 > filters.surfaceMax) return false;
-    if (m.base_price < filters.priceMin || m.base_price > filters.priceMax) return false;
+    
+    // Use calculated price for filtering
+    const modelPrice = getDisplayPrice(m);
+    if (modelPrice < filters.priceMin || modelPrice > filters.priceMax) return false;
 
     return true;
   });
@@ -152,7 +167,7 @@ export default function ModelsPage() {
               <div className="p-4 space-y-1">
                 <h2 className="text-xl font-bold">{model.name}</h2>
                 <p className="text-gray-600 text-sm">{model.surface_m2} m²</p>
-                <p className="text-orange-600 font-semibold">{formatPrice(model.base_price)} TTC</p>
+                <p className="text-orange-600 font-semibold">{formatPrice(getDisplayPrice(model))} HT</p>
 
                 <div className="pt-3">
                   <Button variant="outline" onClick={() => openConfigurator(model)}>
