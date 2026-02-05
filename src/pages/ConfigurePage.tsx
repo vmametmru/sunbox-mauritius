@@ -5,13 +5,26 @@ import {
   ChevronDown,
   ChevronUp,
   X,
-  ZoomIn
+  ZoomIn,
+  Check
 } from 'lucide-react';
 import { useQuote, ModelOption } from '@/contexts/QuoteContext';
 import ConstructionBanner from '@/components/ConstructionBanner';
 import { useSiteSettings, calculateTTC } from '@/hooks/use-site-settings';
 import { Switch } from '@/components/ui/switch';
 import { api } from '@/lib/api';
+
+interface BOQLine {
+  id: number;
+  description: string;
+}
+
+interface BOQBaseCategory {
+  id: number;
+  name: string;
+  display_order: number;
+  lines: BOQLine[];
+}
 
 const ConfigurePage: React.FC = () => {
   const navigate = useNavigate();
@@ -21,6 +34,7 @@ const ConfigurePage: React.FC = () => {
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const [lightboxTitle, setLightboxTitle] = useState('');
   const [options, setOptions] = useState<ModelOption[]>([]);
+  const [baseCategories, setBaseCategories] = useState<BOQBaseCategory[]>([]);
 
   const { data: siteSettings } = useSiteSettings();
   const underConstruction = siteSettings?.site_under_construction === 'true';
@@ -33,33 +47,38 @@ const ConfigurePage: React.FC = () => {
     if (!model) navigate('/');
   }, [model, navigate]);
 
-  /* Load Options */
+  /* Load Options and Base Categories */
   useEffect(() => {
-    const loadOptions = async () => {
-      if (!model?.id) return;
-      try {
-        // Load options from BOQ categories marked as is_option=true
-        const data = await api.getBOQOptions(model.id);
-        const mapped: ModelOption[] = data.map((o: Record<string, unknown>) => ({
-          id: Number(o.id),
-          model_id: model.id,
-          category_id: Number(o.id), // BOQ category id
-          category_name: String(o.name), // BOQ category name
-          name: String(o.name),
-          description: '',
-          // Calculate TTC from HT price
-          price: calculateTTC(Number(o.price_ht || 0), vatRate),
-          is_active: true,
-        }));
-        setOptions(mapped);
-      } catch (err) {
-        console.error(err);
-      }
-    };
-    loadOptions();
-  }, [model?.id, vatRate]);
+    if (quoteData.model?.id) {
+      loadOptionsAndCategories(quoteData.model.id);
+    }
+  }, [quoteData.model?.id]);
 
-  if (!model) return null;
+  const loadOptionsAndCategories = async (modelId: number) => {
+    try {
+      const [optionsData, categoriesData] = await Promise.all([
+        api.getModelOptions(modelId),
+        api.getBOQBaseCategories(modelId)
+      ]);
+
+      const mapped: ModelOption[] = optionsData.map((o: any) => ({
+        id: Number(o.id),
+        model_id: Number(o.model_id),
+        category_id: Number(o.category_id),
+        category_name: o.category_name || 'Autres',
+        name: o.name,
+        description: o.description,
+        price: Number(o.price),
+        is_active: Boolean(o.is_active),
+      }));
+      setOptions(mapped);
+      setBaseCategories(categoriesData);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  if (!quoteData.model) return null;
 
   // 🔧 Fix BUG calcul total : s'assurer que .price est bien un number
   const calculateOptionsTotal = () => {
@@ -205,7 +224,7 @@ const ConfigurePage: React.FC = () => {
             {model.type === 'container' && (
               <>
                 <li>{model.bedrooms} chambre(s)</li>
-                <li>{model.container_20ft_count} × 20’ • {model.container_40ft_count} × 40’</li>
+                <li>{model.container_20ft_count} × 20' • {model.container_40ft_count} × 40'</li>
               </>
             )}
             {model.type === 'pool' && (
@@ -216,6 +235,30 @@ const ConfigurePage: React.FC = () => {
             )}
           </ul>
         </div>
+        {/* INCLUS DANS LE PRIX DE BASE */}
+        {baseCategories.length > 0 && (
+          <div className="bg-green-50 border border-green-200 p-6 rounded shadow">
+            <h3 className="text-lg font-semibold text-green-800 mb-4 flex items-center gap-2">
+              <Check className="w-5 h-5" />
+              Inclus dans le prix de base
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {baseCategories.map(cat => (
+                <div key={cat.id} className="space-y-1">
+                  <p className="font-medium text-green-700">{cat.name}</p>
+                  {cat.lines.length > 0 && (
+                    <ul className="text-sm text-gray-600 list-disc list-inside pl-2 space-y-0.5">
+                      {cat.lines.map(line => (
+                        <li key={line.id}>{line.description}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
 
         {/* OPTIONS */}
         <div className="space-y-6">
@@ -238,11 +281,14 @@ const ConfigurePage: React.FC = () => {
                         key={opt.id}
                         className="flex justify-between items-center px-4 py-3 hover:bg-gray-50 cursor-pointer"
                       >
-                        <div>
+                        <div className="flex-1 mr-4">
                           <p className="font-medium">{opt.name}</p>
-                          <p className="text-sm text-gray-500">
-                            Rs {Number(opt.price).toLocaleString()}
-                          </p>
+                          {opt.description && (
+                            <p className="text-sm text-gray-500 whitespace-pre-line mt-1">
+                              {opt.description}
+                            </p>
+                          )}
+                          <p className={`text-sm text-orange-600 font-medium ${opt.description ? 'mt-2' : 'mt-1'}`}>Rs {Number(opt.price).toLocaleString()}</p>
                         </div>
                         <Switch
                           checked={isSelected(opt.id)}

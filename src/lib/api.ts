@@ -256,6 +256,14 @@ export const api = {
     return this.query('get_boq_options', { model_id: modelId });
   },
 
+  getBOQBaseCategories(modelId: number) {
+    return this.query('get_boq_base_categories', { model_id: modelId });
+  },
+
+  getBOQCategoryLines(categoryId: number) {
+    return this.query('get_boq_category_lines', { category_id: categoryId });
+  },
+
   /* =====================================================
      SETTINGS
   ===================================================== */
