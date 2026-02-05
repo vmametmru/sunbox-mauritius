@@ -70,12 +70,14 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
     }
   };
 
-  const groupedOptions = options.reduce((acc, opt) => {
-    const category = opt.category_name || 'Autres';
-    if (!acc[category]) acc[category] = [];
-    acc[category].push(opt);
-    return acc;
-  }, {} as Record<string, ModelOption[]>);
+  const groupedOptions = options
+    .filter(opt => opt.is_active)
+    .reduce((acc, opt) => {
+      const category = opt.category_name || 'Autres';
+      if (!acc[category]) acc[category] = [];
+      acc[category].push(opt);
+      return acc;
+    }, {} as Record<string, ModelOption[]>);
 
   const toggleCategory = (cat: string) => {
     setExpandedCategories(prev =>
