@@ -46,8 +46,23 @@ function imgUrl(path: string): string {
   return '/' + path.replace(/^\/+/, '');
 }
 
+function getMediaTypeLabel(mediaType: string): string {
+  switch (mediaType) {
+    case 'photo': return 'Photo';
+    case 'plan': return 'Plan';
+    case 'bandeau': return 'Bandeau';
+    case 'category_image': return 'Catégorie';
+    default: return mediaType;
+  }
+}
+
 export default function MediaPage() {
   const { toast } = useToast();
+
+  // File input refs for resetting after upload
+  const bannerFileInputRef = React.useRef<HTMLInputElement>(null);
+  const categoryFileInputRef = React.useRef<HTMLInputElement>(null);
+  const modelFileInputRef = React.useRef<HTMLInputElement>(null);
 
   // Current tab
   const [activeTab, setActiveTab] = useState<string>("bandeau");
@@ -180,11 +195,11 @@ export default function MediaPage() {
   }, [activeTab]);
 
   useEffect(() => {
-    // Reload model images when filters change
+    // Reload model images when filters change (only on models tab)
     if (activeTab === "models") {
       loadModelImages();
     }
-  }, [filterModelId, filterImageType]);
+  }, [filterModelId, filterImageType, activeTab]);
 
   // ===============================
   // UPLOAD FUNCTIONS
@@ -209,9 +224,8 @@ export default function MediaPage() {
       if (!r.ok || !j?.success) throw new Error(j?.error || "Upload bandeau échoué");
 
       setBannerFile(null);
-      // Reset the file input
-      const fileInput = document.getElementById('banner-file-input') as HTMLInputElement;
-      if (fileInput) fileInput.value = '';
+      // Reset the file input using ref
+      if (bannerFileInputRef.current) bannerFileInputRef.current.value = '';
       
       await loadBannerImages();
       toast({ title: "OK", description: "Image bandeau uploadée" });
@@ -242,9 +256,8 @@ export default function MediaPage() {
       if (!r.ok || !j?.success) throw new Error(j?.error || "Upload image catégorie échoué");
 
       setCategoryImageFile(null);
-      // Reset the file input
-      const fileInput = document.getElementById('category-file-input') as HTMLInputElement;
-      if (fileInput) fileInput.value = '';
+      // Reset the file input using ref
+      if (categoryFileInputRef.current) categoryFileInputRef.current.value = '';
       
       await loadCategoryImages();
       toast({ title: "OK", description: "Image de catégorie uploadée" });
@@ -274,9 +287,8 @@ export default function MediaPage() {
       if (!r.ok || !j?.success) throw new Error(j?.error || "Upload failed");
 
       setModelFile(null);
-      // Reset the file input
-      const fileInput = document.getElementById('model-file-input') as HTMLInputElement;
-      if (fileInput) fileInput.value = '';
+      // Reset the file input using ref
+      if (modelFileInputRef.current) modelFileInputRef.current.value = '';
       
       await loadModelImages();
       toast({ title: "OK", description: "Image uploadée" });
@@ -343,7 +355,7 @@ export default function MediaPage() {
           {item.media_type && (
             <div className="absolute top-2 right-2">
               <Badge variant="secondary" className="capitalize">
-                {item.media_type === 'photo' ? 'Photo' : item.media_type === 'plan' ? 'Plan' : item.media_type}
+                {getMediaTypeLabel(item.media_type)}
               </Badge>
             </div>
           )}
@@ -417,7 +429,7 @@ export default function MediaPage() {
                   <div className="flex-1">
                     <label className="text-sm text-gray-600">Fichier image</label>
                     <Input 
-                      id="banner-file-input"
+                      ref={bannerFileInputRef}
                       type="file" 
                       accept="image/*" 
                       onChange={(e) => setBannerFile(e.target.files?.[0] || null)} 
@@ -466,7 +478,7 @@ export default function MediaPage() {
                   <div className="flex-1">
                     <label className="text-sm text-gray-600">Fichier image</label>
                     <Input 
-                      id="category-file-input"
+                      ref={categoryFileInputRef}
                       type="file" 
                       accept="image/*" 
                       onChange={(e) => setCategoryImageFile(e.target.files?.[0] || null)} 
@@ -561,7 +573,7 @@ export default function MediaPage() {
                   <div>
                     <label className="text-sm text-gray-600">Fichier image</label>
                     <Input 
-                      id="model-file-input"
+                      ref={modelFileInputRef}
                       type="file" 
                       accept="image/*" 
                       onChange={(e) => setModelFile(e.target.files?.[0] || null)} 
