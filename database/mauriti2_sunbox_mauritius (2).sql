@@ -233,7 +233,7 @@ INSERT INTO `models` (`id`, `name`, `type`, `description`, `base_price`, `surfac
 CREATE TABLE `model_images` (
   `id` int NOT NULL,
   `model_id` int NOT NULL,
-  `media_type` enum('photo','plan','bandeau') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'photo',
+  `media_type` enum('photo','plan','bandeau','category_image') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'photo',
   `file_path` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `is_primary` tinyint(1) NOT NULL DEFAULT '0',
   `sort_order` int NOT NULL DEFAULT '0',
