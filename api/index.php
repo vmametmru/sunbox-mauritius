@@ -803,10 +803,16 @@ try {
                         INSERT INTO quote_options (quote_id, option_id, option_name, option_price)
                         VALUES (?, ?, ?, ?)
                     ");
+                    // BOQ options have IDs offset by 1000000 and don't exist in model_options table
+                    // Set option_id to NULL for these to avoid foreign key constraint violation
+                    $BOQ_OPTION_ID_OFFSET = 1000000;
                     foreach ($body['selected_options'] as $opt) {
+                        $optionId = (int)$opt['option_id'];
+                        // If option_id >= offset, it's a BOQ option - set to NULL for FK constraint
+                        $optionIdValue = ($optionId >= $BOQ_OPTION_ID_OFFSET) ? null : $optionId;
                         $optStmt->execute([
                             $quoteId,
-                            (int)$opt['option_id'],
+                            $optionIdValue,
                             sanitize($opt['option_name']),
                             (float)$opt['option_price'],
                         ]);
