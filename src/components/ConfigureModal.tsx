@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ChevronUp, ChevronDown, ZoomIn, Check, User, Mail, Phone, MapPin, MessageSquare, Loader2, ArrowLeft, ArrowRight, CheckCircle } from 'lucide-react';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 import { useQuote, ModelOption } from '@/contexts/QuoteContext';
@@ -262,6 +263,12 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="w-full max-w-4xl h-[90vh] overflow-y-auto">
+        {/* Accessibility: Hidden title and description for screen readers */}
+        <VisuallyHidden>
+          <DialogTitle>Configuration du modèle {model?.name}</DialogTitle>
+          <DialogDescription>Configurez les options et vos coordonnées pour demander un devis</DialogDescription>
+        </VisuallyHidden>
+
         {/* Lightbox */}
         {lightbox && (
           <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4" onClick={() => setLightbox(null)}>
