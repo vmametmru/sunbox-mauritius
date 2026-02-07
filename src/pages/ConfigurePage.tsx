@@ -265,6 +265,9 @@ const ConfigurePage: React.FC = () => {
 
         {/* OPTIONS */}
         <div className="space-y-6">
+          {Object.keys(groupedOptions).length > 0 && (
+            <h3 className="text-lg font-semibold text-gray-800">OPTIONS DISPONIBLES :</h3>
+          )}
           {Object.entries(groupedOptions).map(([category, opts]) => {
             const isOpen = expandedCategories.includes(category);
             const categoryDescription = opts[0]?.category_description;
