@@ -13,7 +13,7 @@ require_once __DIR__ . '/config.php';
 
 handleCORS();
 startSession();
-requireAdmin();
+// Note: requireAdmin() is called only for write operations (upload, delete, set_primary)
 
 /* =========================================================
    Helpers
@@ -240,6 +240,7 @@ try {
 
     /* ---------- UPLOAD ---------- */
     case 'model_upload': {
+      requireAdmin();
       $modelId   = (int)($_GET['model_id'] ?? 0);
       $mediaType = $_POST['media_type'] ?? 'photo';
 
@@ -282,6 +283,7 @@ try {
 
     /* ---------- DELETE ---------- */
     case 'model_delete': {
+      requireAdmin();
       $id = (int)($_GET['id'] ?? 0);
       if ($id <= 0) fail("id manquant.");
 
@@ -302,6 +304,7 @@ try {
 
     /* ---------- SET PRIMARY ---------- */
     case 'model_set_primary': {
+      requireAdmin();
       $id = (int)($_GET['id'] ?? 0);
       if ($id <= 0) fail("id manquant.");
 

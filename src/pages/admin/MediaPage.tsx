@@ -555,7 +555,7 @@ export default function MediaPage() {
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
                   <div>
                     <label className="text-sm text-gray-600">Modèle</label>
-                    <Select value={String(uploadModelId)} onValueChange={(v) => setUploadModelId(Number(v))}>
+                    <Select value={uploadModelId > 0 ? String(uploadModelId) : ""} onValueChange={(v) => setUploadModelId(Number(v))}>
                       <SelectTrigger><SelectValue placeholder="Choisir un modèle" /></SelectTrigger>
                       <SelectContent>
                         {models.map((m) => (
