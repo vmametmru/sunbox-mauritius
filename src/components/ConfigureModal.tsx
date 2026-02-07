@@ -251,6 +251,11 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
             </div>
           </div>
 
+          {/* OPTIONS DISPONIBLES label */}
+          {Object.keys(groupedOptions).length > 0 && (
+            <h3 className="text-lg font-semibold text-gray-800">OPTIONS DISPONIBLES :</h3>
+          )}
+
           {/* Options */}
           {Object.entries(groupedOptions).map(([category, opts]) => {
             const isOpen = expandedCategories.includes(category);
