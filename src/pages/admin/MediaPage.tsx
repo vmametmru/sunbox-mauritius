@@ -123,6 +123,9 @@ export default function MediaPage() {
         credentials: "include",
       });
       const j = await r.json().catch(() => ({}));
+      if (!r.ok || j?.error) {
+        throw new Error(j?.error || `Erreur serveur: ${r.status}`);
+      }
       const arr = j?.data?.items;
       setBannerImages(Array.isArray(arr) ? arr : []);
     } catch (e: any) {
@@ -141,6 +144,9 @@ export default function MediaPage() {
         credentials: "include",
       });
       const j = await r.json().catch(() => ({}));
+      if (!r.ok || j?.error) {
+        throw new Error(j?.error || `Erreur serveur: ${r.status}`);
+      }
       const arr = j?.data?.items;
       setCategoryImages(Array.isArray(arr) ? arr : []);
     } catch (e: any) {
@@ -166,6 +172,9 @@ export default function MediaPage() {
         credentials: "include",
       });
       const j = await r.json().catch(() => ({}));
+      if (!r.ok || j?.error) {
+        throw new Error(j?.error || `Erreur serveur: ${r.status}`);
+      }
       const arr = j?.data?.items;
       setModelImages(Array.isArray(arr) ? arr : []);
     } catch (e: any) {
@@ -180,11 +189,15 @@ export default function MediaPage() {
   // EFFECTS
   // ===============================
   useEffect(() => {
+    // Load all data on mount to show correct counts in tab badges
     loadModels();
+    loadBannerImages();
+    loadCategoryImages();
+    loadModelImages();
   }, []);
 
   useEffect(() => {
-    // Load appropriate data when tab changes
+    // Reload data when tab changes to ensure fresh content
     if (activeTab === "bandeau") {
       loadBannerImages();
     } else if (activeTab === "category") {
