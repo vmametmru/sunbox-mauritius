@@ -753,60 +753,72 @@ try {
         case 'create_quote': {
             validateRequired($body, ['model_id', 'model_name', 'model_type', 'base_price', 'total_price', 'customer_name', 'customer_email', 'customer_phone']);
             
-            // Generate reference number: SBM-YYYYMMDD-XXXX
-            $date = date('Ymd');
-            $countStmt = $db->prepare("SELECT COUNT(*) FROM quotes WHERE DATE(created_at) = CURDATE()");
-            $countStmt->execute();
-            $todayCount = (int)$countStmt->fetchColumn() + 1;
-            $reference = sprintf('SBM-%s-%04d', $date, $todayCount);
+            // Use transaction to prevent race conditions
+            $db->beginTransaction();
             
-            // Calculate valid_until (30 days from now)
-            $validUntil = date('Y-m-d', strtotime('+30 days'));
-            
-            $stmt = $db->prepare("
-                INSERT INTO quotes (
-                    reference_number, model_id, model_name, model_type,
-                    base_price, options_total, total_price,
-                    customer_name, customer_email, customer_phone,
-                    customer_address, customer_message,
-                    status, valid_until
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
-            ");
-            $stmt->execute([
-                $reference,
-                (int)$body['model_id'],
-                sanitize($body['model_name']),
-                $body['model_type'],
-                (float)$body['base_price'],
-                (float)($body['options_total'] ?? 0),
-                (float)$body['total_price'],
-                sanitize($body['customer_name']),
-                sanitize($body['customer_email']),
-                sanitize($body['customer_phone']),
-                sanitize($body['customer_address'] ?? ''),
-                sanitize($body['customer_message'] ?? ''),
-                $validUntil,
-            ]);
-            
-            $quoteId = $db->lastInsertId();
-            
-            // Insert selected options
-            if (!empty($body['selected_options']) && is_array($body['selected_options'])) {
-                $optStmt = $db->prepare("
-                    INSERT INTO quote_options (quote_id, option_id, option_name, option_price)
-                    VALUES (?, ?, ?, ?)
+            try {
+                // Generate reference number: SBM-YYYYMMDD-XXXX using MAX(id) for uniqueness
+                $date = date('Ymd');
+                $maxIdStmt = $db->query("SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM quotes");
+                $nextId = (int)$maxIdStmt->fetchColumn();
+                $reference = sprintf('SBM-%s-%04d', $date, $nextId);
+                
+                // Calculate valid_until (30 days from now)
+                $validUntil = date('Y-m-d', strtotime('+30 days'));
+                
+                $stmt = $db->prepare("
+                    INSERT INTO quotes (
+                        reference_number, model_id, model_name, model_type,
+                        base_price, options_total, total_price,
+                        customer_name, customer_email, customer_phone,
+                        customer_address, customer_message,
+                        status, valid_until
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
                 ");
-                foreach ($body['selected_options'] as $opt) {
-                    $optStmt->execute([
-                        $quoteId,
-                        (int)$opt['option_id'],
-                        sanitize($opt['option_name']),
-                        (float)$opt['option_price'],
-                    ]);
+                $stmt->execute([
+                    $reference,
+                    (int)$body['model_id'],
+                    sanitize($body['model_name']),
+                    $body['model_type'],
+                    (float)$body['base_price'],
+                    (float)($body['options_total'] ?? 0),
+                    (float)$body['total_price'],
+                    sanitize($body['customer_name']),
+                    sanitize($body['customer_email']),
+                    sanitize($body['customer_phone']),
+                    sanitize($body['customer_address'] ?? ''),
+                    sanitize($body['customer_message'] ?? ''),
+                    $validUntil,
+                ]);
+                
+                $quoteId = $db->lastInsertId();
+                
+                // Update reference with actual quote ID for guaranteed uniqueness
+                $reference = sprintf('SBM-%s-%04d', $date, $quoteId);
+                $db->prepare("UPDATE quotes SET reference_number = ? WHERE id = ?")->execute([$reference, $quoteId]);
+                
+                // Insert selected options
+                if (!empty($body['selected_options']) && is_array($body['selected_options'])) {
+                    $optStmt = $db->prepare("
+                        INSERT INTO quote_options (quote_id, option_id, option_name, option_price)
+                        VALUES (?, ?, ?, ?)
+                    ");
+                    foreach ($body['selected_options'] as $opt) {
+                        $optStmt->execute([
+                            $quoteId,
+                            (int)$opt['option_id'],
+                            sanitize($opt['option_name']),
+                            (float)$opt['option_price'],
+                        ]);
+                    }
                 }
+                
+                $db->commit();
+                ok(['id' => $quoteId, 'reference_number' => $reference]);
+            } catch (Exception $e) {
+                $db->rollBack();
+                throw $e;
             }
-            
-            ok(['id' => $quoteId, 'reference_number' => $reference]);
             break;
         }
 

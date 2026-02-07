@@ -79,7 +79,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
     
     if (!quoteData.customerEmail.trim()) {
       newErrors.email = 'L\'email est requis';
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(quoteData.customerEmail)) {
+    } else if (!/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(quoteData.customerEmail)) {
       newErrors.email = 'Veuillez entrer un email valide';
     }
     
@@ -89,6 +89,24 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
     
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
+  };
+
+  // Map API errors to user-friendly messages
+  const getErrorMessage = (error: any): string => {
+    const errorMessage = error?.message || '';
+    
+    // Map common API errors to French messages
+    if (errorMessage.includes('SQLSTATE') || errorMessage.includes('Database')) {
+      return 'Une erreur technique s\'est produite. Veuillez réessayer plus tard.';
+    }
+    if (errorMessage.includes('network') || errorMessage.includes('fetch')) {
+      return 'Problème de connexion. Veuillez vérifier votre connexion internet.';
+    }
+    if (errorMessage.includes('timeout')) {
+      return 'Le serveur met trop de temps à répondre. Veuillez réessayer.';
+    }
+    
+    return 'Échec de la soumission du devis. Veuillez réessayer.';
   };
 
   // Submit quote
@@ -125,8 +143,9 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
       toast({ title: 'Succès', description: 'Votre devis a été créé avec succès!' });
     } catch (err: any) {
       console.error('Quote submission error:', err);
-      setErrors({ submit: err.message || 'Échec de la soumission du devis. Veuillez réessayer.' });
-      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+      const userMessage = getErrorMessage(err);
+      setErrors({ submit: userMessage });
+      toast({ title: 'Erreur', description: userMessage, variant: 'destructive' });
     } finally {
       setIsSubmitting(false);
     }
