@@ -692,16 +692,22 @@ try {
             if ($modelId <= 0) fail("model_id manquant");
             
             $stmt = $db->prepare("
-                SELECT bc.id, bc.name, bc.display_order,
+                SELECT bc.id, bc.name, bc.display_order, mi.file_path as image_path,
                     COALESCE(SUM(ROUND(bl.quantity * bl.unit_cost_ht * (1 + bl.margin_percent / 100), 2)), 0) AS price_ht
                 FROM boq_categories bc
                 LEFT JOIN boq_lines bl ON bc.id = bl.category_id
+                LEFT JOIN model_images mi ON bc.image_id = mi.id
                 WHERE bc.model_id = ? AND bc.is_option = TRUE
                 GROUP BY bc.id
                 ORDER BY bc.display_order ASC
             ");
             $stmt->execute([$modelId]);
-            ok($stmt->fetchAll());
+            $options = $stmt->fetchAll();
+            foreach ($options as &$opt) {
+                $opt['image_url'] = $opt['image_path'] ? '/' . ltrim($opt['image_path'], '/') : null;
+                unset($opt['image_path']);
+            }
+            ok($options);
             break;
         }
 

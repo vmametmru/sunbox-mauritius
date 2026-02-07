@@ -23,6 +23,7 @@ interface BOQOption {
   name: string;
   display_order: number;
   price_ht: string;
+  image_url?: string | null;
 }
 
 // Constants for BOQ options handling
@@ -98,7 +99,8 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
             id: Number(o.id) + BOQ_OPTION_ID_OFFSET,
             model_id: model.id,
             category_id: BOQ_OPTIONS_CATEGORY_ID,
-            category_name: 'Options BOQ',
+            category_name: o.name, // Use BOQ option name as category name for proper grouping
+            category_image_url: o.image_url || null, // Include category image URL
             name: o.name,
             description,
             price: parseFloat(o.price_ht),
