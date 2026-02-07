@@ -14,9 +14,34 @@ import { Badge } from "@/components/ui/badge";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 
-// ... types inchangés
+// Types
+interface ModelBrief {
+  id: number;
+  name: string;
+  type: string;
+}
 
-// ... fonctions toBool, imgUrl inchangées
+interface ModelImageRow {
+  id: number;
+  model_id: number;
+  file_path: string;
+  is_primary: number | boolean;
+  media_type: string;
+}
+
+// Helper functions
+function toBool(val: number | boolean | string | null | undefined): boolean {
+  if (typeof val === 'boolean') return val;
+  if (typeof val === 'number') return val !== 0;
+  if (typeof val === 'string') return val === '1' || val.toLowerCase() === 'true';
+  return false;
+}
+
+function imgUrl(path: string): string {
+  if (!path) return '';
+  if (path.startsWith('http://') || path.startsWith('https://')) return path;
+  return '/' + path.replace(/^\/+/, '');
+}
 
 export default function MediaPage() {
   const { toast } = useToast();
@@ -212,8 +237,14 @@ export default function MediaPage() {
   const filteredItems = useMemo(() => {
     return items.filter((it) => {
       const model = models.find((m) => m.id === it.model_id);
-      if (!model) return false;
-      if (filterType !== 'all' && model.type !== filterType) return false;
+      
+      // Apply model type filter (container/pool) only if we have a model
+      // Items with model_id=0 (banners, category images) don't have a model type
+      if (filterType !== 'all') {
+        if (model && model.type !== filterType) return false;
+        // For items without a model, skip the model type filter
+      }
+      
       if (filterTag !== 'all' && it.media_type !== filterTag) return false;
       return true;
     });
