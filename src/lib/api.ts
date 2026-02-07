@@ -255,6 +255,42 @@ export const api = {
   },
 
   /* =====================================================
+     QUOTES
+  ===================================================== */
+  getQuotes() {
+    return this.query('get_quotes');
+  },
+
+  getQuote(id: number) {
+    return this.query('get_quote', { id });
+  },
+
+  createQuote(quote: {
+    model_id: number;
+    model_name: string;
+    model_type: 'container' | 'pool';
+    base_price: number;
+    options_total: number;
+    total_price: number;
+    customer_name: string;
+    customer_email: string;
+    customer_phone: string;
+    customer_address?: string;
+    customer_message?: string;
+    selected_options?: Array<{ option_id: number; option_name: string; option_price: number }>;
+  }) {
+    return this.query('create_quote', quote);
+  },
+
+  updateQuoteStatus(id: number, status: 'pending' | 'approved' | 'rejected' | 'completed') {
+    return this.query('update_quote_status', { id, status });
+  },
+
+  deleteQuote(id: number) {
+    return this.query('delete_quote', { id });
+  },
+
+  /* =====================================================
      SETTINGS
   ===================================================== */
   getSettings(group?: string) {

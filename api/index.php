@@ -708,6 +708,147 @@ try {
             break;
         }
 
+        // === QUOTES
+        case 'get_quotes': {
+            $stmt = $db->prepare("
+                SELECT q.*, m.name as model_name, m.type as model_type
+                FROM quotes q
+                LEFT JOIN models m ON q.model_id = m.id
+                ORDER BY q.created_at DESC
+            ");
+            $stmt->execute();
+            ok($stmt->fetchAll());
+            break;
+        }
+
+        case 'get_quote': {
+            validateRequired($body, ['id']);
+            $id = (int)$body['id'];
+            
+            // Get quote
+            $stmt = $db->prepare("
+                SELECT q.*, m.name as model_name, m.type as model_type
+                FROM quotes q
+                LEFT JOIN models m ON q.model_id = m.id
+                WHERE q.id = ?
+            ");
+            $stmt->execute([$id]);
+            $quote = $stmt->fetch();
+            
+            if (!$quote) fail('Devis non trouvé', 404);
+            
+            // Get quote options
+            $optStmt = $db->prepare("
+                SELECT option_id, option_name, option_price
+                FROM quote_options
+                WHERE quote_id = ?
+            ");
+            $optStmt->execute([$id]);
+            $quote['options'] = $optStmt->fetchAll();
+            
+            ok($quote);
+            break;
+        }
+
+        case 'create_quote': {
+            validateRequired($body, ['model_id', 'model_name', 'model_type', 'base_price', 'total_price', 'customer_name', 'customer_email', 'customer_phone']);
+            
+            // Use transaction to prevent race conditions
+            $db->beginTransaction();
+            
+            try {
+                // Generate reference number: SBM-YYYYMMDD-XXXX using MAX(id) for uniqueness
+                $date = date('Ymd');
+                $maxIdStmt = $db->query("SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM quotes");
+                $nextId = (int)$maxIdStmt->fetchColumn();
+                $reference = sprintf('SBM-%s-%04d', $date, $nextId);
+                
+                // Calculate valid_until (30 days from now)
+                $validUntil = date('Y-m-d', strtotime('+30 days'));
+                
+                $stmt = $db->prepare("
+                    INSERT INTO quotes (
+                        reference_number, model_id, model_name, model_type,
+                        base_price, options_total, total_price,
+                        customer_name, customer_email, customer_phone,
+                        customer_address, customer_message,
+                        status, valid_until
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+                ");
+                $stmt->execute([
+                    $reference,
+                    (int)$body['model_id'],
+                    sanitize($body['model_name']),
+                    $body['model_type'],
+                    (float)$body['base_price'],
+                    (float)($body['options_total'] ?? 0),
+                    (float)$body['total_price'],
+                    sanitize($body['customer_name']),
+                    sanitize($body['customer_email']),
+                    sanitize($body['customer_phone']),
+                    sanitize($body['customer_address'] ?? ''),
+                    sanitize($body['customer_message'] ?? ''),
+                    $validUntil,
+                ]);
+                
+                $quoteId = $db->lastInsertId();
+                
+                // Update reference with actual quote ID for guaranteed uniqueness
+                $reference = sprintf('SBM-%s-%04d', $date, $quoteId);
+                $db->prepare("UPDATE quotes SET reference_number = ? WHERE id = ?")->execute([$reference, $quoteId]);
+                
+                // Insert selected options
+                if (!empty($body['selected_options']) && is_array($body['selected_options'])) {
+                    $optStmt = $db->prepare("
+                        INSERT INTO quote_options (quote_id, option_id, option_name, option_price)
+                        VALUES (?, ?, ?, ?)
+                    ");
+                    foreach ($body['selected_options'] as $opt) {
+                        $optStmt->execute([
+                            $quoteId,
+                            (int)$opt['option_id'],
+                            sanitize($opt['option_name']),
+                            (float)$opt['option_price'],
+                        ]);
+                    }
+                }
+                
+                $db->commit();
+                ok(['id' => $quoteId, 'reference_number' => $reference]);
+            } catch (Exception $e) {
+                $db->rollBack();
+                throw $e;
+            }
+            break;
+        }
+
+        case 'update_quote_status': {
+            validateRequired($body, ['id', 'status']);
+            $validStatuses = ['pending', 'approved', 'rejected', 'completed'];
+            if (!in_array($body['status'], $validStatuses)) {
+                fail('Statut invalide');
+            }
+            
+            $stmt = $db->prepare("UPDATE quotes SET status = ?, updated_at = NOW() WHERE id = ?");
+            $stmt->execute([$body['status'], (int)$body['id']]);
+            ok();
+            break;
+        }
+
+        case 'delete_quote': {
+            validateRequired($body, ['id']);
+            $id = (int)$body['id'];
+            
+            // Delete options first (if no CASCADE)
+            $db->prepare("DELETE FROM quote_options WHERE quote_id = ?")->execute([$id]);
+            
+            // Delete quote
+            $stmt = $db->prepare("DELETE FROM quotes WHERE id = ?");
+            $stmt->execute([$id]);
+            ok();
+            break;
+        }
+
         default:
             fail('Invalid action', 400);
     }
