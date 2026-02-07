@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,8 +10,10 @@ import {
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
+import { Image, LayoutGrid, FileImage } from "lucide-react";
 
 // Types
 interface ModelBrief {
@@ -27,6 +28,8 @@ interface ModelImageRow {
   file_path: string;
   is_primary: number | boolean;
   media_type: string;
+  model_name?: string;
+  model_type?: string;
 }
 
 // Helper functions
@@ -43,28 +46,59 @@ function imgUrl(path: string): string {
   return '/' + path.replace(/^\/+/, '');
 }
 
+function getMediaTypeLabel(mediaType: string): string {
+  switch (mediaType) {
+    case 'photo': return 'Photo';
+    case 'plan': return 'Plan';
+    case 'bandeau': return 'Bandeau';
+    case 'category_image': return 'Catégorie';
+    default: return mediaType;
+  }
+}
+
 export default function MediaPage() {
   const { toast } = useToast();
-  const [sp, setSp] = useSearchParams();
 
+  // File input refs for resetting after upload
+  const bannerFileInputRef = React.useRef<HTMLInputElement>(null);
+  const categoryFileInputRef = React.useRef<HTMLInputElement>(null);
+  const modelFileInputRef = React.useRef<HTMLInputElement>(null);
+
+  // Current tab
+  const [activeTab, setActiveTab] = useState<string>("bandeau");
+
+  // Models list (for model images tab)
   const [models, setModels] = useState<ModelBrief[]>([]);
-  const [modelId, setModelId] = useState<number>(0);
-  const [file, setFile] = useState<File | null>(null);
-  const [mediaType, setMediaType] = useState("photo");
-  const [saving, setSaving] = useState(false);
+  
+  // Upload states
   const [bannerFile, setBannerFile] = useState<File | null>(null);
   const [savingBanner, setSavingBanner] = useState(false);
   const [categoryImageFile, setCategoryImageFile] = useState<File | null>(null);
   const [savingCategoryImage, setSavingCategoryImage] = useState(false);
-  const [items, setItems] = useState<ModelImageRow[]>([]);
-  const [loadingList, setLoadingList] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [modelFile, setModelFile] = useState<File | null>(null);
+  const [savingModel, setSavingModel] = useState(false);
+  const [uploadModelId, setUploadModelId] = useState<number>(0);
+  const [uploadMediaType, setUploadMediaType] = useState<string>("photo");
 
-  const [filterType, setFilterType] = useState<string>('all');
-  const [filterTag, setFilterTag] = useState<string>('all');
+  // Gallery items per tab
+  const [bannerImages, setBannerImages] = useState<ModelImageRow[]>([]);
+  const [categoryImages, setCategoryImages] = useState<ModelImageRow[]>([]);
+  const [modelImages, setModelImages] = useState<ModelImageRow[]>([]);
 
-  const selectedModel = useMemo(() => models.find((m) => m.id === modelId) || null, [models, modelId]);
+  // Loading states
+  const [loadingBanner, setLoadingBanner] = useState(false);
+  const [loadingCategory, setLoadingCategory] = useState(false);
+  const [loadingModels, setLoadingModels] = useState(false);
 
+  // Model images filters
+  const [filterModelId, setFilterModelId] = useState<string>("all");
+  const [filterImageType, setFilterImageType] = useState<string>("all");
+
+  const selectedModel = useMemo(() => models.find((m) => m.id === uploadModelId) || null, [models, uploadModelId]);
+
+  // ===============================
+  // LOAD FUNCTIONS
+  // ===============================
   async function loadModels() {
     try {
       const data = await api.getModels(undefined, false);
@@ -72,83 +106,104 @@ export default function MediaPage() {
         ? data.filter((m: any) => m?.id).map((m: any) => ({ id: Number(m.id), name: String(m.name || ""), type: m.type }))
         : [];
       setModels(list);
-      const q = Number(sp.get("model_id") || 0);
-      if (q > 0) {
-        setModelId(q);
-        return;
+      if (list.length > 0 && uploadModelId === 0) {
+        setUploadModelId(list[0].id);
       }
-      if (list.length > 0) setModelId(list[0].id);
     } catch (e: any) {
       toast({ title: "Erreur", description: e?.message || "Erreur chargement modèles", variant: "destructive" });
       setModels([]);
     }
   }
 
-  async function loadImages(mid: number) {
-    if (!mid) return setItems([]);
-    setLoadingList(true);
-    setError(null);
+  async function loadBannerImages() {
+    setLoadingBanner(true);
     try {
-      const r = await fetch(`/api/media.php?action=model_list&model_id=${mid}`, {
+      const r = await fetch(`/api/media.php?action=list_by_media_type&media_type=bandeau`, {
         method: "GET",
         credentials: "include",
       });
       const j = await r.json().catch(() => ({}));
       const arr = j?.data?.items;
-      setItems(Array.isArray(arr) ? arr : []);
+      setBannerImages(Array.isArray(arr) ? arr : []);
     } catch (e: any) {
-      setError(e?.message || "Erreur chargement images");
-      setItems([]);
+      toast({ title: "Erreur", description: e?.message || "Erreur chargement bandeaux", variant: "destructive" });
+      setBannerImages([]);
     } finally {
-      setLoadingList(false);
+      setLoadingBanner(false);
     }
   }
 
-  useEffect(() => { loadModels(); }, []);
+  async function loadCategoryImages() {
+    setLoadingCategory(true);
+    try {
+      const r = await fetch(`/api/media.php?action=list_by_media_type&media_type=category_image`, {
+        method: "GET",
+        credentials: "include",
+      });
+      const j = await r.json().catch(() => ({}));
+      const arr = j?.data?.items;
+      setCategoryImages(Array.isArray(arr) ? arr : []);
+    } catch (e: any) {
+      toast({ title: "Erreur", description: e?.message || "Erreur chargement images catégories", variant: "destructive" });
+      setCategoryImages([]);
+    } finally {
+      setLoadingCategory(false);
+    }
+  }
+
+  async function loadModelImages() {
+    setLoadingModels(true);
+    try {
+      let url = `/api/media.php?action=list_model_images`;
+      if (filterModelId !== "all") {
+        url += `&model_id=${filterModelId}`;
+      }
+      if (filterImageType !== "all") {
+        url += `&image_type=${filterImageType}`;
+      }
+      const r = await fetch(url, {
+        method: "GET",
+        credentials: "include",
+      });
+      const j = await r.json().catch(() => ({}));
+      const arr = j?.data?.items;
+      setModelImages(Array.isArray(arr) ? arr : []);
+    } catch (e: any) {
+      toast({ title: "Erreur", description: e?.message || "Erreur chargement images modèles", variant: "destructive" });
+      setModelImages([]);
+    } finally {
+      setLoadingModels(false);
+    }
+  }
+
+  // ===============================
+  // EFFECTS
+  // ===============================
+  useEffect(() => {
+    loadModels();
+  }, []);
 
   useEffect(() => {
-    if (modelId) {
-      const cur = Number(sp.get("model_id") || 0);
-      if (cur !== modelId) {
-        sp.set("model_id", String(modelId));
-        setSp(sp, { replace: true });
-      }
-      loadImages(modelId);
+    // Load appropriate data when tab changes
+    if (activeTab === "bandeau") {
+      loadBannerImages();
+    } else if (activeTab === "category") {
+      loadCategoryImages();
+    } else if (activeTab === "models") {
+      loadModelImages();
     }
-  }, [modelId]);
+  }, [activeTab]);
 
-  async function uploadOne(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-
-    if (!modelId) return setError("Choisis un modèle.");
-    if (!file) return setError("Choisis un fichier image.");
-
-    setSaving(true);
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      fd.append("media_type", mediaType);
-
-      const r = await fetch(`/api/media.php?action=model_upload&model_id=${modelId}`, {
-        method: "POST",
-        credentials: "include",
-        body: fd,
-      });
-
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok || !j?.success) throw new Error(j?.error || "Upload failed");
-
-      setFile(null);
-      await loadImages(modelId);
-      toast({ title: "OK", description: "Image uploadée" });
-    } catch (e: any) {
-      setError(e?.message || "Upload failed");
-    } finally {
-      setSaving(false);
+  useEffect(() => {
+    // Reload model images when filters change (only on models tab)
+    if (activeTab === "models") {
+      loadModelImages();
     }
-  }
+  }, [filterModelId, filterImageType, activeTab]);
 
+  // ===============================
+  // UPLOAD FUNCTIONS
+  // ===============================
   async function uploadBanner(e: React.FormEvent) {
     e.preventDefault();
     if (!bannerFile) return;
@@ -169,6 +224,10 @@ export default function MediaPage() {
       if (!r.ok || !j?.success) throw new Error(j?.error || "Upload bandeau échoué");
 
       setBannerFile(null);
+      // Reset the file input using ref
+      if (bannerFileInputRef.current) bannerFileInputRef.current.value = '';
+      
+      await loadBannerImages();
       toast({ title: "OK", description: "Image bandeau uploadée" });
     } catch (e: any) {
       toast({ title: "Erreur", description: e?.message || "Erreur upload bandeau", variant: "destructive" });
@@ -197,6 +256,10 @@ export default function MediaPage() {
       if (!r.ok || !j?.success) throw new Error(j?.error || "Upload image catégorie échoué");
 
       setCategoryImageFile(null);
+      // Reset the file input using ref
+      if (categoryFileInputRef.current) categoryFileInputRef.current.value = '';
+      
+      await loadCategoryImages();
       toast({ title: "OK", description: "Image de catégorie uploadée" });
     } catch (e: any) {
       toast({ title: "Erreur", description: e?.message || "Erreur upload image catégorie", variant: "destructive" });
@@ -205,7 +268,41 @@ export default function MediaPage() {
     }
   }
 
-  async function deleteOne(id: number) {
+  async function uploadModelImage(e: React.FormEvent) {
+    e.preventDefault();
+    if (!uploadModelId || !modelFile) return;
+    setSavingModel(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", modelFile);
+      fd.append("media_type", uploadMediaType);
+
+      const r = await fetch(`/api/media.php?action=model_upload&model_id=${uploadModelId}`, {
+        method: "POST",
+        credentials: "include",
+        body: fd,
+      });
+
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j?.success) throw new Error(j?.error || "Upload failed");
+
+      setModelFile(null);
+      // Reset the file input using ref
+      if (modelFileInputRef.current) modelFileInputRef.current.value = '';
+      
+      await loadModelImages();
+      toast({ title: "OK", description: "Image uploadée" });
+    } catch (e: any) {
+      toast({ title: "Erreur", description: e?.message || "Upload failed", variant: "destructive" });
+    } finally {
+      setSavingModel(false);
+    }
+  }
+
+  // ===============================
+  // DELETE & SET PRIMARY
+  // ===============================
+  async function deleteImage(id: number, reloadFn: () => Promise<void>) {
     if (!confirm("Supprimer cette image ?")) return;
     try {
       const r = await fetch(`/api/media.php?action=model_delete&id=${id}`, {
@@ -214,9 +311,10 @@ export default function MediaPage() {
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok || !j?.success) throw new Error(j?.error || "Delete failed");
-      await loadImages(modelId);
+      await reloadFn();
+      toast({ title: "OK", description: "Image supprimée" });
     } catch (e: any) {
-      setError(e?.message || "Delete failed");
+      toast({ title: "Erreur", description: e?.message || "Delete failed", variant: "destructive" });
     }
   }
 
@@ -228,193 +326,318 @@ export default function MediaPage() {
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok || !j?.success) throw new Error(j?.error || "Action failed");
-      await loadImages(modelId);
+      await loadModelImages();
+      toast({ title: "OK", description: "Image définie comme principale" });
     } catch (e: any) {
-      setError(e?.message || "Action failed");
+      toast({ title: "Erreur", description: e?.message || "Action failed", variant: "destructive" });
     }
   }
 
-  const filteredItems = useMemo(() => {
-    return items.filter((it) => {
-      const model = models.find((m) => m.id === it.model_id);
-      
-      // Apply model type filter (container/pool) only if we have a model
-      // Items with model_id=0 (banners, category images) don't have a model type
-      if (filterType !== 'all') {
-        if (model && model.type !== filterType) return false;
-        // For items without a model, skip the model type filter
-      }
-      
-      if (filterTag !== 'all' && it.media_type !== filterTag) return false;
-      return true;
-    });
-  }, [items, filterType, filterTag, models]);
+  // ===============================
+  // RENDER HELPER: IMAGE CARD
+  // ===============================
+  function renderImageCard(
+    item: ModelImageRow, 
+    showPrimary: boolean, 
+    reloadFn: () => Promise<void>,
+    showModelInfo: boolean = false
+  ) {
+    const primary = toBool(item.is_primary);
+    return (
+      <div key={item.id} className="border rounded-xl overflow-hidden bg-white shadow-sm hover:shadow-md transition-shadow">
+        <div className="aspect-video bg-gray-100 relative">
+          <img src={imgUrl(item.file_path)} alt="" className="w-full h-full object-cover" loading="lazy" />
+          {showModelInfo && item.model_name && (
+            <div className="absolute top-2 left-2">
+              <Badge className="bg-black/70 text-white">{item.model_name}</Badge>
+            </div>
+          )}
+          {item.media_type && (
+            <div className="absolute top-2 right-2">
+              <Badge variant="secondary" className="capitalize">
+                {getMediaTypeLabel(item.media_type)}
+              </Badge>
+            </div>
+          )}
+        </div>
+        <div className="p-3 space-y-2">
+          <div className="flex flex-wrap gap-2 items-center">
+            {showPrimary && (
+              primary ? (
+                <Badge className="bg-green-600">Principale</Badge>
+              ) : (
+                <Button size="sm" variant="outline" onClick={() => setPrimary(item.id)}>
+                  Définir principale
+                </Button>
+              )
+            )}
+            <Button 
+              size="sm" 
+              variant="outline" 
+              className="text-red-600 hover:bg-red-50" 
+              onClick={() => deleteImage(item.id, reloadFn)}
+            >
+              Supprimer
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
+  // ===============================
+  // RENDER
+  // ===============================
   return (
-    <div className="space-y-10">
+    <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold text-gray-900">Photos des modèles</h1>
-        <p className="text-gray-500 mt-1">Ajoute des images pour chaque modèle ou pour le bandeau d’accueil.</p>
+        <h1 className="text-3xl font-bold text-gray-900">Galerie Photos</h1>
+        <p className="text-gray-500 mt-1">Gérez les images du site : bandeaux, catégories d'options et modèles.</p>
       </div>
 
-      {/* Upload Bandeau */}
-      <Card>
-        <CardHeader><CardTitle>Image de bandeau (carousel d’accueil)</CardTitle></CardHeader>
-        <CardContent className="space-y-4">
-          <form onSubmit={uploadBanner}>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-              <div>
-                <label className="text-sm text-gray-600">Fichier image</label>
-                <Input type="file" accept="image/*" onChange={(e) => setBannerFile(e.target.files?.[0] || null)} />
-              </div>
-              <div>
-                <Button type="submit" disabled={savingBanner || !bannerFile} className="w-full bg-orange-500 hover:bg-orange-600">
-                  {savingBanner ? "Upload..." : "Uploader"}
-                </Button>
-              </div>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="grid w-full grid-cols-3 lg:w-auto lg:inline-flex">
+          <TabsTrigger value="bandeau" className="flex items-center gap-2">
+            <Image className="h-4 w-4" />
+            <span>Bandeau</span>
+            <Badge variant="secondary" className="ml-1">{bannerImages.length}</Badge>
+          </TabsTrigger>
+          <TabsTrigger value="category" className="flex items-center gap-2">
+            <LayoutGrid className="h-4 w-4" />
+            <span>Catégories</span>
+            <Badge variant="secondary" className="ml-1">{categoryImages.length}</Badge>
+          </TabsTrigger>
+          <TabsTrigger value="models" className="flex items-center gap-2">
+            <FileImage className="h-4 w-4" />
+            <span>Modèles</span>
+            <Badge variant="secondary" className="ml-1">{modelImages.length}</Badge>
+          </TabsTrigger>
+        </TabsList>
 
-      {/* Upload Category Image */}
-      <Card>
-        <CardHeader><CardTitle>Image de catégorie d'option (100px × 100px)</CardTitle></CardHeader>
-        <CardContent className="space-y-4">
-          <p className="text-sm text-gray-600">
-            Ces images seront utilisées pour illustrer les catégories d'options dans le configurateur.
-            L'image sera affichée en format carré (100px × 100px).
-          </p>
-          <form onSubmit={uploadCategoryImage}>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-              <div>
-                <label className="text-sm text-gray-600">Fichier image</label>
-                <Input type="file" accept="image/*" onChange={(e) => setCategoryImageFile(e.target.files?.[0] || null)} />
-              </div>
-              <div>
-                <Button type="submit" disabled={savingCategoryImage || !categoryImageFile} className="w-full bg-orange-500 hover:bg-orange-600">
-                  {savingCategoryImage ? "Upload..." : "Uploader"}
-                </Button>
-              </div>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
-
-      {/* Upload Model Images */}
-      <Card>
-        <CardHeader><CardTitle>Ajouter une image de modèle</CardTitle></CardHeader>
-        <CardContent className="space-y-4">
-          <form onSubmit={uploadOne}>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-              <div>
-                <label className="text-sm text-gray-600">Modèle</label>
-                <Select value={String(modelId)} onValueChange={(v) => setModelId(Number(v))}>
-                  <SelectTrigger><SelectValue placeholder="Choisir un modèle" /></SelectTrigger>
-                  <SelectContent>
-                    {models.map((m) => (
-                      <SelectItem key={m.id} value={String(m.id)}>
-                        #{m.id} — {m.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {selectedModel && (
-                  <div className="mt-2">
-                    <Badge>{selectedModel.type === "container" ? "Container" : "Piscine"}</Badge>
+        {/* ===================== TAB: BANDEAU ===================== */}
+        <TabsContent value="bandeau" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Ajouter une image de bandeau</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-gray-600 mb-4">
+                Ces images apparaissent dans le carousel de la page d'accueil.
+              </p>
+              <form onSubmit={uploadBanner}>
+                <div className="flex flex-col sm:flex-row gap-4 items-end">
+                  <div className="flex-1">
+                    <label className="text-sm text-gray-600">Fichier image</label>
+                    <Input 
+                      ref={bannerFileInputRef}
+                      type="file" 
+                      accept="image/*" 
+                      onChange={(e) => setBannerFile(e.target.files?.[0] || null)} 
+                    />
                   </div>
-                )}
-              </div>
-
-              <div>
-                <label className="text-sm text-gray-600">Type d'image</label>
-                <Select value={mediaType} onValueChange={setMediaType}>
-                  <SelectTrigger><SelectValue placeholder="Type" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="photo">Photo</SelectItem>
-                    <SelectItem value="plan">Plan</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <label className="text-sm text-gray-600">Fichier image</label>
-                <Input type="file" accept="image/*" onChange={(e) => setFile(e.target.files?.[0] || null)} />
-              </div>
-
-              <div>
-                <Button type="submit" disabled={saving || !modelId || !file} className="w-full bg-orange-500 hover:bg-orange-600">
-                  {saving ? "Upload..." : "Uploader"}
-                </Button>
-              </div>
-            </div>
-            {error && <div className="text-red-600 text-sm mt-2">{error}</div>}
-          </form>
-        </CardContent>
-      </Card>
-
-      {/* Galerie */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Images existantes</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {/* Filtres Galerie */}
-          <div className="flex flex-wrap gap-4 mb-6">
-            <Select value={filterType} onValueChange={setFilterType}>
-              <SelectTrigger className="w-40"><SelectValue placeholder="Type modèle" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Tous types</SelectItem>
-                <SelectItem value="container">Container</SelectItem>
-                <SelectItem value="pool">Piscine</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Select value={filterTag} onValueChange={setFilterTag}>
-              <SelectTrigger className="w-40"><SelectValue placeholder="Tag" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Tous tags</SelectItem>
-                <SelectItem value="photo">Photo</SelectItem>
-                <SelectItem value="plan">Plan</SelectItem>
-                <SelectItem value="bandeau">Bandeau</SelectItem>
-                <SelectItem value="category_image">Image Catégorie</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {filteredItems.map((it) => {
-              const primary = toBool(it.is_primary);
-              return (
-                <div key={it.id} className="border rounded-xl overflow-hidden bg-white">
-                  <div className="aspect-video bg-gray-100">
-                    <img src={imgUrl(it.file_path)} alt="" className="w-full h-full object-cover" loading="lazy" />
-                  </div>
-                  <div className="p-3 space-y-2">
-                    <div className="text-xs text-gray-500 break-all">{it.file_path}</div>
-                    <div className="flex gap-2 items-center">
-                      {primary ? (
-                        <Badge className="bg-green-600">Principale</Badge>
-                      ) : (
-                        <Button size="sm" variant="outline" onClick={() => setPrimary(it.id)}>Mettre principale</Button>
-                      )}
-                      <Button size="sm" variant="outline" className="text-red-600" onClick={() => deleteOne(it.id)}>
-                        Supprimer
-                      </Button>
-                    </div>
-                    <div>
-                      {it.media_type && <Badge variant="secondary">{it.media_type}</Badge>}
-                    </div>
+                  <div>
+                    <Button type="submit" disabled={savingBanner || !bannerFile} className="bg-orange-500 hover:bg-orange-600">
+                      {savingBanner ? "Upload..." : "Uploader"}
+                    </Button>
                   </div>
                 </div>
-              );
-            })}
-            {!loadingList && filteredItems.length === 0 && (
-              <div className="text-sm text-gray-500">Aucune image pour ce modèle.</div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+              </form>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Images de bandeau ({bannerImages.length})</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {loadingBanner ? (
+                <div className="text-center py-8 text-gray-500">Chargement...</div>
+              ) : bannerImages.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">Aucune image de bandeau.</div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {bannerImages.map((item) => renderImageCard(item, false, loadBannerImages))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ===================== TAB: CATEGORY ===================== */}
+        <TabsContent value="category" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Ajouter une image de catégorie</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-gray-600 mb-4">
+                Ces images (100px × 100px) illustrent les catégories d'options dans le configurateur.
+              </p>
+              <form onSubmit={uploadCategoryImage}>
+                <div className="flex flex-col sm:flex-row gap-4 items-end">
+                  <div className="flex-1">
+                    <label className="text-sm text-gray-600">Fichier image</label>
+                    <Input 
+                      ref={categoryFileInputRef}
+                      type="file" 
+                      accept="image/*" 
+                      onChange={(e) => setCategoryImageFile(e.target.files?.[0] || null)} 
+                    />
+                  </div>
+                  <div>
+                    <Button type="submit" disabled={savingCategoryImage || !categoryImageFile} className="bg-orange-500 hover:bg-orange-600">
+                      {savingCategoryImage ? "Upload..." : "Uploader"}
+                    </Button>
+                  </div>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Images de catégories ({categoryImages.length})</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {loadingCategory ? (
+                <div className="text-center py-8 text-gray-500">Chargement...</div>
+              ) : categoryImages.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">Aucune image de catégorie.</div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
+                  {categoryImages.map((item) => (
+                    <div key={item.id} className="border rounded-xl overflow-hidden bg-white shadow-sm hover:shadow-md transition-shadow">
+                      <div className="aspect-square bg-gray-100">
+                        <img src={imgUrl(item.file_path)} alt="" className="w-full h-full object-cover" loading="lazy" />
+                      </div>
+                      <div className="p-2">
+                        <Button 
+                          size="sm" 
+                          variant="outline" 
+                          className="w-full text-red-600 hover:bg-red-50" 
+                          onClick={() => deleteImage(item.id, loadCategoryImages)}
+                        >
+                          Supprimer
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ===================== TAB: MODELS ===================== */}
+        <TabsContent value="models" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Ajouter une image de modèle</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-gray-600 mb-4">
+                Ajoutez des photos ou des plans pour vos modèles de containers et piscines.
+              </p>
+              <form onSubmit={uploadModelImage}>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                  <div>
+                    <label className="text-sm text-gray-600">Modèle</label>
+                    <Select value={String(uploadModelId)} onValueChange={(v) => setUploadModelId(Number(v))}>
+                      <SelectTrigger><SelectValue placeholder="Choisir un modèle" /></SelectTrigger>
+                      <SelectContent>
+                        {models.map((m) => (
+                          <SelectItem key={m.id} value={String(m.id)}>
+                            {m.name} ({m.type === "container" ? "Container" : "Piscine"})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {selectedModel && (
+                      <div className="mt-2">
+                        <Badge>{selectedModel.type === "container" ? "Container" : "Piscine"}</Badge>
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="text-sm text-gray-600">Type d'image</label>
+                    <Select value={uploadMediaType} onValueChange={setUploadMediaType}>
+                      <SelectTrigger><SelectValue placeholder="Type" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="photo">Photo</SelectItem>
+                        <SelectItem value="plan">Plan</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <label className="text-sm text-gray-600">Fichier image</label>
+                    <Input 
+                      ref={modelFileInputRef}
+                      type="file" 
+                      accept="image/*" 
+                      onChange={(e) => setModelFile(e.target.files?.[0] || null)} 
+                    />
+                  </div>
+
+                  <div>
+                    <Button type="submit" disabled={savingModel || !uploadModelId || !modelFile} className="w-full bg-orange-500 hover:bg-orange-600">
+                      {savingModel ? "Upload..." : "Uploader"}
+                    </Button>
+                  </div>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Images des modèles ({modelImages.length})</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {/* Filters */}
+              <div className="flex flex-wrap gap-4 mb-6">
+                <div>
+                  <label className="text-sm text-gray-600 block mb-1">Filtrer par modèle</label>
+                  <Select value={filterModelId} onValueChange={setFilterModelId}>
+                    <SelectTrigger className="w-48"><SelectValue placeholder="Tous les modèles" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Tous les modèles</SelectItem>
+                      {models.map((m) => (
+                        <SelectItem key={m.id} value={String(m.id)}>
+                          {m.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <label className="text-sm text-gray-600 block mb-1">Type d'image</label>
+                  <Select value={filterImageType} onValueChange={setFilterImageType}>
+                    <SelectTrigger className="w-40"><SelectValue placeholder="Tous types" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Tous types</SelectItem>
+                      <SelectItem value="photo">Photo</SelectItem>
+                      <SelectItem value="plan">Plan</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {loadingModels ? (
+                <div className="text-center py-8 text-gray-500">Chargement...</div>
+              ) : modelImages.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">Aucune image de modèle trouvée.</div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {modelImages.map((item) => renderImageCard(item, true, loadModelImages, true))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
