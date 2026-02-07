@@ -118,6 +118,14 @@ function uploadOne(string $folder, array $allowedMime, int $maxBytes): array {
   $relPath = trim($folder, '/') . '/' . $name;
   $absPath = dirname(__DIR__) . '/' . $relPath;
 
+  // Create the upload directory if it doesn't exist
+  $uploadDir = dirname($absPath);
+  if (!is_dir($uploadDir)) {
+    if (!mkdir($uploadDir, 0755, true)) {
+      fail("Erreur création dossier d'upload.");
+    }
+  }
+
   if (!imagejpeg($dst, $absPath, 85)) {
     fail("Erreur écriture JPG.");
   }
