@@ -177,6 +177,59 @@ try {
       break;
     }
 
+    /* ---------- LISTE IMAGES PAR TYPE DE MEDIA ---------- */
+    case 'list_by_media_type': {
+      $mediaType = $_GET['media_type'] ?? '';
+
+      if (!in_array($mediaType, ['photo', 'plan', 'bandeau', 'category_image'], true)) {
+        fail("media_type invalide.");
+      }
+
+      $stmt = $db->prepare("
+        SELECT mi.*, m.name as model_name, m.type as model_type
+        FROM model_images mi
+        LEFT JOIN models m ON m.id = mi.model_id
+        WHERE mi.media_type = ?
+        ORDER BY mi.is_primary DESC, mi.id DESC
+      ");
+      $stmt->execute([$mediaType]);
+
+      ok(['items' => $stmt->fetchAll()]);
+      break;
+    }
+
+    /* ---------- LISTE IMAGES MODELES (photo + plan) ---------- */
+    case 'list_model_images': {
+      $modelId = isset($_GET['model_id']) ? (int)$_GET['model_id'] : null;
+      $imageType = $_GET['image_type'] ?? null; // 'photo' or 'plan'
+
+      $sql = "
+        SELECT mi.*, m.name as model_name, m.type as model_type
+        FROM model_images mi
+        LEFT JOIN models m ON m.id = mi.model_id
+        WHERE mi.media_type IN ('photo', 'plan')
+      ";
+      $params = [];
+
+      if ($modelId !== null && $modelId > 0) {
+        $sql .= " AND mi.model_id = ?";
+        $params[] = $modelId;
+      }
+
+      if ($imageType !== null && in_array($imageType, ['photo', 'plan'], true)) {
+        $sql .= " AND mi.media_type = ?";
+        $params[] = $imageType;
+      }
+
+      $sql .= " ORDER BY mi.model_id, mi.is_primary DESC, mi.id DESC";
+
+      $stmt = $db->prepare($sql);
+      $stmt->execute($params);
+
+      ok(['items' => $stmt->fetchAll()]);
+      break;
+    }
+
     /* ---------- UPLOAD ---------- */
     case 'model_upload': {
       $modelId   = (int)($_GET['model_id'] ?? 0);
