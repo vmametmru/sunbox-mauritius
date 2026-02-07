@@ -241,57 +241,6 @@ try {
             break;
         }
 
-        case 'create_option_category': {
-            validateRequired($body, ['name']);
-            $stmt = $db->prepare("INSERT INTO option_categories (name, description, display_order, image_id) VALUES (?, ?, ?, ?)");
-            $stmt->execute([
-                sanitize($body['name']),
-                sanitize($body['description'] ?? ''),
-                (int)($body['display_order'] ?? 0),
-                !empty($body['image_id']) ? (int)$body['image_id'] : null
-            ]);
-            ok(['id' => $db->lastInsertId()]);
-            break;
-        }
-
-        case 'update_option_category': {
-            validateRequired($body, ['id', 'name']);
-            $stmt = $db->prepare("UPDATE option_categories SET name = ?, description = ?, display_order = ?, image_id = ?, updated_at = NOW() WHERE id = ?");
-            $stmt->execute([
-                sanitize($body['name']),
-                sanitize($body['description'] ?? ''),
-                (int)($body['display_order'] ?? 0),
-                !empty($body['image_id']) ? (int)$body['image_id'] : null,
-                (int)$body['id']
-            ]);
-            ok();
-            break;
-        }
-
-        case 'delete_option_category': {
-            validateRequired($body, ['id']);
-            $stmt = $db->prepare("DELETE FROM option_categories WHERE id = ?");
-            $stmt->execute([(int)$body['id']]);
-            ok();
-            break;
-        }
-
-        case 'get_option_categories': {
-            $stmt = $db->query("
-                SELECT oc.*, mi.file_path as image_path
-                FROM option_categories oc
-                LEFT JOIN model_images mi ON oc.image_id = mi.id
-                ORDER BY oc.display_order ASC
-            ");
-            $categories = $stmt->fetchAll();
-            foreach ($categories as &$cat) {
-                $cat['image_url'] = $cat['image_path'] ? '/' . ltrim($cat['image_path'], '/') : null;
-                unset($cat['image_path']);
-            }
-            ok($categories);
-            break;
-        }
-
         case 'create_model_option': {
             validateRequired($body, ['model_id', 'name']);
             $stmt = $db->prepare("

@@ -122,25 +122,6 @@ export const api = {
   },
 
   /* =====================================================
-     OPTION CATEGORIES
-  ===================================================== */
-  getOptionCategories() {
-    return this.query('get_option_categories');
-  },
-
-  createOptionCategory(data: { name: string; description?: string; display_order?: number; image_id?: number | null }) {
-    return this.query('create_option_category', data);
-  },
-
-  updateOptionCategory(data: { id: number; name?: string; description?: string; display_order?: number; image_id?: number | null }) {
-    return this.query('update_option_category', data);
-  },
-
-  deleteOptionCategory(id: number) {
-    return this.query('delete_option_category', { id });
-  },
-
-  /* =====================================================
      CATEGORY IMAGES
   ===================================================== */
   getCategoryImages() {
