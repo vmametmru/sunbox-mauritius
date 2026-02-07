@@ -31,7 +31,6 @@ import SiteSettingsPage from "./pages/admin/SiteSettingsPage";
 import MediaPage from "./pages/admin/MediaPage";
 import SuppliersPage from "./pages/admin/SuppliersPage";
 import BOQPage from "./pages/admin/BOQPage";
-import OptionCategoriesPage from "./pages/admin/OptionCategoriesPage";
 
 const queryClient = new QueryClient();
 
@@ -64,7 +63,6 @@ const App = () => (
                   <Route path="media" element={<MediaPage />} />
                   <Route path="boq" element={<BOQPage />} />
                   <Route path="suppliers" element={<SuppliersPage />} />
-                  <Route path="option-categories" element={<OptionCategoriesPage />} />
                   <Route path="email" element={<EmailSettingsPage />} />
                   <Route path="site" element={<SiteSettingsPage />} />
                 </Route>

@@ -14,7 +14,6 @@ import {
   Image as ImageIcon,
   Calculator,
   Building2,
-  Tag,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -33,9 +32,6 @@ const menuItems = [
 
   // ✅ NEW: Suppliers Management  
   { icon: Building2, label: 'Fournisseurs', path: '/admin/suppliers' },
-
-  // ✅ NEW: Option Categories Management
-  { icon: Tag, label: 'Catégories Options', path: '/admin/option-categories' },
 
   { icon: Users, label: 'Contacts', path: '/admin/contacts' },
   { icon: Mail, label: 'Email', path: '/admin/email' },
