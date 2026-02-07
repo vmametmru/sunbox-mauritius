@@ -7,6 +7,8 @@
 
 -- Step 1: Add 'category_image' to the model_images.media_type ENUM
 -- This allows uploading images specifically for option categories
+-- Note: We're appending 'category_image' to the end of the existing ENUM values,
+-- which is the safe way to extend an ENUM in MySQL without affecting existing data.
 ALTER TABLE model_images
 MODIFY COLUMN media_type ENUM('photo', 'plan', 'bandeau', 'category_image') 
     CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'photo';
