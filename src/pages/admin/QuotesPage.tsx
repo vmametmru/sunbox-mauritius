@@ -111,20 +111,50 @@ export default function QuotesPage() {
         setSelectedQuote({ ...selectedQuote, status });
       }
       
-      // Send email notification if approved
-      if (status === 'approved' && selectedQuote) {
+      // Send email notification for status changes (approved or rejected)
+      if (status === 'approved' || status === 'rejected') {
         try {
+          // Fetch quote data to ensure we have all necessary fields
+          // Use selectedQuote if available, otherwise fetch from API
+          let quoteData = selectedQuote?.id === id ? selectedQuote : null;
+          if (!quoteData || !quoteData.customer_email) {
+            quoteData = await api.getQuote(id);
+          }
+          
+          if (!quoteData?.customer_email) {
+            console.error('Cannot send email: missing customer email');
+            toast({ 
+              title: 'Avertissement', 
+              description: 'Email client manquant - notification non envoyée',
+              variant: 'default'
+            });
+            return;
+          }
+
+          const templateKey = status === 'approved' ? 'quote_approved' : 'quote_rejected';
+          const emailData: Record<string, any> = {
+            customer_name: quoteData.customer_name,
+            reference: quoteData.reference_number,
+            model_name: quoteData.model_name,
+            total_price: formatPrice(quoteData.total_price),
+          };
+          
+          // Add rejection reason for rejected status
+          // Note: Default message used; custom rejection reasons can be implemented in a future enhancement
+          if (status === 'rejected') {
+            emailData.rejection_reason = 'Veuillez nous contacter pour plus de détails.';
+          }
+          
           await api.sendTemplateEmail({
-            to: selectedQuote.customer_email,
-            template_key: 'quote_approved',
-            data: {
-              customer_name: selectedQuote.customer_name,
-              reference: selectedQuote.reference_number,
-              model_name: selectedQuote.model_name,
-              total_price: formatPrice(selectedQuote.total_price),
-            }
+            to: quoteData.customer_email,
+            template_key: templateKey,
+            data: emailData
           });
-          toast({ title: 'Email envoyé', description: 'Le client a été notifié de l\'approbation' });
+          
+          const message = status === 'approved' 
+            ? 'Le client a été notifié de l\'approbation'
+            : 'Le client a été notifié du refus';
+          toast({ title: 'Email envoyé', description: message });
         } catch (emailErr: any) {
           console.error('Email error:', emailErr);
           toast({ 
