@@ -339,26 +339,49 @@ export const api = {
   /* =====================================================
      EMAIL
   ===================================================== */
-  getEmailTemplates() {
-    return this.query('get_email_templates');
+  getEmailTemplates(templateType?: string) {
+    return this.query('get_email_templates', templateType ? { template_type: templateType } : {});
   },
 
-  createEmailTemplate(templateKey: string, subject: string, bodyHtml: string, bodyText?: string, isActive?: boolean) {
+  createEmailTemplate(data: {
+    templateKey: string;
+    templateType: string;
+    name: string;
+    description?: string;
+    subject: string;
+    bodyHtml: string;
+    bodyText?: string;
+    isActive?: boolean;
+  }) {
     return this.query('create_email_template', { 
-      template_key: templateKey, 
-      subject, 
-      body_html: bodyHtml, 
-      body_text: bodyText,
-      is_active: isActive ?? true
+      template_key: data.templateKey,
+      template_type: data.templateType,
+      name: data.name,
+      description: data.description,
+      subject: data.subject, 
+      body_html: data.bodyHtml, 
+      body_text: data.bodyText,
+      is_active: data.isActive ?? true
     });
   },
 
-  updateEmailTemplate(templateKey: string, subject: string, bodyHtml: string, bodyText?: string) {
+  updateEmailTemplate(data: {
+    templateKey: string;
+    templateType?: string;
+    name?: string;
+    description?: string;
+    subject: string;
+    bodyHtml: string;
+    bodyText?: string;
+  }) {
     return this.query('update_email_template', { 
-      template_key: templateKey, 
-      subject, 
-      body_html: bodyHtml, 
-      body_text: bodyText 
+      template_key: data.templateKey,
+      template_type: data.templateType,
+      name: data.name,
+      description: data.description,
+      subject: data.subject, 
+      body_html: data.bodyHtml, 
+      body_text: data.bodyText 
     });
   },
 

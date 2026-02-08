@@ -1069,7 +1069,14 @@ try {
 
         // === EMAIL TEMPLATES
         case 'get_email_templates': {
-            $stmt = $db->query("SELECT * FROM email_templates ORDER BY template_key");
+            // Filter by template_type if provided
+            $templateType = $body['template_type'] ?? null;
+            if ($templateType) {
+                $stmt = $db->prepare("SELECT * FROM email_templates WHERE template_type = ? ORDER BY name, template_key");
+                $stmt->execute([$templateType]);
+            } else {
+                $stmt = $db->query("SELECT * FROM email_templates ORDER BY template_type, name, template_key");
+            }
             ok($stmt->fetchAll());
             break;
         }
@@ -1084,12 +1091,22 @@ try {
                 fail('Un template avec cette clé existe déjà', 400);
             }
             
+            // Validate template_type
+            $validTypes = ['quote', 'notification', 'password_reset', 'contact', 'status_change', 'other'];
+            $templateType = $body['template_type'] ?? 'other';
+            if (!in_array($templateType, $validTypes)) {
+                $templateType = 'other';
+            }
+            
             $stmt = $db->prepare("
-                INSERT INTO email_templates (template_key, subject, body_html, body_text, is_active)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO email_templates (template_key, template_type, name, description, subject, body_html, body_text, is_active)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ");
             $stmt->execute([
                 sanitize($body['template_key']),
+                $templateType,
+                sanitize($body['name'] ?? $body['template_key']),
+                sanitize($body['description'] ?? ''),
                 sanitize($body['subject']),
                 $body['body_html'],
                 $body['body_text'] ?? '',
@@ -1101,17 +1118,44 @@ try {
 
         case 'update_email_template': {
             validateRequired($body, ['template_key', 'subject', 'body_html']);
-            $stmt = $db->prepare("
-                UPDATE email_templates 
-                SET subject = ?, body_html = ?, body_text = ?, updated_at = NOW()
-                WHERE template_key = ?
-            ");
-            $stmt->execute([
-                sanitize($body['subject']),
-                $body['body_html'],
-                $body['body_text'] ?? '',
-                $body['template_key']
-            ]);
+            
+            // Validate template_type if provided
+            $validTypes = ['quote', 'notification', 'password_reset', 'contact', 'status_change', 'other'];
+            $templateType = $body['template_type'] ?? null;
+            if ($templateType && !in_array($templateType, $validTypes)) {
+                $templateType = 'other';
+            }
+            
+            if ($templateType) {
+                $stmt = $db->prepare("
+                    UPDATE email_templates 
+                    SET template_type = ?, name = ?, description = ?, subject = ?, body_html = ?, body_text = ?, updated_at = NOW()
+                    WHERE template_key = ?
+                ");
+                $stmt->execute([
+                    $templateType,
+                    sanitize($body['name'] ?? $body['template_key']),
+                    sanitize($body['description'] ?? ''),
+                    sanitize($body['subject']),
+                    $body['body_html'],
+                    $body['body_text'] ?? '',
+                    $body['template_key']
+                ]);
+            } else {
+                $stmt = $db->prepare("
+                    UPDATE email_templates 
+                    SET name = ?, description = ?, subject = ?, body_html = ?, body_text = ?, updated_at = NOW()
+                    WHERE template_key = ?
+                ");
+                $stmt->execute([
+                    sanitize($body['name'] ?? $body['template_key']),
+                    sanitize($body['description'] ?? ''),
+                    sanitize($body['subject']),
+                    $body['body_html'],
+                    $body['body_text'] ?? '',
+                    $body['template_key']
+                ]);
+            }
             ok();
             break;
         }
