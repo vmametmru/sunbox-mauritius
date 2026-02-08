@@ -40,6 +40,20 @@ import { useToast } from '@/hooks/use-toast';
 /* ======================================================
    TYPES
 ====================================================== */
+// DevIdea from backend (id is always present)
+interface DevIdeaFromDB {
+  id: number;
+  name: string;
+  script: string;
+  statut: 'non_demarree' | 'en_cours' | 'completee';
+  urgence: 'urgent' | 'non_urgent';
+  importance: 'important' | 'non_important';
+  priority_order: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+// DevIdea for editing (id is optional for new items)
 interface DevIdea {
   id?: number;
   name: string;
@@ -52,6 +66,8 @@ interface DevIdea {
   updated_at?: string;
 }
 
+const SCRIPT_PREVIEW_LENGTH = 300;
+
 const emptyIdea: DevIdea = {
   name: '',
   script: '',
@@ -63,9 +79,9 @@ const emptyIdea: DevIdea = {
 
 /* ======================================================
    COMPONENT
-====================================================== */
+======================================================*/
 export default function DevIdeasPage() {
-  const [ideas, setIdeas] = useState<DevIdea[]>([]);
+  const [ideas, setIdeas] = useState<DevIdeaFromDB[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -90,7 +106,9 @@ export default function DevIdeasPage() {
     try {
       setLoading(true);
       const data = await api.getDevIdeas();
-      setIdeas(Array.isArray(data) ? data : []);
+      // Filter to ensure all items have an id
+      const validData = Array.isArray(data) ? data.filter((d: DevIdeaFromDB) => d.id != null) : [];
+      setIdeas(validData);
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
       setIdeas([]);
@@ -107,7 +125,7 @@ export default function DevIdeasPage() {
     setIsDialogOpen(true);
   };
 
-  const openEditIdea = (idea: DevIdea) => {
+  const openEditIdea = (idea: DevIdeaFromDB) => {
     setEditingIdea({ ...idea });
     setIsDialogOpen(true);
   };
@@ -146,7 +164,7 @@ export default function DevIdeasPage() {
     }
   };
 
-  const copyScript = async (idea: DevIdea) => {
+  const copyScript = async (idea: DevIdeaFromDB) => {
     if (!idea.script) {
       toast({ title: 'Info', description: 'Aucun script à copier' });
       return;
@@ -154,7 +172,7 @@ export default function DevIdeasPage() {
     
     try {
       await navigator.clipboard.writeText(idea.script);
-      setCopiedId(idea.id!);
+      setCopiedId(idea.id);
       toast({ title: 'Copié!', description: 'Script copié dans le presse-papier' });
       setTimeout(() => setCopiedId(null), 2000);
     } catch (err) {
@@ -198,7 +216,7 @@ export default function DevIdeasPage() {
 
     // Create new order
     const orders = newIdeas.map((idea, index) => ({
-      id: idea.id!,
+      id: idea.id,
       priority_order: index + 1
     }));
 
@@ -216,10 +234,11 @@ export default function DevIdeasPage() {
   /* ======================================================
      FILTER
   ====================================================== */
-  const getFilteredIdeas = () => {
+  const getFilteredIdeas = (): DevIdeaFromDB[] => {
     return ideas.filter(idea => {
-      const matchesSearch = idea.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        idea.script?.toLowerCase().includes(searchTerm.toLowerCase());
+      const searchLower = searchTerm.toLowerCase();
+      const matchesSearch = idea.name.toLowerCase().includes(searchLower) ||
+        (idea.script || '').toLowerCase().includes(searchLower);
       const matchesStatus = statusFilter === 'all' || idea.statut === statusFilter;
       const matchesUrgence = urgenceFilter === 'all' || idea.urgence === urgenceFilter;
       const matchesImportance = importanceFilter === 'all' || idea.importance === importanceFilter;
@@ -388,9 +407,9 @@ export default function DevIdeasPage() {
             key={idea.id} 
             className={`overflow-hidden transition-all ${draggedId === idea.id ? 'opacity-50' : ''}`}
             draggable
-            onDragStart={(e) => handleDragStart(e, idea.id!)}
+            onDragStart={(e) => handleDragStart(e, idea.id)}
             onDragOver={handleDragOver}
-            onDrop={(e) => handleDrop(e, idea.id!)}
+            onDrop={(e) => handleDrop(e, idea.id)}
           >
             <CardContent className="p-4">
               <div className="flex items-start gap-4">
@@ -425,7 +444,7 @@ export default function DevIdeasPage() {
                       <Button size="sm" variant="ghost" onClick={() => openEditIdea(idea)}>
                         <Edit className="h-4 w-4" />
                       </Button>
-                      <Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteIdea(idea.id!)}>
+                      <Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteIdea(idea.id)}>
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
@@ -434,7 +453,7 @@ export default function DevIdeasPage() {
                   {idea.script && (
                     <div className="mt-3 p-3 bg-gray-50 rounded-lg">
                       <pre className="text-sm text-gray-600 whitespace-pre-wrap font-mono max-h-32 overflow-y-auto">
-                        {idea.script.length > 300 ? idea.script.substring(0, 300) + '...' : idea.script}
+                        {idea.script.length > SCRIPT_PREVIEW_LENGTH ? idea.script.substring(0, SCRIPT_PREVIEW_LENGTH) + '...' : idea.script}
                       </pre>
                     </div>
                   )}

@@ -1290,14 +1290,18 @@ try {
         }
 
         case 'update_dev_idea': {
-            validateRequired($body, ['id']);
+            validateRequired($body, ['id', 'name']);
+            $name = trim(sanitize($body['name']));
+            if (empty($name)) {
+                fail("Le nom de l'idée est requis");
+            }
             $stmt = $db->prepare("
                 UPDATE development_ideas SET
                     name = ?, script = ?, statut = ?, urgence = ?, importance = ?, updated_at = NOW()
                 WHERE id = ?
             ");
             $stmt->execute([
-                sanitize($body['name'] ?? ''),
+                $name,
                 $body['script'] ?? '',
                 $body['statut'] ?? 'non_demarree',
                 $body['urgence'] ?? 'non_urgent',
