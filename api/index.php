@@ -1223,8 +1223,21 @@ try {
                     }
                 }
                 
+                // Handle contact_id update - use explicit null check to allow unsetting contact
+                if (array_key_exists('contact_id', $body)) {
+                    $contactId = ($body['contact_id'] !== null && $body['contact_id'] !== '') ? (int)$body['contact_id'] : null;
+                    $contactStmt = $db->prepare("UPDATE quotes SET contact_id = ? WHERE id = ?");
+                    $contactStmt->execute([$contactId, $id]);
+                }
+                
                 $db->commit();
-                ok();
+                
+                // Get the quote reference number for the response
+                $refStmt = $db->prepare("SELECT reference_number FROM quotes WHERE id = ?");
+                $refStmt->execute([$id]);
+                $refNumber = $refStmt->fetchColumn();
+                
+                ok(['id' => $id, 'reference_number' => $refNumber]);
             } catch (Exception $e) {
                 $db->rollBack();
                 throw $e;

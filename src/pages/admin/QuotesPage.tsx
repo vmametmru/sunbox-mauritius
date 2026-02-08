@@ -15,7 +15,8 @@ import {
   Plus,
   Copy,
   Edit,
-  Calculator
+  Calculator,
+  Settings
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -26,6 +27,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import AdminConfigureModal from '@/components/AdminConfigureModal';
 
 export default function QuotesPage() {
   const [quotes, setQuotes] = useState<any[]>([]);
@@ -36,6 +38,11 @@ export default function QuotesPage() {
   const [selectedQuote, setSelectedQuote] = useState<any>(null);
   const [quoteDetails, setQuoteDetails] = useState<any>(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
+  
+  // Admin Configure Modal state for editing model-based quotes
+  const [editQuoteId, setEditQuoteId] = useState<number | null>(null);
+  const [showConfigureModal, setShowConfigureModal] = useState(false);
+  
   const { toast } = useToast();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -197,6 +204,28 @@ export default function QuotesPage() {
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
     }
+  };
+
+  // Handler to open the correct editor based on quote type
+  const handleEditQuote = (quote: any) => {
+    if (quote.is_free_quote) {
+      // Free-form quotes go to CreateQuotePage
+      navigate(`/admin/quotes/new?edit=${quote.id}`);
+    } else {
+      // Model-based quotes open the ConfigureModal
+      setEditQuoteId(quote.id);
+      setShowConfigureModal(true);
+    }
+    setSelectedQuote(null);
+  };
+
+  const handleConfigureModalClose = () => {
+    setShowConfigureModal(false);
+    setEditQuoteId(null);
+  };
+
+  const handleConfigureModalSaved = () => {
+    loadQuotes(); // Refresh the quotes list
   };
 
   const formatPrice = (price: number) => {
@@ -378,8 +407,14 @@ export default function QuotesPage() {
                         <Button size="sm" variant="outline" onClick={() => loadQuoteDetails(quote)} aria-label="Voir les détails">
                           <Eye className="h-4 w-4" />
                         </Button>
-                        <Button size="sm" variant="outline" onClick={() => navigate(`/admin/quotes/new?edit=${quote.id}`)} aria-label="Modifier le devis">
-                          <Edit className="h-4 w-4" />
+                        <Button 
+                          size="sm" 
+                          variant="outline" 
+                          onClick={() => handleEditQuote(quote)} 
+                          aria-label="Modifier le devis"
+                          title={quote.is_free_quote ? "Modifier le devis libre" : "Ouvrir le configurateur"}
+                        >
+                          {quote.is_free_quote ? <Edit className="h-4 w-4" /> : <Settings className="h-4 w-4" />}
                         </Button>
                         <Button size="sm" variant="outline" onClick={() => navigate(`/admin/quotes/new?clone=${quote.id}`)} aria-label="Cloner le devis">
                           <Copy className="h-4 w-4" />
@@ -578,13 +613,15 @@ export default function QuotesPage() {
                 {/* Edit & Clone buttons */}
                 <Button 
                   variant="outline"
-                  onClick={() => {
-                    setSelectedQuote(null);
-                    navigate(`/admin/quotes/new?edit=${selectedQuote.id}`);
-                  }}
+                  onClick={() => handleEditQuote(selectedQuote)}
+                  title={selectedQuote.is_free_quote ? "Modifier le devis libre" : "Ouvrir le configurateur"}
                 >
-                  <Edit className="h-4 w-4 mr-2" />
-                  Modifier
+                  {selectedQuote.is_free_quote ? (
+                    <Edit className="h-4 w-4 mr-2" />
+                  ) : (
+                    <Settings className="h-4 w-4 mr-2" />
+                  )}
+                  {selectedQuote.is_free_quote ? 'Modifier' : 'Configurer'}
                 </Button>
                 <Button 
                   variant="outline"
@@ -611,6 +648,14 @@ export default function QuotesPage() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Admin Configure Modal for editing model-based quotes */}
+      <AdminConfigureModal
+        open={showConfigureModal}
+        onClose={handleConfigureModalClose}
+        quoteId={editQuoteId || undefined}
+        onSaved={handleConfigureModalSaved}
+      />
     </div>
   );
 }
