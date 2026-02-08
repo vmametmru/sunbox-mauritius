@@ -115,8 +115,8 @@ export default function QuotesPage() {
         setSelectedQuote({ ...selectedQuote, status });
       }
       
-      // Send email notification for status changes (approved or rejected)
-      if (status === 'approved' || status === 'rejected') {
+      // Send email notification for status changes (approved, validated, or rejected)
+      if (status === 'approved' || status === 'validated' || status === 'rejected') {
         try {
           // Fetch quote data to ensure we have all necessary fields
           // Use selectedQuote if available, otherwise fetch from API
@@ -135,7 +135,7 @@ export default function QuotesPage() {
             return;
           }
 
-          const templateKey = status === 'approved' ? 'quote_approved' : 'quote_rejected';
+          const templateKey = (status === 'approved' || status === 'validated') ? 'quote_approved' : 'quote_rejected';
           const emailData: Record<string, any> = {
             customer_name: quoteData.customer_name,
             reference: quoteData.reference_number,
@@ -155,9 +155,11 @@ export default function QuotesPage() {
             data: emailData
           });
           
-          const message = status === 'approved' 
-            ? 'Le client a été notifié de l\'approbation'
-            : 'Le client a été notifié du refus';
+          const message = status === 'validated'
+            ? 'Le client a été notifié de la validation'
+            : status === 'approved'
+              ? 'Le client a été notifié de l\'approbation'
+              : 'Le client a été notifié du refus';
           toast({ title: 'Email envoyé', description: message });
         } catch (emailErr: any) {
           console.error('Email error:', emailErr);
