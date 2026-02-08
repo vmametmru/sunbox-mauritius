@@ -335,6 +335,40 @@ export const api = {
   updateSettingsBulk(settings: Array<{ key: string; value: string; group?: string }>) {
     return this.query('update_settings_bulk', { settings });
   },
+
+  /* =====================================================
+     EMAIL
+  ===================================================== */
+  getEmailTemplates() {
+    return this.query('get_email_templates');
+  },
+
+  updateEmailTemplate(templateKey: string, subject: string, bodyHtml: string, bodyText?: string) {
+    return this.query('update_email_template', { 
+      template_key: templateKey, 
+      subject, 
+      body_html: bodyHtml, 
+      body_text: bodyText 
+    });
+  },
+
+  getEmailLogs(limit: number = 50) {
+    return this.query('get_email_logs', { limit });
+  },
+
+  async testEmailConfig(toEmail: string) {
+    const response = await fetch(`${API_BASE_URL}/email.php?action=test`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: toEmail }),
+    });
+
+    const result = await response.json();
+    if (!response.ok || result.error) {
+      throw new Error(result.error || 'Failed to send test email');
+    }
+    return result.data !== undefined ? result.data : result;
+  },
 };
 
 export default api;

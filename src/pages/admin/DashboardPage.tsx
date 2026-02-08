@@ -7,7 +7,8 @@ import {
   TrendingUp,
   Users,
   Mail,
-  RefreshCw
+  RefreshCw,
+  AlertTriangle
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -26,8 +27,15 @@ interface DashboardStats {
   monthly_stats: any[];
 }
 
+interface EmailSettings {
+  smtp_host?: string;
+  smtp_user?: string;
+  smtp_port?: string;
+}
+
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [emailSettings, setEmailSettings] = useState<EmailSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -41,12 +49,23 @@ export default function DashboardPage() {
       setError(null);
       const result = await api.getDashboardStats();
       setStats(result);
+      
+      // Also load email settings to check if configured
+      try {
+        const settings = await api.getSettings('email');
+        setEmailSettings(settings);
+      } catch (e) {
+        // Silently fail - email settings might not be accessible
+      }
     } catch (err: any) {
       setError(err.message || 'Erreur de connexion à la base de données');
     } finally {
       setLoading(false);
     }
   };
+
+  // Check if email is properly configured
+  const isEmailConfigured = emailSettings?.smtp_host && emailSettings?.smtp_user;
 
   const formatPrice = (price: number) => {
     return new Intl.NumberFormat('fr-MU', {
@@ -306,26 +325,28 @@ export default function DashboardPage() {
         </Card>
       )}
 
-      {/* Info Card */}
-      <Card className="bg-gray-50">
-        <CardContent className="p-6">
-          <div className="flex items-start gap-4">
-            <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
-              <Mail className="h-5 w-5 text-blue-600" />
+      {/* Email Configuration Warning - only show if NOT configured */}
+      {!isEmailConfigured && (
+        <Card className="bg-amber-50 border-amber-200">
+          <CardContent className="p-6">
+            <div className="flex items-start gap-4">
+              <div className="w-10 h-10 bg-amber-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                <AlertTriangle className="h-5 w-5 text-amber-600" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-amber-900">Configuration Email Requise</h3>
+                <p className="text-sm text-amber-700 mt-1">
+                  Configurez vos paramètres SMTP pour recevoir les notifications de nouveaux devis
+                  et envoyer des confirmations aux clients.
+                </p>
+                <Link to="/admin/email" className="text-sm text-orange-600 hover:text-orange-700 font-medium mt-2 inline-block">
+                  Configurer les emails →
+                </Link>
+              </div>
             </div>
-            <div>
-              <h3 className="font-semibold text-gray-900">Configuration Email</h3>
-              <p className="text-sm text-gray-600 mt-1">
-                N'oubliez pas de configurer vos paramètres SMTP pour recevoir les notifications de nouveaux devis
-                et envoyer des confirmations aux clients.
-              </p>
-              <Link to="/admin/email" className="text-sm text-orange-600 hover:text-orange-700 font-medium mt-2 inline-block">
-                Configurer les emails →
-              </Link>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

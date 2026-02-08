@@ -46,8 +46,13 @@ export default function AdminLayout() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Helper: active state also for subroutes (ex: /admin/media/123)
-  const isActive = (path: string) =>
-    location.pathname === path || location.pathname.startsWith(path + '/');
+  // Special case for Dashboard (/admin): only exact match, not startsWith
+  const isActive = (path: string) => {
+    if (path === '/admin') {
+      return location.pathname === '/admin';
+    }
+    return location.pathname === path || location.pathname.startsWith(path + '/');
+  };
 
   return (
     <div className="min-h-screen bg-gray-100">
