@@ -215,13 +215,6 @@ export default function ContactsPage() {
     return contacts.filter(c => c.status === status).length;
   };
 
-  // Calculate profit (difference between total_price and base_price + options_total would be markup, but here we show options as profit margin)
-  const calculateProfit = (quote: ContactQuote) => {
-    // Assuming VAT is 15% and profit is calculated from the margin
-    // For simplicity, showing the options_total as the "added value"
-    return quote.options_total;
-  };
-
   // Calculate HT from TTC (assuming 15% VAT)
   const calculateHT = (ttc: number) => {
     return Math.round(ttc / 1.15);

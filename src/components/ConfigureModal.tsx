@@ -71,7 +71,15 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
   const getDeviceId = () => {
     let deviceId = localStorage.getItem('sunbox_device_id');
     if (!deviceId) {
-      deviceId = 'device_' + Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
+      // Use crypto.randomUUID if available, otherwise fallback to secure random
+      if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+        deviceId = 'device_' + crypto.randomUUID();
+      } else {
+        // Fallback using crypto.getRandomValues for older browsers
+        const array = new Uint8Array(16);
+        crypto.getRandomValues(array);
+        deviceId = 'device_' + Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
+      }
       localStorage.setItem('sunbox_device_id', deviceId);
     }
     return deviceId;
