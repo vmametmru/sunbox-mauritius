@@ -753,15 +753,24 @@ try {
         case 'create_quote': {
             validateRequired($body, ['model_id', 'model_name', 'model_type', 'base_price', 'total_price', 'customer_name', 'customer_email', 'customer_phone']);
             
+            // Validate model_type
+            $validTypes = ['container', 'pool'];
+            if (!in_array($body['model_type'], $validTypes)) {
+                fail('Type de modèle invalide');
+            }
+            
             // Use transaction to prevent race conditions
             $db->beginTransaction();
             
             try {
-                // Generate reference number: SBM-YYYYMMDD-XXXX using MAX(id) for uniqueness
-                $date = date('Ymd');
+                // Generate reference number: WCQ-yyyymm-xxxxxx (container) or WPQ-yyyymm-xxxxxx (pool)
+                // The xxxxxx is a combined sequential counter shared between both types
+                $yearMonth = date('Ym');
+                $modelType = $body['model_type'];
+                $prefix = ($modelType === 'container') ? 'WCQ' : 'WPQ';
                 $maxIdStmt = $db->query("SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM quotes");
                 $nextId = (int)$maxIdStmt->fetchColumn();
-                $reference = sprintf('SBM-%s-%04d', $date, $nextId);
+                $reference = sprintf('%s-%s-%06d', $prefix, $yearMonth, $nextId);
                 
                 // Calculate valid_until (30 days from now)
                 $validUntil = date('Y-m-d', strtotime('+30 days'));
@@ -842,7 +851,8 @@ try {
                 $quoteId = $db->lastInsertId();
                 
                 // Update reference with actual quote ID for guaranteed uniqueness
-                $reference = sprintf('SBM-%s-%04d', $date, $quoteId);
+                // WCQ-yyyymm-xxxxxx (container) or WPQ-yyyymm-xxxxxx (pool)
+                $reference = sprintf('%s-%s-%06d', $prefix, $yearMonth, $quoteId);
                 $db->prepare("UPDATE quotes SET reference_number = ? WHERE id = ?")->execute([$reference, $quoteId]);
                 
                 // Insert selected options
