@@ -11,16 +11,21 @@
 require_once __DIR__ . '/config.php';
 
 /**
- * Load Composer autoload (usually in project root: public_html/vendor/autoload.php)
- * Fallback to api/vendor/autoload.php if you installed it there (rare).
+ * Load Composer autoload - try multiple common paths
+ * Supports various hosting configurations (a2hosting, cPanel, etc.)
  */
-$autoload1 = dirname(__DIR__) . '/vendor/autoload.php'; // public_html/vendor/autoload.php
-$autoload2 = __DIR__ . '/vendor/autoload.php';          // public_html/api/vendor/autoload.php
+$autoloadPaths = [
+    dirname(__DIR__) . '/vendor/autoload.php',           // public_html/vendor/autoload.php
+    __DIR__ . '/vendor/autoload.php',                    // public_html/api/vendor/autoload.php
+    dirname(__DIR__, 2) . '/vendor/autoload.php',        // One level above public_html
+    '/home/' . get_current_user() . '/vendor/autoload.php', // User home directory
+];
 
-if (file_exists($autoload1)) {
-    require_once $autoload1;
-} elseif (file_exists($autoload2)) {
-    require_once $autoload2;
+foreach ($autoloadPaths as $autoloadPath) {
+    if (file_exists($autoloadPath)) {
+        require_once $autoloadPath;
+        break;
+    }
 }
 
 // Handle CORS
@@ -214,14 +219,17 @@ function normalizeEmailSettings(array $dbSettings): array
 }
 
 /**
- * Send email using PHPMailer (required)
+ * Send email - uses PHPMailer if available, falls back to native PHP mail()
  */
 function sendEmail($settings, $data)
 {
-    if (!class_exists('PHPMailer\\PHPMailer\\PHPMailer')) {
-        errorResponse('PHPMailer is not installed. Run: composer require phpmailer/phpmailer', 500);
+    // Try PHPMailer first (preferred for SMTP with Google Workspace)
+    if (class_exists('PHPMailer\\PHPMailer\\PHPMailer')) {
+        return sendWithPHPMailer($settings, $data);
     }
-    return sendWithPHPMailer($settings, $data);
+    
+    // Fallback to native PHP mail() function
+    return sendWithNativeMail($settings, $data);
 }
 
 /**
@@ -276,6 +284,62 @@ function sendWithPHPMailer($settings, $data)
 
     } catch (Exception $e) {
         error_log('PHPMailer Error: ' . $e->getMessage());
+        return false;
+    }
+}
+
+/**
+ * Send email using native PHP mail() function
+ * Used as fallback when PHPMailer is not available
+ */
+function sendWithNativeMail($settings, $data)
+{
+    try {
+        $to = is_array($data['to']) ? implode(', ', $data['to']) : $data['to'];
+        $subject = (string)($data['subject'] ?? '');
+        $htmlBody = (string)($data['html'] ?? $data['body'] ?? '');
+        $textBody = (string)($data['text'] ?? strip_tags($htmlBody));
+        
+        // Get from email and name from settings (already normalized from env in normalizeEmailSettings)
+        $fromEmail = $settings['smtp_from_email'] ?? $settings['smtp_user'] ?? '';
+        $fromName = $settings['smtp_from_name'] ?? '';
+        
+        if (empty($fromEmail)) {
+            error_log('Native mail: No from email configured');
+            return false;
+        }
+        
+        // Build headers
+        $headers = [];
+        $headers[] = 'MIME-Version: 1.0';
+        $headers[] = 'Content-type: text/html; charset=UTF-8';
+        $headers[] = 'From: ' . ($fromName ? $fromName . ' <' . $fromEmail . '>' : $fromEmail);
+        $headers[] = 'Reply-To: ' . $fromEmail;
+        $headers[] = 'X-Mailer: PHP/' . phpversion();
+        
+        // Add CC if provided
+        if (!empty($data['cc'])) {
+            $ccList = is_array($data['cc']) ? $data['cc'] : explode(',', $data['cc']);
+            $ccList = array_map('trim', $ccList);
+            $ccList = array_filter($ccList);
+            if (!empty($ccList)) {
+                $headers[] = 'Cc: ' . implode(', ', $ccList);
+            }
+        }
+        
+        $headerString = implode("\r\n", $headers);
+        
+        // Use mail() function
+        $result = mail($to, $subject, $htmlBody, $headerString);
+        
+        if (!$result) {
+            error_log('Native mail() failed for recipient: ' . $to);
+        }
+        
+        return $result;
+        
+    } catch (Exception $e) {
+        error_log('Native mail Error: ' . $e->getMessage());
         return false;
     }
 }
