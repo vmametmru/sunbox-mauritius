@@ -24,6 +24,7 @@ import AdminLoginPage from "./pages/AdminLoginPage";
 import AdminLayout from "./pages/admin/AdminLayout";
 import DashboardPage from "./pages/admin/DashboardPage";
 import QuotesPage from "./pages/admin/QuotesPage";
+import ContactsPage from "./pages/admin/ContactsPage";
 import AdminModelsPage from "./pages/admin/ModelsPage";
 import EmailSettingsPage from "./pages/admin/EmailSettingsPage";
 import RequireAdmin from "./components/RequireAdmin";
@@ -59,6 +60,7 @@ const App = () => (
                 <Route path="/admin" element={<AdminLayout />}>
                   <Route index element={<DashboardPage />} />
                   <Route path="quotes" element={<QuotesPage />} />
+                  <Route path="contacts" element={<ContactsPage />} />
                   <Route path="models" element={<AdminModelsPage />} />
                   <Route path="media" element={<MediaPage />} />
                   <Route path="boq" element={<BOQPage />} />

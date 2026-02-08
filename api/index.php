@@ -711,7 +711,7 @@ try {
         // === QUOTES
         case 'get_quotes': {
             $stmt = $db->prepare("
-                SELECT q.*, m.name as model_name, m.type as model_type
+                SELECT q.*, m.name as model_name, m.type as model_type, q.contact_id
                 FROM quotes q
                 LEFT JOIN models m ON q.model_id = m.id
                 ORDER BY q.created_at DESC
@@ -766,14 +766,61 @@ try {
                 // Calculate valid_until (30 days from now)
                 $validUntil = date('Y-m-d', strtotime('+30 days'));
                 
+                // Create or update contact based on email
+                $customerEmail = sanitize($body['customer_email']);
+                $customerName = sanitize($body['customer_name']);
+                $customerPhone = sanitize($body['customer_phone']);
+                $customerAddress = sanitize($body['customer_address'] ?? '');
+                $deviceId = isset($body['device_id']) ? sanitize($body['device_id']) : null;
+                
+                // Check if contact exists by email
+                $contactStmt = $db->prepare("SELECT id FROM contacts WHERE email = ?");
+                $contactStmt->execute([$customerEmail]);
+                $existingContact = $contactStmt->fetch();
+                
+                if ($existingContact) {
+                    // Update existing contact
+                    $contactId = $existingContact['id'];
+                    $updateContactStmt = $db->prepare("
+                        UPDATE contacts SET 
+                            name = ?, 
+                            phone = ?, 
+                            address = ?,
+                            device_id = COALESCE(?, device_id),
+                            updated_at = NOW()
+                        WHERE id = ?
+                    ");
+                    $updateContactStmt->execute([
+                        $customerName,
+                        $customerPhone,
+                        $customerAddress,
+                        $deviceId,
+                        $contactId
+                    ]);
+                } else {
+                    // Create new contact
+                    $insertContactStmt = $db->prepare("
+                        INSERT INTO contacts (name, email, phone, address, device_id, status)
+                        VALUES (?, ?, ?, ?, ?, 'new')
+                    ");
+                    $insertContactStmt->execute([
+                        $customerName,
+                        $customerEmail,
+                        $customerPhone,
+                        $customerAddress,
+                        $deviceId
+                    ]);
+                    $contactId = $db->lastInsertId();
+                }
+                
                 $stmt = $db->prepare("
                     INSERT INTO quotes (
                         reference_number, model_id, model_name, model_type,
                         base_price, options_total, total_price,
                         customer_name, customer_email, customer_phone,
-                        customer_address, customer_message,
+                        customer_address, customer_message, contact_id,
                         status, valid_until
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
                 ");
                 $stmt->execute([
                     $reference,
@@ -783,11 +830,12 @@ try {
                     (float)$body['base_price'],
                     (float)($body['options_total'] ?? 0),
                     (float)$body['total_price'],
-                    sanitize($body['customer_name']),
-                    sanitize($body['customer_email']),
-                    sanitize($body['customer_phone']),
-                    sanitize($body['customer_address'] ?? ''),
+                    $customerName,
+                    $customerEmail,
+                    $customerPhone,
+                    $customerAddress,
                     sanitize($body['customer_message'] ?? ''),
+                    $contactId,
                     $validUntil,
                 ]);
                 
@@ -820,7 +868,7 @@ try {
                 }
                 
                 $db->commit();
-                ok(['id' => $quoteId, 'reference_number' => $reference]);
+                ok(['id' => $quoteId, 'reference_number' => $reference, 'contact_id' => $contactId]);
             } catch (Exception $e) {
                 $db->rollBack();
                 throw $e;
@@ -850,6 +898,134 @@ try {
             
             // Delete quote
             $stmt = $db->prepare("DELETE FROM quotes WHERE id = ?");
+            $stmt->execute([$id]);
+            ok();
+            break;
+        }
+
+        // === CONTACTS
+        case 'get_contacts': {
+            $stmt = $db->prepare("
+                SELECT c.*, 
+                    (SELECT COUNT(*) FROM quotes WHERE contact_id = c.id) as quote_count,
+                    (SELECT SUM(total_price) FROM quotes WHERE contact_id = c.id) as total_revenue
+                FROM contacts c
+                ORDER BY c.created_at DESC
+            ");
+            $stmt->execute();
+            ok($stmt->fetchAll());
+            break;
+        }
+
+        case 'get_contact': {
+            validateRequired($body, ['id']);
+            $id = (int)$body['id'];
+            
+            // Get contact
+            $stmt = $db->prepare("SELECT * FROM contacts WHERE id = ?");
+            $stmt->execute([$id]);
+            $contact = $stmt->fetch();
+            
+            if (!$contact) fail('Contact non trouvé', 404);
+            
+            // Get contact's quotes with financial details
+            $quotesStmt = $db->prepare("
+                SELECT 
+                    q.id,
+                    q.reference_number,
+                    q.model_name,
+                    q.base_price,
+                    q.options_total,
+                    q.total_price,
+                    q.status,
+                    q.created_at,
+                    q.valid_until
+                FROM quotes q
+                WHERE q.contact_id = ?
+                ORDER BY q.created_at DESC
+            ");
+            $quotesStmt->execute([$id]);
+            $contact['quotes'] = $quotesStmt->fetchAll();
+            
+            // Calculate totals
+            $contact['total_quotes'] = count($contact['quotes']);
+            $contact['total_revenue'] = array_sum(array_column($contact['quotes'], 'total_price'));
+            
+            ok($contact);
+            break;
+        }
+
+        case 'get_contact_by_device': {
+            validateRequired($body, ['device_id']);
+            $deviceId = sanitize($body['device_id']);
+            
+            // Find the most recent contact with this device_id
+            $stmt = $db->prepare("
+                SELECT id, name, email, phone, address 
+                FROM contacts 
+                WHERE device_id = ?
+                ORDER BY updated_at DESC
+                LIMIT 1
+            ");
+            $stmt->execute([$deviceId]);
+            $contact = $stmt->fetch();
+            
+            ok($contact ?: null);
+            break;
+        }
+
+        case 'update_contact': {
+            validateRequired($body, ['id']);
+            $id = (int)$body['id'];
+            
+            $updates = [];
+            $params = [];
+            
+            if (isset($body['name'])) {
+                $updates[] = "name = ?";
+                $params[] = sanitize($body['name']);
+            }
+            if (isset($body['email'])) {
+                $updates[] = "email = ?";
+                $params[] = sanitize($body['email']);
+            }
+            if (isset($body['phone'])) {
+                $updates[] = "phone = ?";
+                $params[] = sanitize($body['phone']);
+            }
+            if (isset($body['address'])) {
+                $updates[] = "address = ?";
+                $params[] = sanitize($body['address']);
+            }
+            if (isset($body['status'])) {
+                $validStatuses = ['new', 'read', 'replied', 'archived'];
+                if (!in_array($body['status'], $validStatuses)) {
+                    fail('Statut invalide');
+                }
+                $updates[] = "status = ?";
+                $params[] = $body['status'];
+            }
+            
+            if (empty($updates)) {
+                fail('Aucune mise à jour fournie');
+            }
+            
+            $params[] = $id;
+            $stmt = $db->prepare("UPDATE contacts SET " . implode(", ", $updates) . ", updated_at = NOW() WHERE id = ?");
+            $stmt->execute($params);
+            ok();
+            break;
+        }
+
+        case 'delete_contact': {
+            validateRequired($body, ['id']);
+            $id = (int)$body['id'];
+            
+            // Set contact_id to NULL in related quotes (don't delete quotes)
+            $db->prepare("UPDATE quotes SET contact_id = NULL WHERE contact_id = ?")->execute([$id]);
+            
+            // Delete contact
+            $stmt = $db->prepare("DELETE FROM contacts WHERE id = ?");
             $stmt->execute([$id]);
             ok();
             break;
