@@ -429,7 +429,7 @@ export default function CreateQuotePage() {
   const modelOptionsTotal = selectedModelOptionsTotal + selectedBOQOptionsTotal;
   const modelTotalPrice = modelBasePrice + modelOptionsTotal;
 
-  const formatPrice = (price: number) => `Rs ${price.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  const formatPrice = (price: number | undefined | null) => `Rs ${(price ?? 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 
   /* ======================================================
      SAVE QUOTE
@@ -477,6 +477,7 @@ export default function CreateQuotePage() {
           margin_percent: marginPercent,
           photo_url: photoUrl,
           plan_url: planUrl,
+          status: 'pending', // Reset status to pending when editing a quote
         };
 
         if (quoteMode === 'free') {
