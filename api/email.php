@@ -300,14 +300,20 @@ function sendWithNativeMail($settings, $data)
         $htmlBody = (string)($data['html'] ?? $data['body'] ?? '');
         $textBody = (string)($data['text'] ?? strip_tags($htmlBody));
         
-        $fromEmail = $settings['smtp_from_email'] ?? $settings['smtp_user'] ?? 'noreply@sunbox-mauritius.com';
-        $fromName = $settings['smtp_from_name'] ?? 'Sunbox Mauritius';
+        // Get from email and name from settings (already normalized from env in normalizeEmailSettings)
+        $fromEmail = $settings['smtp_from_email'] ?? $settings['smtp_user'] ?? '';
+        $fromName = $settings['smtp_from_name'] ?? '';
+        
+        if (empty($fromEmail)) {
+            error_log('Native mail: No from email configured');
+            return false;
+        }
         
         // Build headers
         $headers = [];
         $headers[] = 'MIME-Version: 1.0';
         $headers[] = 'Content-type: text/html; charset=UTF-8';
-        $headers[] = 'From: ' . $fromName . ' <' . $fromEmail . '>';
+        $headers[] = 'From: ' . ($fromName ? $fromName . ' <' . $fromEmail . '>' : $fromEmail);
         $headers[] = 'Reply-To: ' . $fromEmail;
         $headers[] = 'X-Mailer: PHP/' . phpversion();
         
