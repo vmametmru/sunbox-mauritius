@@ -1223,9 +1223,9 @@ try {
                     }
                 }
                 
-                // Handle contact_id update
-                if (isset($body['contact_id'])) {
-                    $contactId = $body['contact_id'] ? (int)$body['contact_id'] : null;
+                // Handle contact_id update - use explicit null check to allow unsetting contact
+                if (array_key_exists('contact_id', $body)) {
+                    $contactId = ($body['contact_id'] !== null && $body['contact_id'] !== '') ? (int)$body['contact_id'] : null;
                     $contactStmt = $db->prepare("UPDATE quotes SET contact_id = ? WHERE id = ?");
                     $contactStmt->execute([$contactId, $id]);
                 }

@@ -115,6 +115,9 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   
+  // Pending option IDs to be selected after options load (using ref instead of sessionStorage)
+  const pendingOptionIdsRef = React.useRef<number[]>([]);
+  
   // Contact selection
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [showContactSelector, setShowContactSelector] = useState(false);
@@ -163,6 +166,10 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
 
   const loadQuoteData = async (id: number) => {
     setLoading(true);
+    // Reset selected options when loading a new quote
+    setSelectedOptions([]);
+    pendingOptionIdsRef.current = [];
+    
     try {
       const quote = await api.getQuoteWithDetails(id);
       
@@ -172,9 +179,11 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
       
       if (modelData) {
         // Update base_price with TTC calculation
+        // Uses calculated_base_price (from BOQ) if available, otherwise falls back to manual base_price
+        const priceHT = Number(modelData.calculated_base_price ?? modelData.base_price ?? 0);
         setModel({
           ...modelData,
-          base_price: calculateTTC(Number(modelData.calculated_base_price ?? modelData.base_price ?? 0), vatRate),
+          base_price: calculateTTC(priceHT, vatRate),
         });
       }
       
@@ -186,12 +195,10 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
       setCustomerMessage(quote.customer_message || '');
       setContactId(quote.contact_id || null);
       
-      // Set selected options (will be applied after options are loaded)
+      // Store option IDs to be selected after options are loaded
       if (quote.options && quote.options.length > 0) {
-        // Store option IDs to select after options load
         const optionIds = quote.options.map((o: any) => o.option_id);
-        // We'll select them after options are loaded in the useEffect
-        sessionStorage.setItem('adminConfigureModal_selectedOptionIds', JSON.stringify(optionIds));
+        pendingOptionIdsRef.current = optionIds;
       }
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
@@ -218,13 +225,15 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
       }));
       setOptions(mapped);
       
-      // Apply pre-selected options from session storage
-      const storedOptionIds = sessionStorage.getItem('adminConfigureModal_selectedOptionIds');
-      if (storedOptionIds) {
-        const optionIds = JSON.parse(storedOptionIds);
-        const preselected = mapped.filter(o => optionIds.includes(o.id));
-        setSelectedOptions(prev => [...prev, ...preselected.filter(p => !prev.some(s => s.id === p.id))]);
-        sessionStorage.removeItem('adminConfigureModal_selectedOptionIds');
+      // Apply pre-selected options from pending IDs ref
+      if (pendingOptionIdsRef.current.length > 0) {
+        const preselected = mapped.filter(o => pendingOptionIdsRef.current.includes(o.id));
+        if (preselected.length > 0) {
+          setSelectedOptions(prev => {
+            const newOptions = preselected.filter(p => !prev.some(s => s.id === p.id));
+            return [...prev, ...newOptions];
+          });
+        }
       }
     } catch (err) {
       console.error(err);
@@ -261,12 +270,17 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
       );
       setBOQOptions(mapped);
       
-      // Apply pre-selected BOQ options from session storage
-      const storedOptionIds = sessionStorage.getItem('adminConfigureModal_selectedOptionIds');
-      if (storedOptionIds) {
-        const optionIds = JSON.parse(storedOptionIds);
-        const preselected = mapped.filter(o => optionIds.includes(o.id));
-        setSelectedOptions(prev => [...prev, ...preselected.filter(p => !prev.some(s => s.id === p.id))]);
+      // Apply pre-selected BOQ options from pending IDs ref
+      if (pendingOptionIdsRef.current.length > 0) {
+        const preselected = mapped.filter(o => pendingOptionIdsRef.current.includes(o.id));
+        if (preselected.length > 0) {
+          setSelectedOptions(prev => {
+            const newOptions = preselected.filter(p => !prev.some(s => s.id === p.id));
+            return [...prev, ...newOptions];
+          });
+        }
+        // Clear the ref after BOQ options are processed (both regular and BOQ are now loaded)
+        pendingOptionIdsRef.current = [];
       }
     } catch (err) {
       console.error(err);
@@ -434,6 +448,7 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
     setBOQOptions([]);
     setBaseCategories([]);
     setStep('options');
+    pendingOptionIdsRef.current = [];
     setErrors({});
     setSavedQuote(null);
     onClose();
