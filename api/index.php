@@ -1259,6 +1259,73 @@ try {
             break;
         }
 
+        // === DEVELOPMENT IDEAS
+        case 'get_dev_ideas': {
+            $sql = "SELECT * FROM development_ideas ORDER BY priority_order ASC, created_at DESC";
+            $stmt = $db->query($sql);
+            ok($stmt->fetchAll());
+            break;
+        }
+
+        case 'create_dev_idea': {
+            validateRequired($body, ['name']);
+            
+            // Get max priority_order to place new idea at the end
+            $maxOrder = (int)$db->query("SELECT COALESCE(MAX(priority_order), 0) FROM development_ideas")->fetchColumn();
+            
+            $stmt = $db->prepare("
+                INSERT INTO development_ideas (name, script, statut, urgence, importance, priority_order)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ");
+            $stmt->execute([
+                sanitize($body['name']),
+                $body['script'] ?? '',
+                $body['statut'] ?? 'non_demarree',
+                $body['urgence'] ?? 'non_urgent',
+                $body['importance'] ?? 'non_important',
+                $maxOrder + 1,
+            ]);
+            ok(['id' => $db->lastInsertId()]);
+            break;
+        }
+
+        case 'update_dev_idea': {
+            validateRequired($body, ['id']);
+            $stmt = $db->prepare("
+                UPDATE development_ideas SET
+                    name = ?, script = ?, statut = ?, urgence = ?, importance = ?, updated_at = NOW()
+                WHERE id = ?
+            ");
+            $stmt->execute([
+                sanitize($body['name'] ?? ''),
+                $body['script'] ?? '',
+                $body['statut'] ?? 'non_demarree',
+                $body['urgence'] ?? 'non_urgent',
+                $body['importance'] ?? 'non_important',
+                (int)$body['id'],
+            ]);
+            ok();
+            break;
+        }
+
+        case 'delete_dev_idea': {
+            validateRequired($body, ['id']);
+            $stmt = $db->prepare("DELETE FROM development_ideas WHERE id = ?");
+            $stmt->execute([(int)$body['id']]);
+            ok();
+            break;
+        }
+
+        case 'reorder_dev_ideas': {
+            validateRequired($body, ['orders']);
+            $stmt = $db->prepare("UPDATE development_ideas SET priority_order = ? WHERE id = ?");
+            foreach ($body['orders'] as $order) {
+                $stmt->execute([(int)$order['priority_order'], (int)$order['id']]);
+            }
+            ok();
+            break;
+        }
+
         default:
             fail('Invalid action', 400);
     }

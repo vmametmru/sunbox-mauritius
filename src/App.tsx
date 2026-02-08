@@ -32,6 +32,7 @@ import SiteSettingsPage from "./pages/admin/SiteSettingsPage";
 import MediaPage from "./pages/admin/MediaPage";
 import SuppliersPage from "./pages/admin/SuppliersPage";
 import BOQPage from "./pages/admin/BOQPage";
+import DevIdeasPage from "./pages/admin/DevIdeasPage";
 
 const queryClient = new QueryClient();
 
@@ -67,6 +68,7 @@ const App = () => (
                   <Route path="suppliers" element={<SuppliersPage />} />
                   <Route path="email" element={<EmailSettingsPage />} />
                   <Route path="site" element={<SiteSettingsPage />} />
+                  <Route path="dev-ideas" element={<DevIdeasPage />} />
                 </Route>
               </Route>
 
