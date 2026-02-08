@@ -45,14 +45,37 @@ interface EmailSettings {
   send_customer_confirmations: string;
 }
 
+type TemplateType = 'quote' | 'notification' | 'password_reset' | 'contact' | 'status_change' | 'other';
+
 interface EmailTemplate {
   id: number;
   template_key: string;
+  template_type: TemplateType;
+  name: string;
+  description: string;
   subject: string;
   body_html: string;
   body_text: string;
   is_active: boolean;
 }
+
+const templateTypeLabels: Record<TemplateType, string> = {
+  quote: 'Devis',
+  notification: 'Notification',
+  password_reset: 'Mot de passe',
+  contact: 'Contact',
+  status_change: 'Changement de statut',
+  other: 'Autre',
+};
+
+const templateTypeColors: Record<TemplateType, string> = {
+  quote: 'bg-blue-100 text-blue-800',
+  notification: 'bg-purple-100 text-purple-800',
+  password_reset: 'bg-yellow-100 text-yellow-800',
+  contact: 'bg-green-100 text-green-800',
+  status_change: 'bg-orange-100 text-orange-800',
+  other: 'bg-gray-100 text-gray-800',
+};
 
 interface EmailLog {
   id: number;
@@ -84,6 +107,9 @@ const defaultSettings: EmailSettings = {
 
 const defaultNewTemplate: Omit<EmailTemplate, 'id'> = {
   template_key: '',
+  template_type: 'other',
+  name: '',
+  description: '',
   subject: '',
   body_html: '',
   body_text: '',
@@ -171,12 +197,15 @@ export default function EmailSettingsPage() {
     
     try {
       setSaving(true);
-      await api.updateEmailTemplate(
-        selectedTemplate.template_key,
-        selectedTemplate.subject,
-        selectedTemplate.body_html,
-        selectedTemplate.body_text
-      );
+      await api.updateEmailTemplate({
+        templateKey: selectedTemplate.template_key,
+        templateType: selectedTemplate.template_type,
+        name: selectedTemplate.name,
+        description: selectedTemplate.description,
+        subject: selectedTemplate.subject,
+        bodyHtml: selectedTemplate.body_html,
+        bodyText: selectedTemplate.body_text
+      });
       toast({ title: 'Succès', description: 'Template enregistré' });
       loadData();
     } catch (err: any) {
@@ -187,7 +216,7 @@ export default function EmailSettingsPage() {
   };
 
   const createTemplate = async () => {
-    if (!newTemplate.template_key || !newTemplate.subject || !newTemplate.body_html) {
+    if (!newTemplate.template_key || !newTemplate.name || !newTemplate.subject || !newTemplate.body_html) {
       toast({ title: 'Erreur', description: 'Veuillez remplir tous les champs obligatoires', variant: 'destructive' });
       return;
     }
@@ -205,13 +234,16 @@ export default function EmailSettingsPage() {
     
     try {
       setSaving(true);
-      await api.createEmailTemplate(
-        newTemplate.template_key,
-        newTemplate.subject,
-        newTemplate.body_html,
-        newTemplate.body_text,
-        newTemplate.is_active
-      );
+      await api.createEmailTemplate({
+        templateKey: newTemplate.template_key,
+        templateType: newTemplate.template_type,
+        name: newTemplate.name,
+        description: newTemplate.description,
+        subject: newTemplate.subject,
+        bodyHtml: newTemplate.body_html,
+        bodyText: newTemplate.body_text,
+        isActive: newTemplate.is_active
+      });
       toast({ title: 'Succès', description: 'Template créé avec succès' });
       setShowCreateForm(false);
       setNewTemplate(defaultNewTemplate);
@@ -636,6 +668,36 @@ export default function EmailSettingsPage() {
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
+                      <Label>Type de template *</Label>
+                      <Select 
+                        value={newTemplate.template_type} 
+                        onValueChange={(v) => setNewTemplate({ ...newTemplate, template_type: v as TemplateType })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Sélectionnez un type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="quote">Devis</SelectItem>
+                          <SelectItem value="notification">Notification</SelectItem>
+                          <SelectItem value="password_reset">Réinitialisation mot de passe</SelectItem>
+                          <SelectItem value="contact">Contact</SelectItem>
+                          <SelectItem value="status_change">Changement de statut</SelectItem>
+                          <SelectItem value="other">Autre</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-gray-500">Catégorie du template</p>
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <Label>Nom du template *</Label>
+                      <Input
+                        value={newTemplate.name}
+                        onChange={(e) => setNewTemplate({ ...newTemplate, name: e.target.value })}
+                        placeholder="ex: Confirmation de devis"
+                      />
+                    </div>
+                    
+                    <div className="space-y-2">
                       <Label>Clé du template *</Label>
                       <Input
                         value={newTemplate.template_key}
@@ -653,6 +715,15 @@ export default function EmailSettingsPage() {
                         placeholder="ex: Bienvenue chez Sunbox Mauritius"
                       />
                     </div>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label>Description</Label>
+                    <Input
+                      value={newTemplate.description}
+                      onChange={(e) => setNewTemplate({ ...newTemplate, description: e.target.value })}
+                      placeholder="Description courte du template"
+                    />
                   </div>
                   
                   <div className="space-y-2">
@@ -707,11 +778,15 @@ export default function EmailSettingsPage() {
                       }`}
                     >
                       <div className="flex items-center justify-between mb-2">
-                        <span className="font-medium text-sm">{template.template_key}</span>
+                        <span className={`text-xs px-2 py-0.5 rounded ${templateTypeColors[template.template_type] || templateTypeColors.other}`}>
+                          {templateTypeLabels[template.template_type] || 'Autre'}
+                        </span>
                         <Badge variant={template.is_active ? 'default' : 'secondary'}>
                           {template.is_active ? 'Actif' : 'Inactif'}
                         </Badge>
                       </div>
+                      <p className="font-medium text-sm mb-1">{template.name || template.template_key}</p>
+                      <p className="text-xs text-gray-400 mb-2 font-mono">{template.template_key}</p>
                       <p className="text-xs text-gray-500 truncate">{template.subject}</p>
                     </div>
                   ))}
@@ -721,7 +796,12 @@ export default function EmailSettingsPage() {
               {selectedTemplate && (
                 <div className="mt-6 pt-6 border-t space-y-4">
                   <div className="flex items-center justify-between">
-                    <h3 className="font-semibold">Modifier: {selectedTemplate.template_key}</h3>
+                    <div>
+                      <h3 className="font-semibold">Modifier: {selectedTemplate.name || selectedTemplate.template_key}</h3>
+                      <span className={`text-xs px-2 py-0.5 rounded ${templateTypeColors[selectedTemplate.template_type] || templateTypeColors.other}`}>
+                        {templateTypeLabels[selectedTemplate.template_type] || 'Autre'}
+                      </span>
+                    </div>
                     <Button 
                       variant="destructive" 
                       size="sm"
@@ -730,6 +810,44 @@ export default function EmailSettingsPage() {
                       <Trash2 className="h-4 w-4 mr-2" />
                       Supprimer
                     </Button>
+                  </div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Type de template</Label>
+                      <Select 
+                        value={selectedTemplate.template_type} 
+                        onValueChange={(v) => setSelectedTemplate({ ...selectedTemplate, template_type: v as TemplateType })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="quote">Devis</SelectItem>
+                          <SelectItem value="notification">Notification</SelectItem>
+                          <SelectItem value="password_reset">Réinitialisation mot de passe</SelectItem>
+                          <SelectItem value="contact">Contact</SelectItem>
+                          <SelectItem value="status_change">Changement de statut</SelectItem>
+                          <SelectItem value="other">Autre</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <Label>Nom du template</Label>
+                      <Input
+                        value={selectedTemplate.name || ''}
+                        onChange={(e) => setSelectedTemplate({ ...selectedTemplate, name: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label>Description</Label>
+                    <Input
+                      value={selectedTemplate.description || ''}
+                      onChange={(e) => setSelectedTemplate({ ...selectedTemplate, description: e.target.value })}
+                    />
                   </div>
                   
                   <div className="space-y-2">
