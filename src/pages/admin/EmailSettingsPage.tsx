@@ -192,6 +192,17 @@ export default function EmailSettingsPage() {
       return;
     }
     
+    // Validate template_key format (snake_case: lowercase letters, numbers, underscores)
+    const templateKeyRegex = /^[a-z][a-z0-9_]*$/;
+    if (!templateKeyRegex.test(newTemplate.template_key)) {
+      toast({ 
+        title: 'Erreur', 
+        description: 'La clé du template doit être en snake_case (lettres minuscules, chiffres et underscores)', 
+        variant: 'destructive' 
+      });
+      return;
+    }
+    
     try {
       setSaving(true);
       await api.createEmailTemplate(

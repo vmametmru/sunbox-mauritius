@@ -1076,6 +1076,14 @@ try {
 
         case 'create_email_template': {
             validateRequired($body, ['template_key', 'subject', 'body_html']);
+            
+            // Check if template_key already exists
+            $checkStmt = $db->prepare("SELECT COUNT(*) FROM email_templates WHERE template_key = ?");
+            $checkStmt->execute([sanitize($body['template_key'])]);
+            if ($checkStmt->fetchColumn() > 0) {
+                fail('Un template avec cette clé existe déjà', 400);
+            }
+            
             $stmt = $db->prepare("
                 INSERT INTO email_templates (template_key, subject, body_html, body_text, is_active)
                 VALUES (?, ?, ?, ?, ?)
