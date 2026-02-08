@@ -336,6 +336,7 @@ export const api = {
     customer_phone?: string;
     customer_address?: string;
     customer_message?: string;
+    contact_id?: number;
     quote_title?: string;
     model_id?: number;
     model_name?: string;
