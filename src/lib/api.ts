@@ -343,6 +343,16 @@ export const api = {
     return this.query('get_email_templates');
   },
 
+  createEmailTemplate(templateKey: string, subject: string, bodyHtml: string, bodyText?: string, isActive?: boolean) {
+    return this.query('create_email_template', { 
+      template_key: templateKey, 
+      subject, 
+      body_html: bodyHtml, 
+      body_text: bodyText,
+      is_active: isActive ?? true
+    });
+  },
+
   updateEmailTemplate(templateKey: string, subject: string, bodyHtml: string, bodyText?: string) {
     return this.query('update_email_template', { 
       template_key: templateKey, 
@@ -350,6 +360,10 @@ export const api = {
       body_html: bodyHtml, 
       body_text: bodyText 
     });
+  },
+
+  deleteEmailTemplate(templateKey: string) {
+    return this.query('delete_email_template', { template_key: templateKey });
   },
 
   getEmailLogs(limit: number = 50) {

@@ -11,7 +11,9 @@ import {
   EyeOff,
   FileText,
   RefreshCw,
-  History
+  History,
+  Plus,
+  Trash2
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -80,6 +82,14 @@ const defaultSettings: EmailSettings = {
   send_customer_confirmations: 'true',
 };
 
+const defaultNewTemplate: Omit<EmailTemplate, 'id'> = {
+  template_key: '',
+  subject: '',
+  body_html: '',
+  body_text: '',
+  is_active: true,
+};
+
 export default function EmailSettingsPage() {
   const [settings, setSettings] = useState<EmailSettings>(defaultSettings);
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
@@ -91,6 +101,8 @@ export default function EmailSettingsPage() {
   const [testEmail, setTestEmail] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [activeTab, setActiveTab] = useState('smtp');
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [newTemplate, setNewTemplate] = useState<Omit<EmailTemplate, 'id'>>(defaultNewTemplate);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -166,6 +178,48 @@ export default function EmailSettingsPage() {
         selectedTemplate.body_text
       );
       toast({ title: 'Succès', description: 'Template enregistré' });
+      loadData();
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const createTemplate = async () => {
+    if (!newTemplate.template_key || !newTemplate.subject || !newTemplate.body_html) {
+      toast({ title: 'Erreur', description: 'Veuillez remplir tous les champs obligatoires', variant: 'destructive' });
+      return;
+    }
+    
+    try {
+      setSaving(true);
+      await api.createEmailTemplate(
+        newTemplate.template_key,
+        newTemplate.subject,
+        newTemplate.body_html,
+        newTemplate.body_text,
+        newTemplate.is_active
+      );
+      toast({ title: 'Succès', description: 'Template créé avec succès' });
+      setShowCreateForm(false);
+      setNewTemplate(defaultNewTemplate);
+      loadData();
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteTemplate = async (templateKey: string) => {
+    if (!confirm('Êtes-vous sûr de vouloir supprimer ce template ?')) return;
+    
+    try {
+      setSaving(true);
+      await api.deleteEmailTemplate(templateKey);
+      toast({ title: 'Succès', description: 'Template supprimé' });
+      setSelectedTemplate(null);
       loadData();
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
@@ -544,20 +598,90 @@ export default function EmailSettingsPage() {
         <TabsContent value="templates" className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <FileText className="h-5 w-5 text-orange-500" />
-                Templates d'Email
-              </CardTitle>
-              <CardDescription>
-                Personnalisez les emails automatiques. Utilisez {'{{variable}}'} pour les données dynamiques.
-              </CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <FileText className="h-5 w-5 text-orange-500" />
+                    Templates d'Email
+                  </CardTitle>
+                  <CardDescription>
+                    Personnalisez les emails automatiques. Utilisez {'{{variable}}'} pour les données dynamiques.
+                  </CardDescription>
+                </div>
+                <Button 
+                  onClick={() => setShowCreateForm(true)} 
+                  className="bg-orange-500 hover:bg-orange-600"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Nouveau template
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
-              {templates.length === 0 ? (
+              {/* Create Form */}
+              {showCreateForm && (
+                <div className="mb-6 p-6 border rounded-lg bg-gray-50 space-y-4">
+                  <h3 className="font-semibold">Créer un nouveau template</h3>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Clé du template *</Label>
+                      <Input
+                        value={newTemplate.template_key}
+                        onChange={(e) => setNewTemplate({ ...newTemplate, template_key: e.target.value })}
+                        placeholder="ex: welcome_email, password_reset"
+                      />
+                      <p className="text-xs text-gray-500">Identifiant unique (snake_case recommandé)</p>
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <Label>Sujet *</Label>
+                      <Input
+                        value={newTemplate.subject}
+                        onChange={(e) => setNewTemplate({ ...newTemplate, subject: e.target.value })}
+                        placeholder="ex: Bienvenue chez Sunbox Mauritius"
+                      />
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label>Corps HTML *</Label>
+                    <Textarea
+                      value={newTemplate.body_html}
+                      onChange={(e) => setNewTemplate({ ...newTemplate, body_html: e.target.value })}
+                      rows={8}
+                      className="font-mono text-sm"
+                      placeholder="<html><body>Contenu HTML de l'email...</body></html>"
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label>Corps Texte (fallback)</Label>
+                    <Textarea
+                      value={newTemplate.body_text}
+                      onChange={(e) => setNewTemplate({ ...newTemplate, body_text: e.target.value })}
+                      rows={3}
+                      className="font-mono text-sm"
+                      placeholder="Version texte de l'email..."
+                    />
+                  </div>
+                  
+                  <div className="flex justify-end gap-2">
+                    <Button variant="outline" onClick={() => { setShowCreateForm(false); setNewTemplate(defaultNewTemplate); }}>
+                      Annuler
+                    </Button>
+                    <Button onClick={createTemplate} disabled={saving} className="bg-orange-500 hover:bg-orange-600">
+                      {saving ? 'Création...' : 'Créer le template'}
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {templates.length === 0 && !showCreateForm ? (
                 <div className="text-center py-8 text-gray-500">
                   <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
                   <p>Aucun template disponible</p>
-                  <p className="text-sm">Les templates seront créés lors du déploiement de la base de données</p>
+                  <p className="text-sm mb-4">Cliquez sur "Nouveau template" pour en créer un</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -585,7 +709,17 @@ export default function EmailSettingsPage() {
               
               {selectedTemplate && (
                 <div className="mt-6 pt-6 border-t space-y-4">
-                  <h3 className="font-semibold">Modifier: {selectedTemplate.template_key}</h3>
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-semibold">Modifier: {selectedTemplate.template_key}</h3>
+                    <Button 
+                      variant="destructive" 
+                      size="sm"
+                      onClick={() => deleteTemplate(selectedTemplate.template_key)}
+                    >
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      Supprimer
+                    </Button>
+                  </div>
                   
                   <div className="space-y-2">
                     <Label>Sujet</Label>

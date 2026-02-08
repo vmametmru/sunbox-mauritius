@@ -1074,6 +1074,23 @@ try {
             break;
         }
 
+        case 'create_email_template': {
+            validateRequired($body, ['template_key', 'subject', 'body_html']);
+            $stmt = $db->prepare("
+                INSERT INTO email_templates (template_key, subject, body_html, body_text, is_active)
+                VALUES (?, ?, ?, ?, ?)
+            ");
+            $stmt->execute([
+                sanitize($body['template_key']),
+                sanitize($body['subject']),
+                $body['body_html'],
+                $body['body_text'] ?? '',
+                isset($body['is_active']) ? ($body['is_active'] ? 1 : 0) : 1
+            ]);
+            ok(['id' => $db->lastInsertId()]);
+            break;
+        }
+
         case 'update_email_template': {
             validateRequired($body, ['template_key', 'subject', 'body_html']);
             $stmt = $db->prepare("
@@ -1087,6 +1104,14 @@ try {
                 $body['body_text'] ?? '',
                 $body['template_key']
             ]);
+            ok();
+            break;
+        }
+
+        case 'delete_email_template': {
+            validateRequired($body, ['template_key']);
+            $stmt = $db->prepare("DELETE FROM email_templates WHERE template_key = ?");
+            $stmt->execute([$body['template_key']]);
             ok();
             break;
         }
