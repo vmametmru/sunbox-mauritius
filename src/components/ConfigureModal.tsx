@@ -557,9 +557,9 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                   Veuillez remplir vos informations pour recevoir votre devis.
                 </p>
 
-                {/* Checkbox to use saved client info */}
-                {savedClientInfo && (
-                  <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                {/* Checkbox to use saved client info - always show this section */}
+                <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  {savedClientInfo ? (
                     <label className="flex items-center gap-3 cursor-pointer">
                       <input
                         type="checkbox"
@@ -574,8 +574,12 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                         </p>
                       </div>
                     </label>
-                  </div>
-                )}
+                  ) : (
+                    <div className="text-blue-700 text-sm">
+                      <span className="font-medium">💡 Astuce :</span> Lors de votre prochaine demande de devis, vos informations seront pré-remplies automatiquement.
+                    </div>
+                  )}
+                </div>
 
                 {errors.submit && (
                   <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
