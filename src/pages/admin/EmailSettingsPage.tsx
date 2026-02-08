@@ -13,7 +13,9 @@ import {
   RefreshCw,
   History,
   Plus,
-  Trash2
+  Trash2,
+  Pen,
+  Image
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -26,6 +28,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
+import { WysiwygEditor } from '@/components/ui/wysiwyg-editor';
 
 interface EmailSettings {
   smtp_host: string;
@@ -87,6 +90,18 @@ interface EmailLog {
   created_at: string;
 }
 
+interface EmailSignature {
+  id: number;
+  signature_key: string;
+  name: string;
+  description: string;
+  body_html: string;
+  logo_url: string;
+  photo_url: string;
+  is_active: boolean;
+  is_default: boolean;
+}
+
 const defaultSettings: EmailSettings = {
   smtp_host: 'mail.sunbox-mauritius.com',
   smtp_port: '465',
@@ -116,11 +131,24 @@ const defaultNewTemplate: Omit<EmailTemplate, 'id'> = {
   is_active: true,
 };
 
+const defaultNewSignature: Omit<EmailSignature, 'id'> = {
+  signature_key: '',
+  name: '',
+  description: '',
+  body_html: '',
+  logo_url: '',
+  photo_url: '',
+  is_active: true,
+  is_default: false,
+};
+
 export default function EmailSettingsPage() {
   const [settings, setSettings] = useState<EmailSettings>(defaultSettings);
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
   const [emailLogs, setEmailLogs] = useState<EmailLog[]>([]);
+  const [signatures, setSignatures] = useState<EmailSignature[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<EmailTemplate | null>(null);
+  const [selectedSignature, setSelectedSignature] = useState<EmailSignature | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -128,7 +156,9 @@ export default function EmailSettingsPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [activeTab, setActiveTab] = useState('smtp');
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showCreateSignatureForm, setShowCreateSignatureForm] = useState(false);
   const [newTemplate, setNewTemplate] = useState<Omit<EmailTemplate, 'id'>>(defaultNewTemplate);
+  const [newSignature, setNewSignature] = useState<Omit<EmailSignature, 'id'>>(defaultNewSignature);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -163,6 +193,16 @@ export default function EmailSettingsPage() {
         }
       } catch (e) {
         console.log('Email logs not available');
+      }
+
+      // Load signatures
+      try {
+        const signaturesResult = await api.getEmailSignatures();
+        if (Array.isArray(signaturesResult)) {
+          setSignatures(signaturesResult);
+        }
+      } catch (e) {
+        console.log('Signatures not available');
       }
       
     } catch (err: any) {
@@ -271,6 +311,97 @@ export default function EmailSettingsPage() {
     }
   };
 
+  // Signature CRUD functions
+  const saveSignature = async () => {
+    if (!selectedSignature) return;
+    
+    try {
+      setSaving(true);
+      await api.updateEmailSignature({
+        signatureKey: selectedSignature.signature_key,
+        name: selectedSignature.name,
+        description: selectedSignature.description,
+        bodyHtml: selectedSignature.body_html,
+        logoUrl: selectedSignature.logo_url,
+        photoUrl: selectedSignature.photo_url,
+        isActive: selectedSignature.is_active,
+        isDefault: selectedSignature.is_default
+      });
+      toast({ title: 'Succès', description: 'Signature enregistrée' });
+      loadData();
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const createSignature = async () => {
+    if (!newSignature.signature_key || !newSignature.name || !newSignature.body_html) {
+      toast({ title: 'Erreur', description: 'Veuillez remplir tous les champs obligatoires', variant: 'destructive' });
+      return;
+    }
+    
+    // Validate signature_key format (snake_case: lowercase letters, numbers, underscores)
+    const signatureKeyRegex = /^[a-z][a-z0-9_]*$/;
+    if (!signatureKeyRegex.test(newSignature.signature_key)) {
+      toast({ 
+        title: 'Erreur', 
+        description: 'La clé de la signature doit être en snake_case (lettres minuscules, chiffres et underscores)', 
+        variant: 'destructive' 
+      });
+      return;
+    }
+    
+    try {
+      setSaving(true);
+      await api.createEmailSignature({
+        signatureKey: newSignature.signature_key,
+        name: newSignature.name,
+        description: newSignature.description,
+        bodyHtml: newSignature.body_html,
+        logoUrl: newSignature.logo_url,
+        photoUrl: newSignature.photo_url,
+        isActive: newSignature.is_active,
+        isDefault: newSignature.is_default
+      });
+      toast({ title: 'Succès', description: 'Signature créée avec succès' });
+      setShowCreateSignatureForm(false);
+      setNewSignature(defaultNewSignature);
+      loadData();
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteSignature = async (signatureKey: string) => {
+    if (!confirm('Êtes-vous sûr de vouloir supprimer cette signature ?')) return;
+    
+    try {
+      setSaving(true);
+      await api.deleteEmailSignature(signatureKey);
+      toast({ title: 'Succès', description: 'Signature supprimée' });
+      setSelectedSignature(null);
+      loadData();
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSignatureImageUpload = async (file: File, type: 'logo' | 'photo') => {
+    try {
+      const url = await api.uploadSignatureImage(file, type);
+      return url;
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: `Échec du téléchargement de l'image: ${err.message}`, variant: 'destructive' });
+      throw err;
+    }
+  };
+
   const sendTestEmail = async () => {
     if (!testEmail) {
       toast({ title: 'Erreur', description: 'Veuillez entrer une adresse email', variant: 'destructive' });
@@ -313,7 +444,7 @@ export default function EmailSettingsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Paramètres Email</h1>
-          <p className="text-gray-500 mt-1">Configuration SMTP, templates et historique des envois</p>
+          <p className="text-gray-500 mt-1">Configuration SMTP, templates, signatures et historique des envois</p>
         </div>
         <Button onClick={loadData} variant="outline" size="sm">
           <RefreshCw className="h-4 w-4 mr-2" />
@@ -322,7 +453,7 @@ export default function EmailSettingsPage() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="smtp" className="flex items-center gap-2">
             <Server className="h-4 w-4" />
             SMTP
@@ -334,6 +465,10 @@ export default function EmailSettingsPage() {
           <TabsTrigger value="templates" className="flex items-center gap-2">
             <FileText className="h-4 w-4" />
             Templates
+          </TabsTrigger>
+          <TabsTrigger value="signatures" className="flex items-center gap-2">
+            <Pen className="h-4 w-4" />
+            Signatures
           </TabsTrigger>
           <TabsTrigger value="logs" className="flex items-center gap-2">
             <History className="h-4 w-4" />
@@ -728,12 +863,17 @@ export default function EmailSettingsPage() {
                   
                   <div className="space-y-2">
                     <Label>Corps HTML *</Label>
-                    <Textarea
+                    <WysiwygEditor
                       value={newTemplate.body_html}
-                      onChange={(e) => setNewTemplate({ ...newTemplate, body_html: e.target.value })}
-                      rows={8}
-                      className="font-mono text-sm"
-                      placeholder="<html><body>Contenu HTML de l'email...</body></html>"
+                      onChange={(value) => setNewTemplate({ ...newTemplate, body_html: value })}
+                      placeholder="Contenu HTML de l'email..."
+                      minHeight="300px"
+                      availableVariables={[
+                        '{{customer_name}}', '{{customer_email}}', '{{customer_phone}}', '{{customer_address}}',
+                        '{{reference}}', '{{model_name}}', '{{model_type}}', '{{base_price}}',
+                        '{{options_total}}', '{{total_price}}', '{{valid_until}}', '{{customer_message}}',
+                        '{{signature_logo}}', '{{signature_photo}}'
+                      ]}
                     />
                   </div>
                   
@@ -860,11 +1000,17 @@ export default function EmailSettingsPage() {
                   
                   <div className="space-y-2">
                     <Label>Corps HTML</Label>
-                    <Textarea
+                    <WysiwygEditor
                       value={selectedTemplate.body_html}
-                      onChange={(e) => setSelectedTemplate({ ...selectedTemplate, body_html: e.target.value })}
-                      rows={12}
-                      className="font-mono text-sm"
+                      onChange={(value) => setSelectedTemplate({ ...selectedTemplate, body_html: value })}
+                      placeholder="Contenu HTML de l'email..."
+                      minHeight="400px"
+                      availableVariables={[
+                        '{{customer_name}}', '{{customer_email}}', '{{customer_phone}}', '{{customer_address}}',
+                        '{{reference}}', '{{model_name}}', '{{model_type}}', '{{base_price}}',
+                        '{{options_total}}', '{{total_price}}', '{{valid_until}}', '{{customer_message}}',
+                        '{{signature_logo}}', '{{signature_photo}}'
+                      ]}
                     />
                   </div>
                   
@@ -900,13 +1046,328 @@ export default function EmailSettingsPage() {
                 {[
                   '{{customer_name}}', '{{customer_email}}', '{{customer_phone}}', '{{customer_address}}',
                   '{{reference}}', '{{model_name}}', '{{model_type}}', '{{base_price}}',
-                  '{{options_total}}', '{{total_price}}', '{{valid_until}}', '{{customer_message}}'
+                  '{{options_total}}', '{{total_price}}', '{{valid_until}}', '{{customer_message}}',
+                  '{{signature_logo}}', '{{signature_photo}}'
                 ].map((variable) => (
                   <code key={variable} className="bg-gray-100 px-2 py-1 rounded text-xs">
                     {variable}
                   </code>
                 ))}
               </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Signatures Tab */}
+        <TabsContent value="signatures" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Pen className="h-5 w-5 text-orange-500" />
+                Signatures Email
+              </CardTitle>
+              <CardDescription>
+                Gérez vos signatures email avec logo et photo
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="flex justify-end">
+                <Button 
+                  onClick={() => setShowCreateSignatureForm(!showCreateSignatureForm)} 
+                  className="bg-orange-500 hover:bg-orange-600"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Nouvelle signature
+                </Button>
+              </div>
+
+              {showCreateSignatureForm && (
+                <div className="border rounded-lg p-4 space-y-4 bg-gray-50">
+                  <h3 className="font-semibold text-lg">Créer une nouvelle signature</h3>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Nom de la signature *</Label>
+                      <Input
+                        value={newSignature.name}
+                        onChange={(e) => setNewSignature({ ...newSignature, name: e.target.value })}
+                        placeholder="ex: Signature Secrétaire"
+                      />
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <Label>Clé de la signature *</Label>
+                      <Input
+                        value={newSignature.signature_key}
+                        onChange={(e) => setNewSignature({ ...newSignature, signature_key: e.target.value })}
+                        placeholder="ex: secretary_signature"
+                      />
+                      <p className="text-xs text-gray-500">Identifiant unique (snake_case recommandé)</p>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label>Description</Label>
+                    <Input
+                      value={newSignature.description}
+                      onChange={(e) => setNewSignature({ ...newSignature, description: e.target.value })}
+                      placeholder="Description courte de la signature"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label className="flex items-center gap-2">
+                        <Image className="h-4 w-4" />
+                        URL du Logo
+                      </Label>
+                      <Input
+                        value={newSignature.logo_url}
+                        onChange={(e) => setNewSignature({ ...newSignature, logo_url: e.target.value })}
+                        placeholder="https://example.com/logo.png"
+                      />
+                      <p className="text-xs text-gray-500">Utilisez {'{{signature_logo}}'} dans le contenu HTML</p>
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <Label className="flex items-center gap-2">
+                        <Image className="h-4 w-4" />
+                        URL de la Photo
+                      </Label>
+                      <Input
+                        value={newSignature.photo_url}
+                        onChange={(e) => setNewSignature({ ...newSignature, photo_url: e.target.value })}
+                        placeholder="https://example.com/photo.jpg"
+                      />
+                      <p className="text-xs text-gray-500">Utilisez {'{{signature_photo}}'} dans le contenu HTML</p>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label>Contenu HTML de la signature *</Label>
+                    <WysiwygEditor
+                      value={newSignature.body_html}
+                      onChange={(value) => setNewSignature({ ...newSignature, body_html: value })}
+                      placeholder="Créez votre signature email..."
+                      minHeight="250px"
+                      availableVariables={[
+                        '{{signature_logo}}', '{{signature_photo}}',
+                        '{{sender_name}}', '{{sender_title}}', '{{sender_email}}', '{{sender_phone}}'
+                      ]}
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={newSignature.is_active}
+                        onCheckedChange={(checked) => setNewSignature({ ...newSignature, is_active: checked })}
+                      />
+                      <Label>Actif</Label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={newSignature.is_default}
+                        onCheckedChange={(checked) => setNewSignature({ ...newSignature, is_default: checked })}
+                      />
+                      <Label>Signature par défaut</Label>
+                    </div>
+                  </div>
+                  
+                  <div className="flex justify-end gap-2">
+                    <Button variant="outline" onClick={() => { setShowCreateSignatureForm(false); setNewSignature(defaultNewSignature); }}>
+                      Annuler
+                    </Button>
+                    <Button onClick={createSignature} disabled={saving} className="bg-orange-500 hover:bg-orange-600">
+                      {saving ? 'Création...' : 'Créer la signature'}
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {signatures.length === 0 && !showCreateSignatureForm ? (
+                <div className="text-center py-8 text-gray-500">
+                  <Pen className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p>Aucune signature disponible</p>
+                  <p className="text-sm mb-4">Cliquez sur "Nouvelle signature" pour en créer une</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {signatures.map((signature) => (
+                    <div
+                      key={signature.id}
+                      onClick={() => setSelectedSignature(signature)}
+                      className={`p-4 border rounded-lg cursor-pointer transition-all ${
+                        selectedSignature?.id === signature.id 
+                          ? 'border-orange-500 bg-orange-50' 
+                          : 'hover:border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        {signature.is_default && (
+                          <span className="text-xs px-2 py-0.5 rounded bg-orange-100 text-orange-800">
+                            Par défaut
+                          </span>
+                        )}
+                        <Badge variant={signature.is_active ? 'default' : 'secondary'}>
+                          {signature.is_active ? 'Actif' : 'Inactif'}
+                        </Badge>
+                      </div>
+                      <p className="font-medium text-sm mb-1">{signature.name}</p>
+                      <p className="text-xs text-gray-400 mb-2 font-mono">{signature.signature_key}</p>
+                      {signature.description && (
+                        <p className="text-xs text-gray-500 truncate">{signature.description}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              
+              {selectedSignature && (
+                <div className="mt-6 pt-6 border-t space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-semibold">Modifier: {selectedSignature.name}</h3>
+                      <p className="text-xs text-gray-400 font-mono">{selectedSignature.signature_key}</p>
+                    </div>
+                    <Button 
+                      variant="destructive" 
+                      size="sm"
+                      onClick={() => deleteSignature(selectedSignature.signature_key)}
+                    >
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      Supprimer
+                    </Button>
+                  </div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Nom de la signature</Label>
+                      <Input
+                        value={selectedSignature.name || ''}
+                        onChange={(e) => setSelectedSignature({ ...selectedSignature, name: e.target.value })}
+                      />
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <Label>Description</Label>
+                      <Input
+                        value={selectedSignature.description || ''}
+                        onChange={(e) => setSelectedSignature({ ...selectedSignature, description: e.target.value })}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label className="flex items-center gap-2">
+                        <Image className="h-4 w-4" />
+                        URL du Logo
+                      </Label>
+                      <Input
+                        value={selectedSignature.logo_url || ''}
+                        onChange={(e) => setSelectedSignature({ ...selectedSignature, logo_url: e.target.value })}
+                        placeholder="https://example.com/logo.png"
+                      />
+                      {selectedSignature.logo_url && (
+                        <div className="mt-2">
+                          <img 
+                            src={selectedSignature.logo_url} 
+                            alt="Logo" 
+                            className="h-12 object-contain border rounded p-1"
+                            onError={(e) => (e.target as HTMLImageElement).style.display = 'none'}
+                          />
+                        </div>
+                      )}
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <Label className="flex items-center gap-2">
+                        <Image className="h-4 w-4" />
+                        URL de la Photo
+                      </Label>
+                      <Input
+                        value={selectedSignature.photo_url || ''}
+                        onChange={(e) => setSelectedSignature({ ...selectedSignature, photo_url: e.target.value })}
+                        placeholder="https://example.com/photo.jpg"
+                      />
+                      {selectedSignature.photo_url && (
+                        <div className="mt-2">
+                          <img 
+                            src={selectedSignature.photo_url} 
+                            alt="Photo" 
+                            className="h-16 w-16 object-cover border rounded-full"
+                            onError={(e) => (e.target as HTMLImageElement).style.display = 'none'}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label>Contenu HTML de la signature</Label>
+                    <WysiwygEditor
+                      value={selectedSignature.body_html}
+                      onChange={(value) => setSelectedSignature({ ...selectedSignature, body_html: value })}
+                      placeholder="Créez votre signature email..."
+                      minHeight="350px"
+                      availableVariables={[
+                        '{{signature_logo}}', '{{signature_photo}}',
+                        '{{sender_name}}', '{{sender_title}}', '{{sender_email}}', '{{sender_phone}}'
+                      ]}
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={selectedSignature.is_active}
+                        onCheckedChange={(checked) => setSelectedSignature({ ...selectedSignature, is_active: checked })}
+                      />
+                      <Label>Actif</Label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={selectedSignature.is_default}
+                        onCheckedChange={(checked) => setSelectedSignature({ ...selectedSignature, is_default: checked })}
+                      />
+                      <Label>Signature par défaut</Label>
+                    </div>
+                  </div>
+                  
+                  <div className="flex justify-end gap-2">
+                    <Button variant="outline" onClick={() => setSelectedSignature(null)}>
+                      Annuler
+                    </Button>
+                    <Button onClick={saveSignature} disabled={saving} className="bg-orange-500 hover:bg-orange-600">
+                      {saving ? 'Enregistrement...' : 'Enregistrer la signature'}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+          
+          <Card>
+            <CardHeader>
+              <CardTitle>Variables disponibles pour les signatures</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+                {[
+                  '{{signature_logo}}', '{{signature_photo}}',
+                  '{{sender_name}}', '{{sender_title}}', '{{sender_email}}', '{{sender_phone}}'
+                ].map((variable) => (
+                  <code key={variable} className="bg-gray-100 px-2 py-1 rounded text-xs">
+                    {variable}
+                  </code>
+                ))}
+              </div>
+              <p className="text-sm text-gray-500 mt-4">
+                <strong>Note:</strong> Les variables {'{{signature_logo}}'} et {'{{signature_photo}}'} seront automatiquement remplacées 
+                par les images définies dans les champs URL correspondants. Vous pouvez également utiliser ces 
+                variables dans les templates d'email pour insérer dynamiquement la signature.
+              </p>
             </CardContent>
           </Card>
         </TabsContent>
