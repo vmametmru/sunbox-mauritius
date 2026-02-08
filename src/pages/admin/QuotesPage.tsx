@@ -191,8 +191,9 @@ export default function QuotesPage() {
       const result = await api.cloneQuote(id);
       toast({ title: 'Succès', description: `Devis cloné: ${result.reference_number}` });
       setSelectedQuote(null);
-      // Navigate to edit the cloned quote
-      navigate(`/admin/quotes/new?clone=${id}`);
+      loadQuotes(); // Refresh the list
+      // Navigate to edit the newly cloned quote
+      navigate(`/admin/quotes/new?edit=${result.id}`);
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
     }
@@ -424,16 +425,16 @@ export default function QuotesPage() {
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center justify-end gap-2">
-                        <Button size="sm" variant="outline" onClick={() => loadQuoteDetails(quote)}>
+                        <Button size="sm" variant="outline" onClick={() => loadQuoteDetails(quote)} aria-label="Voir les détails">
                           <Eye className="h-4 w-4" />
                         </Button>
-                        <Button size="sm" variant="outline" onClick={() => navigate(`/admin/quotes/new?edit=${quote.id}`)}>
+                        <Button size="sm" variant="outline" onClick={() => navigate(`/admin/quotes/new?edit=${quote.id}`)} aria-label="Modifier le devis">
                           <Edit className="h-4 w-4" />
                         </Button>
-                        <Button size="sm" variant="outline" onClick={() => navigate(`/admin/quotes/new?clone=${quote.id}`)}>
+                        <Button size="sm" variant="outline" onClick={() => navigate(`/admin/quotes/new?clone=${quote.id}`)} aria-label="Cloner le devis">
                           <Copy className="h-4 w-4" />
                         </Button>
-                        <Button size="sm" variant="outline" className="text-red-600 hover:bg-red-50" onClick={() => deleteQuote(quote.id)}>
+                        <Button size="sm" variant="outline" className="text-red-600 hover:bg-red-50" onClick={() => deleteQuote(quote.id)} aria-label="Supprimer le devis">
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>

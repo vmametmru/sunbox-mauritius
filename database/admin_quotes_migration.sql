@@ -37,9 +37,9 @@ ADD COLUMN IF NOT EXISTS quote_title VARCHAR(255) NULL COMMENT 'Custom title for
 
 -- Modify status enum to include new statuses
 -- Note: MySQL requires recreating the column to modify ENUM values
--- First check current status values and migrate appropriately
+-- Keep 'pending' as default for backward compatibility with existing public quote flow
 ALTER TABLE quotes 
-MODIFY COLUMN status ENUM('draft', 'open', 'validated', 'cancelled', 'pending', 'approved', 'rejected', 'completed') DEFAULT 'draft';
+MODIFY COLUMN status ENUM('draft', 'open', 'validated', 'cancelled', 'pending', 'approved', 'rejected', 'completed') DEFAULT 'pending';
 
 -- Add index for cloned_from_id
 ALTER TABLE quotes 

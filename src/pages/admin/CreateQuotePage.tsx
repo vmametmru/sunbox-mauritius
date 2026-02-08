@@ -43,6 +43,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { api } from '@/lib/api';
+import { BOQ_OPTION_ID_OFFSET } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useSiteSettings, calculateTTC } from '@/hooks/use-site-settings';
@@ -411,7 +412,6 @@ export default function CreateQuotePage() {
   const selectedModel = models.find(m => m.id === selectedModelId);
   const modelBasePrice = selectedModel?.base_price || 0;
   
-  const BOQ_OPTION_ID_OFFSET = 1000000;
   const selectedModelOptionsTotal = selectedOptions
     .filter(id => id < BOQ_OPTION_ID_OFFSET)
     .reduce((sum, id) => {
