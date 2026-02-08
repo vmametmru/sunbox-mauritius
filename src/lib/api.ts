@@ -265,6 +265,10 @@ export const api = {
     return this.query('get_quote', { id });
   },
 
+  getQuoteWithDetails(id: number) {
+    return this.query('get_quote_with_details', { id });
+  },
+
   createQuote(quote: {
     model_id: number;
     model_name: string;
@@ -283,7 +287,95 @@ export const api = {
     return this.query('create_quote', quote);
   },
 
-  updateQuoteStatus(id: number, status: 'pending' | 'approved' | 'rejected' | 'completed') {
+  createAdminQuote(quote: {
+    // Customer info
+    customer_name: string;
+    customer_email: string;
+    customer_phone: string;
+    customer_address?: string;
+    customer_message?: string;
+    contact_id?: number;
+    // Quote type
+    is_free_quote: boolean;
+    quote_title?: string;
+    // Model info (for model-based quotes)
+    model_id?: number;
+    model_name?: string;
+    model_type?: 'container' | 'pool';
+    // Pricing
+    base_price?: number;
+    options_total?: number;
+    total_price?: number;
+    margin_percent?: number;
+    // Media
+    photo_url?: string;
+    plan_url?: string;
+    // Options (for model-based quotes)
+    selected_options?: Array<{ option_id: number; option_name: string; option_price: number }>;
+    // Categories (for free quotes)
+    categories?: Array<{
+      name: string;
+      lines: Array<{
+        description: string;
+        quantity: number;
+        unit: string;
+        unit_cost_ht: number;
+        margin_percent: number;
+      }>;
+    }>;
+    // Clone reference
+    cloned_from_id?: number;
+  }) {
+    return this.query('create_admin_quote', quote);
+  },
+
+  updateAdminQuote(quote: {
+    id: number;
+    customer_name?: string;
+    customer_email?: string;
+    customer_phone?: string;
+    customer_address?: string;
+    customer_message?: string;
+    quote_title?: string;
+    model_id?: number;
+    model_name?: string;
+    model_type?: 'container' | 'pool';
+    base_price?: number;
+    options_total?: number;
+    total_price?: number;
+    margin_percent?: number;
+    photo_url?: string;
+    plan_url?: string;
+    status?: string;
+    notes?: string;
+    selected_options?: Array<{ option_id: number; option_name: string; option_price: number }>;
+    categories?: Array<{
+      name: string;
+      lines: Array<{
+        description: string;
+        quantity: number;
+        unit: string;
+        unit_cost_ht: number;
+        margin_percent: number;
+      }>;
+    }>;
+  }) {
+    return this.query('update_admin_quote', quote);
+  },
+
+  cloneQuote(id: number) {
+    return this.query('clone_quote', { id });
+  },
+
+  getQuoteCategories(quoteId: number) {
+    return this.query('get_quote_categories', { quote_id: quoteId });
+  },
+
+  getQuoteLines(categoryId: number) {
+    return this.query('get_quote_lines', { category_id: categoryId });
+  },
+
+  updateQuoteStatus(id: number, status: 'draft' | 'open' | 'validated' | 'cancelled' | 'pending' | 'approved' | 'rejected' | 'completed') {
     return this.query('update_quote_status', { id, status });
   },
 

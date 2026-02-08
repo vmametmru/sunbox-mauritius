@@ -737,7 +737,8 @@ try {
         // === QUOTES
         case 'get_quotes': {
             $stmt = $db->prepare("
-                SELECT q.*, m.name as model_name, m.type as model_type, q.contact_id
+                SELECT q.*, m.name as model_display_name, m.type as model_display_type, q.contact_id,
+                       q.is_free_quote, q.quote_title, q.photo_url, q.plan_url, q.margin_percent
                 FROM quotes q
                 LEFT JOIN models m ON q.model_id = m.id
                 ORDER BY q.created_at DESC
@@ -914,7 +915,7 @@ try {
 
         case 'update_quote_status': {
             validateRequired($body, ['id', 'status']);
-            $validStatuses = ['pending', 'approved', 'rejected', 'completed'];
+            $validStatuses = ['draft', 'open', 'validated', 'cancelled', 'pending', 'approved', 'rejected', 'completed'];
             if (!in_array($body['status'], $validStatuses)) {
                 fail('Statut invalide');
             }
@@ -929,6 +930,10 @@ try {
             validateRequired($body, ['id']);
             $id = (int)$body['id'];
             
+            // Delete quote lines and categories for free quotes (if any)
+            $db->prepare("DELETE ql FROM quote_lines ql JOIN quote_categories qc ON ql.category_id = qc.id WHERE qc.quote_id = ?")->execute([$id]);
+            $db->prepare("DELETE FROM quote_categories WHERE quote_id = ?")->execute([$id]);
+            
             // Delete options first (if no CASCADE)
             $db->prepare("DELETE FROM quote_options WHERE quote_id = ?")->execute([$id]);
             
@@ -936,6 +941,492 @@ try {
             $stmt = $db->prepare("DELETE FROM quotes WHERE id = ?");
             $stmt->execute([$id]);
             ok();
+            break;
+        }
+
+        // === ADMIN QUOTES (Free-form and Model-based)
+        case 'create_admin_quote': {
+            // Required for both free and model-based quotes
+            validateRequired($body, ['customer_name', 'customer_email', 'customer_phone']);
+            
+            $isFreeQuote = $body['is_free_quote'] ?? false;
+            $modelType = $body['model_type'] ?? 'container'; // Default to container for free quotes
+            
+            // Validate model_type
+            $validTypes = ['container', 'pool'];
+            if (!in_array($modelType, $validTypes)) {
+                fail('Type de modèle invalide');
+            }
+            
+            $db->beginTransaction();
+            
+            try {
+                // Generate reference number
+                $yearMonth = date('Ym');
+                $prefix = $isFreeQuote ? 'WFQ' : (($modelType === 'container') ? 'WCQ' : 'WPQ');
+                $maxIdStmt = $db->query("SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM quotes");
+                $nextId = (int)$maxIdStmt->fetchColumn();
+                $reference = sprintf('%s-%s-%06d', $prefix, $yearMonth, $nextId);
+                
+                // Calculate valid_until (30 days from now)
+                $validUntil = date('Y-m-d', strtotime('+30 days'));
+                
+                // Handle contact - either use existing or create new
+                $customerEmail = sanitize($body['customer_email']);
+                $customerName = sanitize($body['customer_name']);
+                $customerPhone = sanitize($body['customer_phone']);
+                $customerAddress = sanitize($body['customer_address'] ?? '');
+                $contactId = isset($body['contact_id']) ? (int)$body['contact_id'] : null;
+                
+                // If no contact_id provided, check by email or create new
+                if (!$contactId) {
+                    $contactStmt = $db->prepare("SELECT id FROM contacts WHERE email = ?");
+                    $contactStmt->execute([$customerEmail]);
+                    $existingContact = $contactStmt->fetch();
+                    
+                    if ($existingContact) {
+                        $contactId = $existingContact['id'];
+                        $updateContactStmt = $db->prepare("
+                            UPDATE contacts SET name = ?, phone = ?, address = ?, updated_at = NOW()
+                            WHERE id = ?
+                        ");
+                        $updateContactStmt->execute([$customerName, $customerPhone, $customerAddress, $contactId]);
+                    } else {
+                        $insertContactStmt = $db->prepare("
+                            INSERT INTO contacts (name, email, phone, address, status)
+                            VALUES (?, ?, ?, ?, 'new')
+                        ");
+                        $insertContactStmt->execute([$customerName, $customerEmail, $customerPhone, $customerAddress]);
+                        $contactId = $db->lastInsertId();
+                    }
+                }
+                
+                // Calculate prices
+                $basePrice = (float)($body['base_price'] ?? 0);
+                $optionsTotal = (float)($body['options_total'] ?? 0);
+                $totalPrice = (float)($body['total_price'] ?? ($basePrice + $optionsTotal));
+                
+                // Insert quote
+                $stmt = $db->prepare("
+                    INSERT INTO quotes (
+                        reference_number, model_id, model_name, model_type,
+                        base_price, options_total, total_price,
+                        customer_name, customer_email, customer_phone,
+                        customer_address, customer_message, contact_id,
+                        status, valid_until, is_free_quote, quote_title,
+                        margin_percent, photo_url, plan_url, cloned_from_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?)
+                ");
+                $stmt->execute([
+                    $reference,
+                    $body['model_id'] ? (int)$body['model_id'] : null,
+                    sanitize($body['model_name'] ?? 'Devis libre'),
+                    $modelType,
+                    $basePrice,
+                    $optionsTotal,
+                    $totalPrice,
+                    $customerName,
+                    $customerEmail,
+                    $customerPhone,
+                    $customerAddress,
+                    sanitize($body['customer_message'] ?? ''),
+                    $contactId,
+                    $validUntil,
+                    $isFreeQuote ? 1 : 0,
+                    sanitize($body['quote_title'] ?? ''),
+                    (float)($body['margin_percent'] ?? 30),
+                    sanitize($body['photo_url'] ?? ''),
+                    sanitize($body['plan_url'] ?? ''),
+                    $body['cloned_from_id'] ? (int)$body['cloned_from_id'] : null,
+                ]);
+                
+                $quoteId = $db->lastInsertId();
+                
+                // Update reference with actual quote ID
+                $reference = sprintf('%s-%s-%06d', $prefix, $yearMonth, $quoteId);
+                $db->prepare("UPDATE quotes SET reference_number = ? WHERE id = ?")->execute([$reference, $quoteId]);
+                
+                // Insert selected options for model-based quotes
+                if (!$isFreeQuote && !empty($body['selected_options']) && is_array($body['selected_options'])) {
+                    $optStmt = $db->prepare("
+                        INSERT INTO quote_options (quote_id, option_id, option_name, option_price)
+                        VALUES (?, ?, ?, ?)
+                    ");
+                    $BOQ_OPTION_ID_OFFSET = 1000000;
+                    foreach ($body['selected_options'] as $opt) {
+                        $optionId = (int)$opt['option_id'];
+                        $optionIdValue = ($optionId >= $BOQ_OPTION_ID_OFFSET) ? null : $optionId;
+                        $optStmt->execute([
+                            $quoteId,
+                            $optionIdValue,
+                            sanitize($opt['option_name']),
+                            (float)$opt['option_price'],
+                        ]);
+                    }
+                }
+                
+                // Insert categories and lines for free quotes
+                if ($isFreeQuote && !empty($body['categories']) && is_array($body['categories'])) {
+                    $catStmt = $db->prepare("
+                        INSERT INTO quote_categories (quote_id, name, display_order)
+                        VALUES (?, ?, ?)
+                    ");
+                    $lineStmt = $db->prepare("
+                        INSERT INTO quote_lines (category_id, description, quantity, unit, unit_cost_ht, margin_percent, display_order)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ");
+                    
+                    foreach ($body['categories'] as $catIndex => $cat) {
+                        $catStmt->execute([
+                            $quoteId,
+                            sanitize($cat['name']),
+                            $catIndex,
+                        ]);
+                        $categoryId = $db->lastInsertId();
+                        
+                        if (!empty($cat['lines']) && is_array($cat['lines'])) {
+                            foreach ($cat['lines'] as $lineIndex => $line) {
+                                $lineStmt->execute([
+                                    $categoryId,
+                                    sanitize($line['description']),
+                                    (float)($line['quantity'] ?? 1),
+                                    sanitize($line['unit'] ?? 'unité'),
+                                    (float)($line['unit_cost_ht'] ?? 0),
+                                    (float)($line['margin_percent'] ?? 30),
+                                    $lineIndex,
+                                ]);
+                            }
+                        }
+                    }
+                }
+                
+                $db->commit();
+                ok(['id' => $quoteId, 'reference_number' => $reference, 'contact_id' => $contactId]);
+            } catch (Exception $e) {
+                $db->rollBack();
+                throw $e;
+            }
+            break;
+        }
+
+        case 'update_admin_quote': {
+            validateRequired($body, ['id']);
+            $id = (int)$body['id'];
+            
+            // Check if quote exists
+            $checkStmt = $db->prepare("SELECT id, is_free_quote, status FROM quotes WHERE id = ?");
+            $checkStmt->execute([$id]);
+            $existingQuote = $checkStmt->fetch();
+            
+            if (!$existingQuote) fail('Devis non trouvé', 404);
+            
+            $db->beginTransaction();
+            
+            try {
+                // Build update query dynamically
+                $updates = [];
+                $params = [];
+                
+                $allowedFields = [
+                    'model_id', 'model_name', 'model_type', 'base_price', 'options_total', 
+                    'total_price', 'customer_name', 'customer_email', 'customer_phone',
+                    'customer_address', 'customer_message', 'status', 'quote_title',
+                    'margin_percent', 'photo_url', 'plan_url', 'notes'
+                ];
+                
+                foreach ($allowedFields as $field) {
+                    if (isset($body[$field])) {
+                        $updates[] = "$field = ?";
+                        if (in_array($field, ['base_price', 'options_total', 'total_price', 'margin_percent'])) {
+                            $params[] = (float)$body[$field];
+                        } elseif ($field === 'model_id') {
+                            $params[] = $body[$field] ? (int)$body[$field] : null;
+                        } else {
+                            $params[] = sanitize($body[$field]);
+                        }
+                    }
+                }
+                
+                // Generate reference when status changes to validated
+                if (isset($body['status']) && $body['status'] === 'validated' && $existingQuote['status'] !== 'validated') {
+                    // Reference already exists, no need to regenerate
+                }
+                
+                if (!empty($updates)) {
+                    $updates[] = "updated_at = NOW()";
+                    $params[] = $id;
+                    $sql = "UPDATE quotes SET " . implode(', ', $updates) . " WHERE id = ?";
+                    $stmt = $db->prepare($sql);
+                    $stmt->execute($params);
+                }
+                
+                // Update categories and lines for free quotes
+                if ($existingQuote['is_free_quote'] && isset($body['categories']) && is_array($body['categories'])) {
+                    // Delete existing categories and lines
+                    $db->prepare("DELETE ql FROM quote_lines ql JOIN quote_categories qc ON ql.category_id = qc.id WHERE qc.quote_id = ?")->execute([$id]);
+                    $db->prepare("DELETE FROM quote_categories WHERE quote_id = ?")->execute([$id]);
+                    
+                    // Re-insert categories and lines
+                    $catStmt = $db->prepare("
+                        INSERT INTO quote_categories (quote_id, name, display_order)
+                        VALUES (?, ?, ?)
+                    ");
+                    $lineStmt = $db->prepare("
+                        INSERT INTO quote_lines (category_id, description, quantity, unit, unit_cost_ht, margin_percent, display_order)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ");
+                    
+                    foreach ($body['categories'] as $catIndex => $cat) {
+                        $catStmt->execute([
+                            $id,
+                            sanitize($cat['name']),
+                            $catIndex,
+                        ]);
+                        $categoryId = $db->lastInsertId();
+                        
+                        if (!empty($cat['lines']) && is_array($cat['lines'])) {
+                            foreach ($cat['lines'] as $lineIndex => $line) {
+                                $lineStmt->execute([
+                                    $categoryId,
+                                    sanitize($line['description']),
+                                    (float)($line['quantity'] ?? 1),
+                                    sanitize($line['unit'] ?? 'unité'),
+                                    (float)($line['unit_cost_ht'] ?? 0),
+                                    (float)($line['margin_percent'] ?? 30),
+                                    $lineIndex,
+                                ]);
+                            }
+                        }
+                    }
+                }
+                
+                // Update options for model-based quotes
+                if (!$existingQuote['is_free_quote'] && isset($body['selected_options']) && is_array($body['selected_options'])) {
+                    // Delete existing options
+                    $db->prepare("DELETE FROM quote_options WHERE quote_id = ?")->execute([$id]);
+                    
+                    // Re-insert options
+                    $optStmt = $db->prepare("
+                        INSERT INTO quote_options (quote_id, option_id, option_name, option_price)
+                        VALUES (?, ?, ?, ?)
+                    ");
+                    $BOQ_OPTION_ID_OFFSET = 1000000;
+                    foreach ($body['selected_options'] as $opt) {
+                        $optionId = (int)$opt['option_id'];
+                        $optionIdValue = ($optionId >= $BOQ_OPTION_ID_OFFSET) ? null : $optionId;
+                        $optStmt->execute([
+                            $id,
+                            $optionIdValue,
+                            sanitize($opt['option_name']),
+                            (float)$opt['option_price'],
+                        ]);
+                    }
+                }
+                
+                $db->commit();
+                ok();
+            } catch (Exception $e) {
+                $db->rollBack();
+                throw $e;
+            }
+            break;
+        }
+
+        case 'clone_quote': {
+            validateRequired($body, ['id']);
+            $sourceId = (int)$body['id'];
+            
+            // Get source quote
+            $stmt = $db->prepare("SELECT * FROM quotes WHERE id = ?");
+            $stmt->execute([$sourceId]);
+            $sourceQuote = $stmt->fetch();
+            
+            if (!$sourceQuote) fail('Devis source non trouvé', 404);
+            
+            $db->beginTransaction();
+            
+            try {
+                // Generate new reference
+                $yearMonth = date('Ym');
+                $isFreeQuote = $sourceQuote['is_free_quote'] ?? false;
+                $modelType = $sourceQuote['model_type'];
+                $prefix = $isFreeQuote ? 'WFQ' : (($modelType === 'container') ? 'WCQ' : 'WPQ');
+                $maxIdStmt = $db->query("SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM quotes");
+                $nextId = (int)$maxIdStmt->fetchColumn();
+                $reference = sprintf('%s-%s-%06d', $prefix, $yearMonth, $nextId);
+                
+                $validUntil = date('Y-m-d', strtotime('+30 days'));
+                
+                // Clone the quote
+                $stmt = $db->prepare("
+                    INSERT INTO quotes (
+                        reference_number, model_id, model_name, model_type,
+                        base_price, options_total, total_price,
+                        customer_name, customer_email, customer_phone,
+                        customer_address, customer_message, contact_id,
+                        status, valid_until, is_free_quote, quote_title,
+                        margin_percent, photo_url, plan_url, cloned_from_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?)
+                ");
+                $stmt->execute([
+                    $reference,
+                    $sourceQuote['model_id'],
+                    $sourceQuote['model_name'],
+                    $sourceQuote['model_type'],
+                    $sourceQuote['base_price'],
+                    $sourceQuote['options_total'],
+                    $sourceQuote['total_price'],
+                    $sourceQuote['customer_name'],
+                    $sourceQuote['customer_email'],
+                    $sourceQuote['customer_phone'],
+                    $sourceQuote['customer_address'],
+                    $sourceQuote['customer_message'],
+                    $sourceQuote['contact_id'],
+                    $validUntil,
+                    $isFreeQuote ? 1 : 0,
+                    $sourceQuote['quote_title'] ? $sourceQuote['quote_title'] . ' (copie)' : 'Copie',
+                    $sourceQuote['margin_percent'] ?? 30,
+                    $sourceQuote['photo_url'] ?? '',
+                    $sourceQuote['plan_url'] ?? '',
+                    $sourceId,
+                ]);
+                
+                $newQuoteId = $db->lastInsertId();
+                
+                // Update reference with actual ID
+                $reference = sprintf('%s-%s-%06d', $prefix, $yearMonth, $newQuoteId);
+                $db->prepare("UPDATE quotes SET reference_number = ? WHERE id = ?")->execute([$reference, $newQuoteId]);
+                
+                // Clone options
+                $db->prepare("
+                    INSERT INTO quote_options (quote_id, option_id, option_name, option_price)
+                    SELECT ?, option_id, option_name, option_price
+                    FROM quote_options WHERE quote_id = ?
+                ")->execute([$newQuoteId, $sourceId]);
+                
+                // Clone categories and lines for free quotes
+                if ($isFreeQuote) {
+                    $catStmt = $db->prepare("SELECT * FROM quote_categories WHERE quote_id = ? ORDER BY display_order");
+                    $catStmt->execute([$sourceId]);
+                    $categories = $catStmt->fetchAll();
+                    
+                    foreach ($categories as $cat) {
+                        $insertCatStmt = $db->prepare("
+                            INSERT INTO quote_categories (quote_id, name, display_order)
+                            VALUES (?, ?, ?)
+                        ");
+                        $insertCatStmt->execute([$newQuoteId, $cat['name'], $cat['display_order']]);
+                        $newCatId = $db->lastInsertId();
+                        
+                        $db->prepare("
+                            INSERT INTO quote_lines (category_id, description, quantity, unit, unit_cost_ht, margin_percent, display_order)
+                            SELECT ?, description, quantity, unit, unit_cost_ht, margin_percent, display_order
+                            FROM quote_lines WHERE category_id = ?
+                        ")->execute([$newCatId, $cat['id']]);
+                    }
+                }
+                
+                $db->commit();
+                ok(['id' => $newQuoteId, 'reference_number' => $reference]);
+            } catch (Exception $e) {
+                $db->rollBack();
+                throw $e;
+            }
+            break;
+        }
+
+        case 'get_quote_categories': {
+            validateRequired($body, ['quote_id']);
+            $quoteId = (int)$body['quote_id'];
+            
+            $stmt = $db->prepare("
+                SELECT qc.*, 
+                    COALESCE(SUM(ROUND(ql.quantity * ql.unit_cost_ht, 2)), 0) AS total_cost_ht,
+                    COALESCE(SUM(ROUND(ql.quantity * ql.unit_cost_ht * (1 + ql.margin_percent / 100), 2)), 0) AS total_sale_price_ht
+                FROM quote_categories qc
+                LEFT JOIN quote_lines ql ON qc.id = ql.category_id
+                WHERE qc.quote_id = ?
+                GROUP BY qc.id
+                ORDER BY qc.display_order ASC
+            ");
+            $stmt->execute([$quoteId]);
+            ok($stmt->fetchAll());
+            break;
+        }
+
+        case 'get_quote_lines': {
+            validateRequired($body, ['category_id']);
+            $categoryId = (int)$body['category_id'];
+            
+            $stmt = $db->prepare("
+                SELECT ql.*,
+                    ROUND(ql.quantity * ql.unit_cost_ht, 2) AS total_cost_ht,
+                    ROUND(ql.quantity * ql.unit_cost_ht * (1 + ql.margin_percent / 100), 2) AS sale_price_ht
+                FROM quote_lines ql
+                WHERE ql.category_id = ?
+                ORDER BY ql.display_order ASC
+            ");
+            $stmt->execute([$categoryId]);
+            ok($stmt->fetchAll());
+            break;
+        }
+
+        case 'get_quote_with_details': {
+            validateRequired($body, ['id']);
+            $id = (int)$body['id'];
+            
+            // Get quote
+            $stmt = $db->prepare("
+                SELECT q.*, m.name as model_display_name, m.type as model_display_type
+                FROM quotes q
+                LEFT JOIN models m ON q.model_id = m.id
+                WHERE q.id = ?
+            ");
+            $stmt->execute([$id]);
+            $quote = $stmt->fetch();
+            
+            if (!$quote) fail('Devis non trouvé', 404);
+            
+            // Get quote options (for model-based quotes)
+            $optStmt = $db->prepare("
+                SELECT option_id, option_name, option_price
+                FROM quote_options
+                WHERE quote_id = ?
+            ");
+            $optStmt->execute([$id]);
+            $quote['options'] = $optStmt->fetchAll();
+            
+            // Get categories and lines (for free quotes)
+            if ($quote['is_free_quote']) {
+                $catStmt = $db->prepare("
+                    SELECT qc.*, 
+                        COALESCE(SUM(ROUND(ql.quantity * ql.unit_cost_ht, 2)), 0) AS total_cost_ht,
+                        COALESCE(SUM(ROUND(ql.quantity * ql.unit_cost_ht * (1 + ql.margin_percent / 100), 2)), 0) AS total_sale_price_ht
+                    FROM quote_categories qc
+                    LEFT JOIN quote_lines ql ON qc.id = ql.category_id
+                    WHERE qc.quote_id = ?
+                    GROUP BY qc.id
+                    ORDER BY qc.display_order ASC
+                ");
+                $catStmt->execute([$id]);
+                $categories = $catStmt->fetchAll();
+                
+                foreach ($categories as &$cat) {
+                    $lineStmt = $db->prepare("
+                        SELECT ql.*,
+                            ROUND(ql.quantity * ql.unit_cost_ht, 2) AS total_cost_ht,
+                            ROUND(ql.quantity * ql.unit_cost_ht * (1 + ql.margin_percent / 100), 2) AS sale_price_ht
+                        FROM quote_lines ql
+                        WHERE ql.category_id = ?
+                        ORDER BY ql.display_order ASC
+                    ");
+                    $lineStmt->execute([$cat['id']]);
+                    $cat['lines'] = $lineStmt->fetchAll();
+                }
+                $quote['categories'] = $categories;
+            }
+            
+            ok($quote);
             break;
         }
 
