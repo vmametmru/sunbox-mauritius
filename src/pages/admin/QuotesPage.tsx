@@ -206,9 +206,15 @@ export default function QuotesPage() {
     }
   };
 
+  // Helper to properly check if a quote is a free-form quote
+  // This handles both boolean true/false and string "1"/"0" from the API
+  const isFreeQuote = (quote: any): boolean => {
+    return quote.is_free_quote === true || quote.is_free_quote === 1 || quote.is_free_quote === '1';
+  };
+
   // Handler to open the correct editor based on quote type
   const handleEditQuote = (quote: any) => {
-    if (quote.is_free_quote) {
+    if (isFreeQuote(quote)) {
       // Free-form quotes go to CreateQuotePage
       navigate(`/admin/quotes/new?edit=${quote.id}`);
     } else {
@@ -367,7 +373,7 @@ export default function QuotesPage() {
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
                         <span className="font-mono text-sm text-blue-600">{quote.reference_number}</span>
-                        {quote.is_free_quote && (
+                        {isFreeQuote(quote) && (
                           <Badge variant="outline" className="text-xs">
                             <Calculator className="h-3 w-3 mr-1" />
                             Libre
@@ -412,9 +418,9 @@ export default function QuotesPage() {
                           variant="outline" 
                           onClick={() => handleEditQuote(quote)} 
                           aria-label="Modifier le devis"
-                          title={quote.is_free_quote ? "Modifier le devis libre" : "Ouvrir le configurateur"}
+                          title={isFreeQuote(quote) ? "Modifier le devis libre" : "Ouvrir le configurateur"}
                         >
-                          {quote.is_free_quote ? <Edit className="h-4 w-4" /> : <Settings className="h-4 w-4" />}
+                          {isFreeQuote(quote) ? <Edit className="h-4 w-4" /> : <Settings className="h-4 w-4" />}
                         </Button>
                         <Button size="sm" variant="outline" onClick={() => navigate(`/admin/quotes/new?clone=${quote.id}`)} aria-label="Cloner le devis">
                           <Copy className="h-4 w-4" />
@@ -614,14 +620,14 @@ export default function QuotesPage() {
                 <Button 
                   variant="outline"
                   onClick={() => handleEditQuote(selectedQuote)}
-                  title={selectedQuote.is_free_quote ? "Modifier le devis libre" : "Ouvrir le configurateur"}
+                  title={isFreeQuote(selectedQuote) ? "Modifier le devis libre" : "Ouvrir le configurateur"}
                 >
-                  {selectedQuote.is_free_quote ? (
+                  {isFreeQuote(selectedQuote) ? (
                     <Edit className="h-4 w-4 mr-2" />
                   ) : (
                     <Settings className="h-4 w-4 mr-2" />
                   )}
-                  {selectedQuote.is_free_quote ? 'Modifier' : 'Configurer'}
+                  {isFreeQuote(selectedQuote) ? 'Modifier' : 'Configurer'}
                 </Button>
                 <Button 
                   variant="outline"
