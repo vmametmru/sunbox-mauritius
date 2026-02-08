@@ -232,18 +232,50 @@ export default function DevIdeasPage() {
   };
 
   /* ======================================================
-     FILTER
+     FILTER & SORT
   ====================================================== */
+  // Priority order for status: en_cours (1), non_demarree (2), completee (3)
+  const getStatusPriority = (statut: string): number => {
+    if (statut === 'en_cours') return 1;
+    if (statut === 'non_demarree') return 2;
+    return 3; // completee
+  };
+
+  // Priority order for urgence/importance combinations
+  const getPriorityCategory = (urgence: string, importance: string): number => {
+    if (urgence === 'urgent' && importance === 'important') return 1;      // Urgent et Important
+    if (urgence === 'urgent' && importance === 'non_important') return 2;  // Urgent et Non Important
+    if (urgence === 'non_urgent' && importance === 'important') return 3;  // Non Urgent et Important
+    return 4;                                                               // Non Urgent et Non Important
+  };
+
   const getFilteredIdeas = (): DevIdeaFromDB[] => {
-    return ideas.filter(idea => {
-      const searchLower = searchTerm.toLowerCase();
-      const matchesSearch = idea.name.toLowerCase().includes(searchLower) ||
-        (idea.script || '').toLowerCase().includes(searchLower);
-      const matchesStatus = statusFilter === 'all' || idea.statut === statusFilter;
-      const matchesUrgence = urgenceFilter === 'all' || idea.urgence === urgenceFilter;
-      const matchesImportance = importanceFilter === 'all' || idea.importance === importanceFilter;
-      return matchesSearch && matchesStatus && matchesUrgence && matchesImportance;
-    });
+    return ideas
+      .filter(idea => {
+        const searchLower = searchTerm.toLowerCase();
+        const matchesSearch = idea.name.toLowerCase().includes(searchLower) ||
+          (idea.script || '').toLowerCase().includes(searchLower);
+        const matchesStatus = statusFilter === 'all' || idea.statut === statusFilter;
+        const matchesUrgence = urgenceFilter === 'all' || idea.urgence === urgenceFilter;
+        const matchesImportance = importanceFilter === 'all' || idea.importance === importanceFilter;
+        return matchesSearch && matchesStatus && matchesUrgence && matchesImportance;
+      })
+      .sort((a, b) => {
+        // 1. Sort by status first (en_cours > non_demarree > completee)
+        const statusA = getStatusPriority(a.statut);
+        const statusB = getStatusPriority(b.statut);
+        if (statusA !== statusB) {
+          return statusA - statusB;
+        }
+        // 2. Then by priority category (Urgent+Important > Urgent+NonImportant > NonUrgent+Important > NonUrgent+NonImportant)
+        const priorityA = getPriorityCategory(a.urgence, a.importance);
+        const priorityB = getPriorityCategory(b.urgence, b.importance);
+        if (priorityA !== priorityB) {
+          return priorityA - priorityB;
+        }
+        // 3. Then sort alphabetically by name within each category
+        return a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' });
+      });
   };
 
   const filteredIdeas = getFilteredIdeas();
