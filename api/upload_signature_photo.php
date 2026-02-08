@@ -53,12 +53,8 @@ if (!is_dir($uploadDir)) {
     }
 }
 
-// Generate unique filename
-$extension = pathinfo($file['name'], PATHINFO_EXTENSION);
-if (empty($extension)) {
-    $extension = 'jpg'; // Default extension
-}
-$filename = 'photo_' . uniqid() . '_' . time() . '.' . strtolower($extension);
+// Generate unique filename - always use .jpg since we save as JPEG
+$filename = 'photo_' . uniqid() . '_' . time() . '.jpg';
 $destPath = $uploadDir . $filename;
 
 // Load source image
@@ -100,15 +96,8 @@ if ($srcWidth > $maxSize || $srcHeight > $maxSize) {
     
     $resized = imagecreatetruecolor($newWidth, $newHeight);
     
-    // Preserve transparency for PNG
-    if ($file['type'] === 'image/png') {
-        imagealphablending($resized, false);
-        imagesavealpha($resized, true);
-        $transparent = imagecolorallocatealpha($resized, 255, 255, 255, 127);
-        imagefill($resized, 0, 0, $transparent);
-    } else {
-        imagefill($resized, 0, 0, imagecolorallocate($resized, 255, 255, 255));
-    }
+    // Fill with white background for JPEG (no transparency support)
+    imagefill($resized, 0, 0, imagecolorallocate($resized, 255, 255, 255));
     
     imagecopyresampled($resized, $srcImage, 0, 0, 0, 0, $newWidth, $newHeight, $srcWidth, $srcHeight);
     

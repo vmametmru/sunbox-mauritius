@@ -1223,6 +1223,8 @@ try {
         case 'update_email_signature': {
             validateRequired($body, ['signature_key', 'body_html']);
             
+            $signatureKey = sanitize($body['signature_key']);
+            
             $stmt = $db->prepare("
                 UPDATE email_signatures 
                 SET name = ?, description = ?, body_html = ?, logo_url = ?, photo_url = ?, is_active = ?, is_default = ?, updated_at = NOW()
@@ -1236,13 +1238,13 @@ try {
                 sanitize($body['photo_url'] ?? ''),
                 isset($body['is_active']) ? ($body['is_active'] ? 1 : 0) : 1,
                 isset($body['is_default']) ? ($body['is_default'] ? 1 : 0) : 0,
-                $body['signature_key']
+                $signatureKey
             ]);
             
             // If this is set as default, unset other defaults
             if (!empty($body['is_default'])) {
                 $updateStmt = $db->prepare("UPDATE email_signatures SET is_default = 0 WHERE signature_key != ?");
-                $updateStmt->execute([$body['signature_key']]);
+                $updateStmt->execute([$signatureKey]);
             }
             
             ok();
@@ -1252,7 +1254,7 @@ try {
         case 'delete_email_signature': {
             validateRequired($body, ['signature_key']);
             $stmt = $db->prepare("DELETE FROM email_signatures WHERE signature_key = ?");
-            $stmt->execute([$body['signature_key']]);
+            $stmt->execute([sanitize($body['signature_key'])]);
             ok();
             break;
         }
