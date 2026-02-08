@@ -407,6 +407,25 @@ export const api = {
     return result.data !== undefined ? result.data : result;
   },
 
+  async sendTemplateEmail(data: {
+    to: string | string[];
+    template_key: string;
+    data: Record<string, any>;
+    cc?: string | string[];
+  }) {
+    const response = await fetch(`${API_BASE_URL}/email.php?action=send_template`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+
+    const result = await response.json();
+    if (!response.ok || result.error) {
+      throw new Error(result.error || 'Failed to send email');
+    }
+    return result.data !== undefined ? result.data : result;
+  },
+
   /* =====================================================
      EMAIL SIGNATURES
   ===================================================== */
