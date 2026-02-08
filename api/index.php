@@ -25,7 +25,33 @@ try {
             $stats['total_quotes'] = (int)$db->query("SELECT COUNT(*) FROM quotes")->fetchColumn();
             $stats['pending_quotes'] = (int)$db->query("SELECT COUNT(*) FROM quotes WHERE status='pending'")->fetchColumn();
             $stats['approved_quotes'] = (int)$db->query("SELECT COUNT(*) FROM quotes WHERE status='approved'")->fetchColumn();
+            $stats['today_quotes'] = (int)$db->query("SELECT COUNT(*) FROM quotes WHERE created_at >= CURDATE() AND created_at < CURDATE() + INTERVAL 1 DAY")->fetchColumn();
             $stats['total_revenue'] = (float)$db->query("SELECT COALESCE(SUM(total_price),0) FROM quotes WHERE status='approved'")->fetchColumn();
+            $stats['new_contacts'] = (int)$db->query("SELECT COUNT(*) FROM contacts WHERE status = 'new'")->fetchColumn();
+            
+            // Recent quotes (last 5)
+            $recentQuotes = $db->query("
+                SELECT id, reference_number, customer_name, customer_email, model_name, model_type, 
+                       total_price, status, created_at 
+                FROM quotes 
+                ORDER BY created_at DESC 
+                LIMIT 5
+            ")->fetchAll();
+            $stats['recent_quotes'] = $recentQuotes;
+            
+            // Monthly stats (last 6 months)
+            $monthlyStats = $db->query("
+                SELECT 
+                    DATE_FORMAT(created_at, '%Y-%m') as month,
+                    COUNT(*) as count,
+                    COALESCE(SUM(CASE WHEN status = 'approved' THEN total_price ELSE 0 END), 0) as revenue
+                FROM quotes 
+                WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
+                GROUP BY DATE_FORMAT(created_at, '%Y-%m')
+                ORDER BY month ASC
+            ")->fetchAll();
+            $stats['monthly_stats'] = $monthlyStats;
+            
             ok($stats);
             break;
         }
@@ -1038,6 +1064,40 @@ try {
             $stmt = $db->prepare("DELETE FROM contacts WHERE id = ?");
             $stmt->execute([$id]);
             ok();
+            break;
+        }
+
+        // === EMAIL TEMPLATES
+        case 'get_email_templates': {
+            $stmt = $db->query("SELECT * FROM email_templates ORDER BY template_key");
+            ok($stmt->fetchAll());
+            break;
+        }
+
+        case 'update_email_template': {
+            validateRequired($body, ['template_key', 'subject', 'body_html']);
+            $stmt = $db->prepare("
+                UPDATE email_templates 
+                SET subject = ?, body_html = ?, body_text = ?, updated_at = NOW()
+                WHERE template_key = ?
+            ");
+            $stmt->execute([
+                sanitize($body['subject']),
+                $body['body_html'],
+                $body['body_text'] ?? '',
+                $body['template_key']
+            ]);
+            ok();
+            break;
+        }
+
+        case 'get_email_logs': {
+            $limit = (int)($body['limit'] ?? 50);
+            if ($limit < 1) $limit = 50;
+            if ($limit > 500) $limit = 500;
+            
+            $stmt = $db->query("SELECT * FROM email_logs ORDER BY created_at DESC LIMIT " . $limit);
+            ok($stmt->fetchAll());
             break;
         }
 
