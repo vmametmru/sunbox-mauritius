@@ -462,19 +462,18 @@ export const api = {
     return this.query('delete_email_signature', { signature_key: signatureKey });
   },
 
-  async uploadSignatureImage(file: File, type: 'logo' | 'photo') {
+  async uploadSignaturePhoto(file: File) {
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('type', type);
     
-    const response = await fetch(`${API_BASE_URL}/upload_signature_image.php`, {
+    const response = await fetch(`${API_BASE_URL}/upload_signature_photo.php`, {
       method: 'POST',
       body: formData,
     });
 
     const result = await response.json();
     if (!response.ok || result.error) {
-      throw new Error(result.error || 'Failed to upload image');
+      throw new Error(result.error || 'Failed to upload photo');
     }
     return result.data?.url || result.url;
   },

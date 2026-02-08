@@ -1178,6 +1178,87 @@ try {
             break;
         }
 
+        // === EMAIL SIGNATURES ===
+        case 'get_email_signatures': {
+            $stmt = $db->query("SELECT * FROM email_signatures ORDER BY is_default DESC, name ASC");
+            ok($stmt->fetchAll());
+            break;
+        }
+
+        case 'create_email_signature': {
+            validateRequired($body, ['signature_key', 'name', 'body_html']);
+            
+            // Check if signature_key already exists
+            $checkStmt = $db->prepare("SELECT COUNT(*) FROM email_signatures WHERE signature_key = ?");
+            $checkStmt->execute([sanitize($body['signature_key'])]);
+            if ($checkStmt->fetchColumn() > 0) {
+                fail('Une signature avec cette clé existe déjà', 400);
+            }
+            
+            $stmt = $db->prepare("
+                INSERT INTO email_signatures (signature_key, name, description, body_html, logo_url, photo_url, is_active, is_default)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ");
+            $stmt->execute([
+                sanitize($body['signature_key']),
+                sanitize($body['name']),
+                sanitize($body['description'] ?? ''),
+                $body['body_html'],
+                sanitize($body['logo_url'] ?? ''),
+                sanitize($body['photo_url'] ?? ''),
+                isset($body['is_active']) ? ($body['is_active'] ? 1 : 0) : 1,
+                isset($body['is_default']) ? ($body['is_default'] ? 1 : 0) : 0
+            ]);
+            
+            // If this is set as default, unset other defaults
+            if (!empty($body['is_default'])) {
+                $updateStmt = $db->prepare("UPDATE email_signatures SET is_default = 0 WHERE signature_key != ?");
+                $updateStmt->execute([sanitize($body['signature_key'])]);
+            }
+            
+            ok(['id' => $db->lastInsertId()]);
+            break;
+        }
+
+        case 'update_email_signature': {
+            validateRequired($body, ['signature_key', 'body_html']);
+            
+            $signatureKey = sanitize($body['signature_key']);
+            
+            $stmt = $db->prepare("
+                UPDATE email_signatures 
+                SET name = ?, description = ?, body_html = ?, logo_url = ?, photo_url = ?, is_active = ?, is_default = ?, updated_at = NOW()
+                WHERE signature_key = ?
+            ");
+            $stmt->execute([
+                sanitize($body['name'] ?? ''),
+                sanitize($body['description'] ?? ''),
+                $body['body_html'],
+                sanitize($body['logo_url'] ?? ''),
+                sanitize($body['photo_url'] ?? ''),
+                isset($body['is_active']) ? ($body['is_active'] ? 1 : 0) : 1,
+                isset($body['is_default']) ? ($body['is_default'] ? 1 : 0) : 0,
+                $signatureKey
+            ]);
+            
+            // If this is set as default, unset other defaults
+            if (!empty($body['is_default'])) {
+                $updateStmt = $db->prepare("UPDATE email_signatures SET is_default = 0 WHERE signature_key != ?");
+                $updateStmt->execute([$signatureKey]);
+            }
+            
+            ok();
+            break;
+        }
+
+        case 'delete_email_signature': {
+            validateRequired($body, ['signature_key']);
+            $stmt = $db->prepare("DELETE FROM email_signatures WHERE signature_key = ?");
+            $stmt->execute([sanitize($body['signature_key'])]);
+            ok();
+            break;
+        }
+
         default:
             fail('Invalid action', 400);
     }
