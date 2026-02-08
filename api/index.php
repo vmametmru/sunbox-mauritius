@@ -1015,7 +1015,7 @@ try {
                         customer_address, customer_message, contact_id,
                         status, valid_until, is_free_quote, quote_title,
                         margin_percent, photo_url, plan_url, cloned_from_id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)
                 ");
                 $stmt->execute([
                     $reference,
@@ -1266,7 +1266,7 @@ try {
                         customer_address, customer_message, contact_id,
                         status, valid_until, is_free_quote, quote_title,
                         margin_percent, photo_url, plan_url, cloned_from_id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)
                 ");
                 $stmt->execute([
                     $reference,

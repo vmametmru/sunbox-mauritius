@@ -115,8 +115,8 @@ export default function QuotesPage() {
         setSelectedQuote({ ...selectedQuote, status });
       }
       
-      // Send email notification for status changes (approved, validated, or rejected)
-      if (status === 'approved' || status === 'validated' || status === 'rejected') {
+      // Send email notification for status changes (approved or rejected)
+      if (status === 'approved' || status === 'rejected') {
         try {
           // Fetch quote data to ensure we have all necessary fields
           // Use selectedQuote if available, otherwise fetch from API
@@ -135,7 +135,7 @@ export default function QuotesPage() {
             return;
           }
 
-          const templateKey = (status === 'approved' || status === 'validated') ? 'quote_approved' : 'quote_rejected';
+          const templateKey = status === 'approved' ? 'quote_approved' : 'quote_rejected';
           const emailData: Record<string, any> = {
             customer_name: quoteData.customer_name,
             reference: quoteData.reference_number,
@@ -155,11 +155,9 @@ export default function QuotesPage() {
             data: emailData
           });
           
-          const message = status === 'validated'
-            ? 'Le client a été notifié de la validation'
-            : status === 'approved'
-              ? 'Le client a été notifié de l\'approbation'
-              : 'Le client a été notifié du refus';
+          const message = status === 'approved'
+            ? 'Le client a été notifié de l\'approbation'
+            : 'Le client a été notifié du refus';
           toast({ title: 'Email envoyé', description: message });
         } catch (emailErr: any) {
           console.error('Email error:', emailErr);
@@ -210,20 +208,12 @@ export default function QuotesPage() {
 
   const getStatusBadge = (status: string) => {
     const styles: Record<string, string> = {
-      draft: 'bg-gray-100 text-gray-800',
-      open: 'bg-blue-100 text-blue-800',
-      validated: 'bg-green-100 text-green-800',
-      cancelled: 'bg-red-100 text-red-800',
       pending: 'bg-yellow-100 text-yellow-800',
       approved: 'bg-green-100 text-green-800',
       rejected: 'bg-red-100 text-red-800',
       completed: 'bg-purple-100 text-purple-800',
     };
     const labels: Record<string, string> = {
-      draft: 'Brouillon',
-      open: 'Ouvert',
-      validated: 'Validé',
-      cancelled: 'Annulé',
       pending: 'En attente',
       approved: 'Approuvé',
       rejected: 'Rejeté',
@@ -236,13 +226,7 @@ export default function QuotesPage() {
     return quotes.filter(q => q.status === status).length;
   };
 
-  // Count for new admin quote statuses
-  const draftCount = getStatusCount('draft');
-  const openCount = getStatusCount('open');
-  const validatedCount = getStatusCount('validated');
-  const cancelledCount = getStatusCount('cancelled');
-  
-  // Count for legacy public quote statuses  
+  // Count for quote statuses (unified WCQ-style flow)
   const pendingCount = getStatusCount('pending');
   const approvedCount = getStatusCount('approved');
   const rejectedCount = getStatusCount('rejected');
@@ -275,65 +259,33 @@ export default function QuotesPage() {
         </div>
       </div>
 
-      {/* Status Summary - Admin Quote Statuses */}
-      {(draftCount > 0 || openCount > 0 || validatedCount > 0 || cancelledCount > 0) && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card className="cursor-pointer hover:border-gray-400" onClick={() => setStatusFilter('draft')}>
-            <CardContent className="p-4 text-center">
-              <p className="text-2xl font-bold text-gray-600">{draftCount}</p>
-              <p className="text-sm text-gray-500">Brouillons</p>
-            </CardContent>
-          </Card>
-          <Card className="cursor-pointer hover:border-blue-300" onClick={() => setStatusFilter('open')}>
-            <CardContent className="p-4 text-center">
-              <p className="text-2xl font-bold text-blue-600">{openCount}</p>
-              <p className="text-sm text-gray-500">Ouverts</p>
-            </CardContent>
-          </Card>
-          <Card className="cursor-pointer hover:border-green-300" onClick={() => setStatusFilter('validated')}>
-            <CardContent className="p-4 text-center">
-              <p className="text-2xl font-bold text-green-600">{validatedCount}</p>
-              <p className="text-sm text-gray-500">Validés</p>
-            </CardContent>
-          </Card>
-          <Card className="cursor-pointer hover:border-red-300" onClick={() => setStatusFilter('cancelled')}>
-            <CardContent className="p-4 text-center">
-              <p className="text-2xl font-bold text-red-600">{cancelledCount}</p>
-              <p className="text-sm text-gray-500">Annulés</p>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {/* Status Summary - Legacy Public Quote Statuses */}
-      {(pendingCount > 0 || approvedCount > 0 || rejectedCount > 0 || completedCount > 0) && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card className="cursor-pointer hover:border-yellow-300" onClick={() => setStatusFilter('pending')}>
-            <CardContent className="p-4 text-center">
-              <p className="text-2xl font-bold text-yellow-600">{pendingCount}</p>
-              <p className="text-sm text-gray-500">En attente</p>
-            </CardContent>
-          </Card>
-          <Card className="cursor-pointer hover:border-green-300" onClick={() => setStatusFilter('approved')}>
-            <CardContent className="p-4 text-center">
-              <p className="text-2xl font-bold text-green-600">{approvedCount}</p>
-              <p className="text-sm text-gray-500">Approuvés</p>
-            </CardContent>
-          </Card>
-          <Card className="cursor-pointer hover:border-red-300" onClick={() => setStatusFilter('rejected')}>
-            <CardContent className="p-4 text-center">
-              <p className="text-2xl font-bold text-red-600">{rejectedCount}</p>
-              <p className="text-sm text-gray-500">Rejetés</p>
-            </CardContent>
-          </Card>
-          <Card className="cursor-pointer hover:border-purple-300" onClick={() => setStatusFilter('completed')}>
-            <CardContent className="p-4 text-center">
-              <p className="text-2xl font-bold text-purple-600">{completedCount}</p>
-              <p className="text-sm text-gray-500">Terminés</p>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+      {/* Status Summary - Quote Statuses (unified WCQ-style flow) */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <Card className="cursor-pointer hover:border-yellow-300" onClick={() => setStatusFilter('pending')}>
+          <CardContent className="p-4 text-center">
+            <p className="text-2xl font-bold text-yellow-600">{pendingCount}</p>
+            <p className="text-sm text-gray-500">En attente</p>
+          </CardContent>
+        </Card>
+        <Card className="cursor-pointer hover:border-green-300" onClick={() => setStatusFilter('approved')}>
+          <CardContent className="p-4 text-center">
+            <p className="text-2xl font-bold text-green-600">{approvedCount}</p>
+            <p className="text-sm text-gray-500">Approuvés</p>
+          </CardContent>
+        </Card>
+        <Card className="cursor-pointer hover:border-red-300" onClick={() => setStatusFilter('rejected')}>
+          <CardContent className="p-4 text-center">
+            <p className="text-2xl font-bold text-red-600">{rejectedCount}</p>
+            <p className="text-sm text-gray-500">Rejetés</p>
+          </CardContent>
+        </Card>
+        <Card className="cursor-pointer hover:border-purple-300" onClick={() => setStatusFilter('completed')}>
+          <CardContent className="p-4 text-center">
+            <p className="text-2xl font-bold text-purple-600">{completedCount}</p>
+            <p className="text-sm text-gray-500">Terminés</p>
+          </CardContent>
+        </Card>
+      </div>
 
       {/* Filters */}
       <Card>
@@ -354,10 +306,6 @@ export default function QuotesPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Tous les statuts</SelectItem>
-                <SelectItem value="draft">Brouillon</SelectItem>
-                <SelectItem value="open">Ouvert</SelectItem>
-                <SelectItem value="validated">Validé</SelectItem>
-                <SelectItem value="cancelled">Annulé</SelectItem>
                 <SelectItem value="pending">En attente</SelectItem>
                 <SelectItem value="approved">Approuvé</SelectItem>
                 <SelectItem value="rejected">Rejeté</SelectItem>
@@ -589,69 +537,7 @@ export default function QuotesPage() {
 
               {/* Actions */}
               <div className="flex flex-wrap gap-2 pt-4 border-t">
-                {/* Admin quote status flow: draft → open → validated / cancelled */}
-                {selectedQuote.status === 'draft' && (
-                  <>
-                    <Button 
-                      className="bg-blue-600 hover:bg-blue-700"
-                      onClick={() => updateStatus(selectedQuote.id, 'open')}
-                    >
-                      <CheckCircle className="h-4 w-4 mr-2" />
-                      Ouvrir
-                    </Button>
-                    <Button 
-                      variant="outline" 
-                      className="text-red-600 border-red-300 hover:bg-red-50"
-                      onClick={() => updateStatus(selectedQuote.id, 'cancelled')}
-                    >
-                      <XCircle className="h-4 w-4 mr-2" />
-                      Annuler
-                    </Button>
-                  </>
-                )}
-                {selectedQuote.status === 'open' && (
-                  <>
-                    <Button 
-                      className="bg-green-600 hover:bg-green-700"
-                      onClick={() => updateStatus(selectedQuote.id, 'validated')}
-                    >
-                      <CheckCircle className="h-4 w-4 mr-2" />
-                      Valider
-                    </Button>
-                    <Button 
-                      variant="outline"
-                      onClick={() => updateStatus(selectedQuote.id, 'draft')}
-                    >
-                      Remettre en brouillon
-                    </Button>
-                    <Button 
-                      variant="outline" 
-                      className="text-red-600 border-red-300 hover:bg-red-50"
-                      onClick={() => updateStatus(selectedQuote.id, 'cancelled')}
-                    >
-                      <XCircle className="h-4 w-4 mr-2" />
-                      Annuler
-                    </Button>
-                  </>
-                )}
-                {selectedQuote.status === 'validated' && (
-                  <Button 
-                    variant="outline"
-                    onClick={() => updateStatus(selectedQuote.id, 'open')}
-                  >
-                    Réouvrir
-                  </Button>
-                )}
-                {selectedQuote.status === 'cancelled' && (
-                  <Button 
-                    variant="outline"
-                    onClick={() => updateStatus(selectedQuote.id, 'draft')}
-                  >
-                    Remettre en brouillon
-                  </Button>
-                )}
-
-                {/* Legacy public quote status flow: pending → approved/rejected → completed */}
+                {/* Quote status flow: pending → approved/rejected → completed */}
                 {selectedQuote.status === 'pending' && (
                   <>
                     <Button 
