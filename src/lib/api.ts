@@ -375,7 +375,7 @@ export const api = {
     return this.query('get_quote_lines', { category_id: categoryId });
   },
 
-  updateQuoteStatus(id: number, status: 'draft' | 'open' | 'validated' | 'cancelled' | 'pending' | 'approved' | 'rejected' | 'completed') {
+  updateQuoteStatus(id: number, status: 'pending' | 'approved' | 'rejected' | 'completed') {
     return this.query('update_quote_status', { id, status });
   },
 
