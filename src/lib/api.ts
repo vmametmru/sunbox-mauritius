@@ -277,6 +277,7 @@ export const api = {
     customer_phone: string;
     customer_address?: string;
     customer_message?: string;
+    device_id?: string;
     selected_options?: Array<{ option_id: number; option_name: string; option_price: number }>;
   }) {
     return this.query('create_quote', quote);
@@ -288,6 +289,36 @@ export const api = {
 
   deleteQuote(id: number) {
     return this.query('delete_quote', { id });
+  },
+
+  /* =====================================================
+     CONTACTS
+  ===================================================== */
+  getContacts() {
+    return this.query('get_contacts');
+  },
+
+  getContact(id: number) {
+    return this.query('get_contact', { id });
+  },
+
+  getContactByDevice(deviceId: string) {
+    return this.query('get_contact_by_device', { device_id: deviceId });
+  },
+
+  updateContact(contact: {
+    id: number;
+    name?: string;
+    email?: string;
+    phone?: string;
+    address?: string;
+    status?: 'new' | 'read' | 'replied' | 'archived';
+  }) {
+    return this.query('update_contact', contact);
+  },
+
+  deleteContact(id: number) {
+    return this.query('delete_contact', { id });
   },
 
   /* =====================================================

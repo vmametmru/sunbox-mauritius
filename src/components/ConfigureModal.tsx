@@ -52,23 +52,77 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submittedQuote, setSubmittedQuote] = useState<{ id: number; reference_number: string } | null>(null);
   
+  // Client info reuse state
+  const [savedClientInfo, setSavedClientInfo] = useState<{
+    name: string;
+    email: string;
+    phone: string;
+    address: string;
+  } | null>(null);
+  const [useLastClientInfo, setUseLastClientInfo] = useState(false);
+  
   const { toast } = useToast();
   const { data: siteSettings } = useSiteSettings();
   const vatRate = Number(siteSettings?.vat_rate) || 15;
 
   const model = quoteData.model;
+  
+  // Generate or retrieve device ID for client info reuse
+  const getDeviceId = () => {
+    let deviceId = localStorage.getItem('sunbox_device_id');
+    if (!deviceId) {
+      deviceId = 'device_' + Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
+      localStorage.setItem('sunbox_device_id', deviceId);
+    }
+    return deviceId;
+  };
+  
+  // Load saved client info from API
+  const loadSavedClientInfo = async () => {
+    try {
+      const deviceId = getDeviceId();
+      const result = await api.getContactByDevice(deviceId);
+      if (result && result.name) {
+        setSavedClientInfo({
+          name: result.name,
+          email: result.email,
+          phone: result.phone || '',
+          address: result.address || '',
+        });
+      } else {
+        setSavedClientInfo(null);
+      }
+    } catch (err) {
+      console.error('Error loading saved client info:', err);
+      setSavedClientInfo(null);
+    }
+  };
 
   useEffect(() => {
     if (open && model?.id) {
       loadOptions();
       loadBOQOptions();
       loadBaseCategories();
+      loadSavedClientInfo();
       // Reset to first step when opening
       setStep('options');
       setErrors({});
       setSubmittedQuote(null);
+      setUseLastClientInfo(false);
     }
   }, [open, model?.id]);
+  
+  // Handle checkbox to use saved client info
+  useEffect(() => {
+    if (useLastClientInfo && savedClientInfo) {
+      setCustomerDetails({
+        customerName: savedClientInfo.name,
+        customerEmail: savedClientInfo.email,
+        customerPhone: savedClientInfo.phone,
+        customerAddress: savedClientInfo.address,
+      });
+    }
+  }, [useLastClientInfo, savedClientInfo]);
 
   // Form validation
   const validateForm = () => {
@@ -119,6 +173,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
     try {
       const optionsTotal = calculateOptionsTotalTTC();
       const totalPrice = calculateTotalTTC();
+      const deviceId = getDeviceId();
       
       const result = await api.createQuote({
         model_id: model.id,
@@ -132,6 +187,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
         customer_phone: quoteData.customerPhone,
         customer_address: quoteData.customerAddress || '',
         customer_message: quoteData.customerMessage || '',
+        device_id: deviceId,
         selected_options: quoteData.selectedOptions.map(opt => ({
           option_id: opt.id,
           option_name: opt.name,
@@ -492,6 +548,26 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                 <p className="text-gray-600 mb-6">
                   Veuillez remplir vos informations pour recevoir votre devis.
                 </p>
+
+                {/* Checkbox to use saved client info */}
+                {savedClientInfo && (
+                  <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={useLastClientInfo}
+                        onChange={(e) => setUseLastClientInfo(e.target.checked)}
+                        className="w-5 h-5 text-orange-600 rounded border-gray-300 focus:ring-orange-500"
+                      />
+                      <div>
+                        <span className="font-medium text-blue-800">Utiliser mes informations précédentes</span>
+                        <p className="text-sm text-blue-600 mt-0.5">
+                          {savedClientInfo.name} • {savedClientInfo.email}
+                        </p>
+                      </div>
+                    </label>
+                  </div>
+                )}
 
                 {errors.submit && (
                   <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">

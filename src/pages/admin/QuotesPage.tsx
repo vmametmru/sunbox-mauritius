@@ -10,7 +10,8 @@ import {
   Phone,
   MapPin,
   RefreshCw,
-  Download
+  Download,
+  ExternalLink
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -20,6 +21,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 
 export default function QuotesPage() {
   const [quotes, setQuotes] = useState<any[]>([]);
@@ -31,10 +33,23 @@ export default function QuotesPage() {
   const [quoteDetails, setQuoteDetails] = useState<any>(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const { toast } = useToast();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   useEffect(() => {
     loadQuotes();
   }, []);
+
+  // Handle ?quote= parameter to auto-open a specific quote
+  useEffect(() => {
+    const quoteIdParam = searchParams.get('quote');
+    if (quoteIdParam && quotes.length > 0) {
+      const quote = quotes.find(q => q.id === parseInt(quoteIdParam));
+      if (quote) {
+        loadQuoteDetails(quote);
+      }
+    }
+  }, [searchParams, quotes]);
 
   useEffect(() => {
     filterQuotes();
@@ -266,7 +281,17 @@ export default function QuotesPage() {
                     </td>
                     <td className="px-6 py-4">
                       <div>
-                        <p className="font-medium text-sm">{quote.customer_name}</p>
+                        {quote.contact_id ? (
+                          <button
+                            onClick={() => navigate(`/admin/contacts?contact=${quote.contact_id}`)}
+                            className="font-medium text-sm text-orange-600 hover:text-orange-700 hover:underline flex items-center gap-1"
+                          >
+                            {quote.customer_name}
+                            <ExternalLink className="h-3 w-3" />
+                          </button>
+                        ) : (
+                          <p className="font-medium text-sm">{quote.customer_name}</p>
+                        )}
                         <p className="text-xs text-gray-500">{quote.customer_email}</p>
                       </div>
                     </td>
@@ -338,7 +363,23 @@ export default function QuotesPage() {
 
               {/* Customer Info */}
               <div className="bg-gray-50 rounded-lg p-4 space-y-3">
-                <h4 className="font-semibold text-gray-900">Informations Client</h4>
+                <div className="flex items-center justify-between">
+                  <h4 className="font-semibold text-gray-900">Informations Client</h4>
+                  {selectedQuote.contact_id && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setSelectedQuote(null);
+                        navigate(`/admin/contacts?contact=${selectedQuote.contact_id}`);
+                      }}
+                      className="text-orange-600 hover:text-orange-700"
+                    >
+                      <ExternalLink className="h-4 w-4 mr-1" />
+                      Voir le contact
+                    </Button>
+                  )}
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div className="flex items-center gap-2">
                     <span className="font-medium">{selectedQuote.customer_name}</span>

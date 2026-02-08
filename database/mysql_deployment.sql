@@ -99,6 +99,7 @@ CREATE TABLE quotes (
     customer_phone VARCHAR(50) NOT NULL,
     customer_address TEXT,
     customer_message TEXT,
+    contact_id INT NULL,
     status ENUM('pending', 'approved', 'rejected', 'completed') DEFAULT 'pending',
     valid_until DATE,
     notes TEXT,
@@ -109,8 +110,10 @@ CREATE TABLE quotes (
     INDEX idx_status (status),
     INDEX idx_customer_email (customer_email),
     INDEX idx_created_at (created_at),
+    INDEX idx_contact_id (contact_id),
     FOREIGN KEY (model_id) REFERENCES models(id) ON DELETE SET NULL,
-    FOREIGN KEY (assigned_to) REFERENCES users(id) ON DELETE SET NULL
+    FOREIGN KEY (assigned_to) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
@@ -129,20 +132,23 @@ CREATE TABLE quote_options (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
--- TABLE: contacts (Contact form submissions)
+-- TABLE: contacts (Contact form submissions and customer records)
 -- ============================================
 CREATE TABLE contacts (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     email VARCHAR(255) NOT NULL,
     phone VARCHAR(50),
+    address TEXT,
     subject VARCHAR(255),
-    message TEXT NOT NULL,
+    message TEXT,
+    device_id VARCHAR(100),
     status ENUM('new', 'read', 'replied', 'archived') DEFAULT 'new',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_status (status),
-    INDEX idx_email (email)
+    INDEX idx_email (email),
+    INDEX idx_device_id (device_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================
