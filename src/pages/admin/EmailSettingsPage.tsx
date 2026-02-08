@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { 
   Mail, 
   Server, 
@@ -15,7 +15,8 @@ import {
   Plus,
   Trash2,
   Pen,
-  Image
+  Image,
+  Upload
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -159,6 +160,10 @@ export default function EmailSettingsPage() {
   const [showCreateSignatureForm, setShowCreateSignatureForm] = useState(false);
   const [newTemplate, setNewTemplate] = useState<Omit<EmailTemplate, 'id'>>(defaultNewTemplate);
   const [newSignature, setNewSignature] = useState<Omit<EmailSignature, 'id'>>(defaultNewSignature);
+  const [siteLogo, setSiteLogo] = useState<string>('');
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const newPhotoInputRef = useRef<HTMLInputElement>(null);
+  const editPhotoInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -173,6 +178,16 @@ export default function EmailSettingsPage() {
       const settingsResult = await api.getSettings();
       if (settingsResult) {
         setSettings({ ...defaultSettings, ...settingsResult });
+      }
+      
+      // Load site settings to get the logo
+      try {
+        const siteSettingsResult = await api.getSettings('site');
+        if (siteSettingsResult && siteSettingsResult.site_logo) {
+          setSiteLogo(siteSettingsResult.site_logo);
+        }
+      } catch (e) {
+        console.log('Site settings not available');
       }
       
       // Load templates
@@ -392,13 +407,20 @@ export default function EmailSettingsPage() {
     }
   };
 
-  const handleSignatureImageUpload = async (file: File, type: 'logo' | 'photo') => {
+  const handlePhotoUpload = async (file: File, isNewSignature: boolean) => {
     try {
-      const url = await api.uploadSignatureImage(file, type);
-      return url;
+      setUploadingPhoto(true);
+      const url = await api.uploadSignaturePhoto(file);
+      if (isNewSignature) {
+        setNewSignature({ ...newSignature, photo_url: url });
+      } else if (selectedSignature) {
+        setSelectedSignature({ ...selectedSignature, photo_url: url });
+      }
+      toast({ title: 'Succès', description: 'Photo uploadée avec succès' });
     } catch (err: any) {
-      toast({ title: 'Erreur', description: `Échec du téléchargement de l'image: ${err.message}`, variant: 'destructive' });
-      throw err;
+      toast({ title: 'Erreur', description: `Échec du téléchargement de la photo: ${err.message}`, variant: 'destructive' });
+    } finally {
+      setUploadingPhoto(false);
     }
   };
 
@@ -1119,26 +1141,63 @@ export default function EmailSettingsPage() {
                     <div className="space-y-2">
                       <Label className="flex items-center gap-2">
                         <Image className="h-4 w-4" />
-                        URL du Logo
+                        Logo
                       </Label>
-                      <Input
-                        value={newSignature.logo_url}
-                        onChange={(e) => setNewSignature({ ...newSignature, logo_url: e.target.value })}
-                        placeholder="https://example.com/logo.png"
-                      />
+                      <div className="p-3 bg-gray-100 rounded-lg border">
+                        {siteLogo ? (
+                          <div className="flex items-center gap-3">
+                            <img 
+                              src={siteLogo} 
+                              alt="Logo du site" 
+                              className="h-10 object-contain"
+                              onError={(e) => (e.target as HTMLImageElement).style.display = 'none'}
+                            />
+                            <p className="text-sm text-gray-600">Logo du site (configuré dans Paramètres &gt; Site)</p>
+                          </div>
+                        ) : (
+                          <p className="text-sm text-gray-500">Aucun logo configuré. Configurez-le dans Paramètres &gt; Site</p>
+                        )}
+                      </div>
                       <p className="text-xs text-gray-500">Utilisez {'{{signature_logo}}'} dans le contenu HTML</p>
                     </div>
                     
                     <div className="space-y-2">
                       <Label className="flex items-center gap-2">
                         <Image className="h-4 w-4" />
-                        URL de la Photo
+                        Photo
                       </Label>
-                      <Input
-                        value={newSignature.photo_url}
-                        onChange={(e) => setNewSignature({ ...newSignature, photo_url: e.target.value })}
-                        placeholder="https://example.com/photo.jpg"
-                      />
+                      <div className="flex items-center gap-3">
+                        {newSignature.photo_url && (
+                          <img 
+                            src={newSignature.photo_url} 
+                            alt="Photo" 
+                            className="h-16 w-16 object-cover border rounded-full"
+                            onError={(e) => (e.target as HTMLImageElement).style.display = 'none'}
+                          />
+                        )}
+                        <div className="flex-1">
+                          <input
+                            type="file"
+                            ref={newPhotoInputRef}
+                            accept="image/jpeg,image/png,image/webp"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) handlePhotoUpload(file, true);
+                            }}
+                          />
+                          <Button 
+                            type="button"
+                            variant="outline" 
+                            onClick={() => newPhotoInputRef.current?.click()}
+                            disabled={uploadingPhoto}
+                            className="w-full"
+                          >
+                            <Upload className="h-4 w-4 mr-2" />
+                            {uploadingPhoto ? 'Upload en cours...' : 'Uploader une photo'}
+                          </Button>
+                        </div>
+                      </div>
                       <p className="text-xs text-gray-500">Utilisez {'{{signature_photo}}'} dans le contenu HTML</p>
                     </div>
                   </div>
@@ -1262,45 +1321,64 @@ export default function EmailSettingsPage() {
                     <div className="space-y-2">
                       <Label className="flex items-center gap-2">
                         <Image className="h-4 w-4" />
-                        URL du Logo
+                        Logo
                       </Label>
-                      <Input
-                        value={selectedSignature.logo_url || ''}
-                        onChange={(e) => setSelectedSignature({ ...selectedSignature, logo_url: e.target.value })}
-                        placeholder="https://example.com/logo.png"
-                      />
-                      {selectedSignature.logo_url && (
-                        <div className="mt-2">
-                          <img 
-                            src={selectedSignature.logo_url} 
-                            alt="Logo" 
-                            className="h-12 object-contain border rounded p-1"
-                            onError={(e) => (e.target as HTMLImageElement).style.display = 'none'}
-                          />
-                        </div>
-                      )}
+                      <div className="p-3 bg-gray-100 rounded-lg border">
+                        {siteLogo ? (
+                          <div className="flex items-center gap-3">
+                            <img 
+                              src={siteLogo} 
+                              alt="Logo du site" 
+                              className="h-10 object-contain"
+                              onError={(e) => (e.target as HTMLImageElement).style.display = 'none'}
+                            />
+                            <p className="text-sm text-gray-600">Logo du site (configuré dans Paramètres &gt; Site)</p>
+                          </div>
+                        ) : (
+                          <p className="text-sm text-gray-500">Aucun logo configuré. Configurez-le dans Paramètres &gt; Site</p>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-500">Utilisez {'{{signature_logo}}'} dans le contenu HTML</p>
                     </div>
                     
                     <div className="space-y-2">
                       <Label className="flex items-center gap-2">
                         <Image className="h-4 w-4" />
-                        URL de la Photo
+                        Photo
                       </Label>
-                      <Input
-                        value={selectedSignature.photo_url || ''}
-                        onChange={(e) => setSelectedSignature({ ...selectedSignature, photo_url: e.target.value })}
-                        placeholder="https://example.com/photo.jpg"
-                      />
-                      {selectedSignature.photo_url && (
-                        <div className="mt-2">
+                      <div className="flex items-center gap-3">
+                        {selectedSignature.photo_url && (
                           <img 
                             src={selectedSignature.photo_url} 
                             alt="Photo" 
                             className="h-16 w-16 object-cover border rounded-full"
                             onError={(e) => (e.target as HTMLImageElement).style.display = 'none'}
                           />
+                        )}
+                        <div className="flex-1">
+                          <input
+                            type="file"
+                            ref={editPhotoInputRef}
+                            accept="image/jpeg,image/png,image/webp"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) handlePhotoUpload(file, false);
+                            }}
+                          />
+                          <Button 
+                            type="button"
+                            variant="outline" 
+                            onClick={() => editPhotoInputRef.current?.click()}
+                            disabled={uploadingPhoto}
+                            className="w-full"
+                          >
+                            <Upload className="h-4 w-4 mr-2" />
+                            {uploadingPhoto ? 'Upload en cours...' : 'Changer la photo'}
+                          </Button>
                         </div>
-                      )}
+                      </div>
+                      <p className="text-xs text-gray-500">Utilisez {'{{signature_photo}}'} dans le contenu HTML</p>
                     </div>
                   </div>
                   
