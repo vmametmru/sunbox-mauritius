@@ -14,6 +14,7 @@ import {
   Image as ImageIcon,
   Calculator,
   Building2,
+  Lightbulb,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -36,6 +37,7 @@ const menuItems = [
   { icon: Users, label: 'Contacts', path: '/admin/contacts' },
   { icon: Mail, label: 'Email', path: '/admin/email' },
   { icon: Settings, label: 'Site', path: '/admin/site' },
+  { icon: Lightbulb, label: 'Idées Dev', path: '/admin/dev-ideas' },
   { icon: Activity, label: 'Activité', path: '/admin/activity' },
 ];
 

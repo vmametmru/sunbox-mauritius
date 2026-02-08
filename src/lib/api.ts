@@ -477,6 +477,42 @@ export const api = {
     }
     return result.data?.url || result.url;
   },
+
+  /* =====================================================
+     DEVELOPMENT IDEAS
+  ===================================================== */
+  getDevIdeas() {
+    return this.query('get_dev_ideas');
+  },
+
+  createDevIdea(idea: {
+    name: string;
+    script?: string;
+    statut?: 'non_demarree' | 'en_cours' | 'completee';
+    urgence?: 'urgent' | 'non_urgent';
+    importance?: 'important' | 'non_important';
+  }) {
+    return this.query('create_dev_idea', idea);
+  },
+
+  updateDevIdea(idea: {
+    id: number;
+    name: string;
+    script?: string;
+    statut?: 'non_demarree' | 'en_cours' | 'completee';
+    urgence?: 'urgent' | 'non_urgent';
+    importance?: 'important' | 'non_important';
+  }) {
+    return this.query('update_dev_idea', idea);
+  },
+
+  deleteDevIdea(id: number) {
+    return this.query('delete_dev_idea', { id });
+  },
+
+  reorderDevIdeas(orders: Array<{ id: number; priority_order: number }>) {
+    return this.query('reorder_dev_ideas', { orders });
+  },
 };
 
 export default api;
