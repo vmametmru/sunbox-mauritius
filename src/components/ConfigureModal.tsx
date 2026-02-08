@@ -576,7 +576,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                     </label>
                   ) : (
                     <div className="text-blue-700 text-sm">
-                      <span className="font-medium">💡 Astuce :</span> Lors de votre prochaine demande de devis, vos informations seront pré-remplies automatiquement.
+                      <span className="font-medium" aria-label="Astuce">💡 Astuce :</span> Lors de votre prochaine demande de devis, vos informations seront pré-remplies automatiquement.
                     </div>
                   )}
                 </div>

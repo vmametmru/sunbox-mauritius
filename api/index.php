@@ -753,6 +753,12 @@ try {
         case 'create_quote': {
             validateRequired($body, ['model_id', 'model_name', 'model_type', 'base_price', 'total_price', 'customer_name', 'customer_email', 'customer_phone']);
             
+            // Validate model_type
+            $validTypes = ['container', 'pool'];
+            if (!in_array($body['model_type'], $validTypes)) {
+                fail('Type de modèle invalide');
+            }
+            
             // Use transaction to prevent race conditions
             $db->beginTransaction();
             
