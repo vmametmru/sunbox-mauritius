@@ -46,7 +46,7 @@ export function WysiwygEditor({
               quill.setSelection(range.index + 1);
             } catch (error) {
               console.error('Image upload failed:', error);
-              alert('Échec du téléchargement de l\'image');
+              // Error handling should be done in the parent component via onImageUpload
             }
           } else {
             // Fallback to base64 encoding
