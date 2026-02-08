@@ -406,6 +406,78 @@ export const api = {
     }
     return result.data !== undefined ? result.data : result;
   },
+
+  /* =====================================================
+     EMAIL SIGNATURES
+  ===================================================== */
+  getEmailSignatures() {
+    return this.query('get_email_signatures');
+  },
+
+  createEmailSignature(data: {
+    signatureKey: string;
+    name: string;
+    description?: string;
+    bodyHtml: string;
+    logoUrl?: string;
+    photoUrl?: string;
+    isActive?: boolean;
+    isDefault?: boolean;
+  }) {
+    return this.query('create_email_signature', { 
+      signature_key: data.signatureKey,
+      name: data.name,
+      description: data.description,
+      body_html: data.bodyHtml,
+      logo_url: data.logoUrl,
+      photo_url: data.photoUrl,
+      is_active: data.isActive ?? true,
+      is_default: data.isDefault ?? false
+    });
+  },
+
+  updateEmailSignature(data: {
+    signatureKey: string;
+    name?: string;
+    description?: string;
+    bodyHtml: string;
+    logoUrl?: string;
+    photoUrl?: string;
+    isActive?: boolean;
+    isDefault?: boolean;
+  }) {
+    return this.query('update_email_signature', { 
+      signature_key: data.signatureKey,
+      name: data.name,
+      description: data.description,
+      body_html: data.bodyHtml,
+      logo_url: data.logoUrl,
+      photo_url: data.photoUrl,
+      is_active: data.isActive,
+      is_default: data.isDefault
+    });
+  },
+
+  deleteEmailSignature(signatureKey: string) {
+    return this.query('delete_email_signature', { signature_key: signatureKey });
+  },
+
+  async uploadSignatureImage(file: File, type: 'logo' | 'photo') {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('type', type);
+    
+    const response = await fetch(`${API_BASE_URL}/upload_signature_image.php`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    const result = await response.json();
+    if (!response.ok || result.error) {
+      throw new Error(result.error || 'Failed to upload image');
+    }
+    return result.data?.url || result.url;
+  },
 };
 
 export default api;
