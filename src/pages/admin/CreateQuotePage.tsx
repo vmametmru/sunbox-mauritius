@@ -104,6 +104,15 @@ interface BOQOption {
   lines?: BOQLine[];
 }
 
+// API response type for BOQ options (different from internal BOQOption type)
+interface BOQOptionAPIResponse {
+  id: number;
+  name: string;
+  price_ht?: number;
+  total_sale_price_ht?: number;
+  image_url?: string | null;
+}
+
 interface BOQLine {
   id: number;
   description: string;
@@ -115,6 +124,17 @@ interface BOQBaseCategory {
   display_order: number;
   lines: BOQLine[];
 }
+
+// Helper function to map BOQ API response to internal BOQOption format
+// The API returns 'price_ht' but we use 'total_sale_price_ht' internally
+// The total_sale_price_ht fallback handles cases where the API might already have the correct field name
+const mapBOQApiResponseToOption = (opt: BOQOptionAPIResponse, lines: BOQLine[] = []): BOQOption => ({
+  id: opt.id,
+  name: opt.name,
+  total_sale_price_ht: opt.price_ht ?? opt.total_sale_price_ht ?? 0,
+  image_url: opt.image_url,
+  lines,
+});
 
 const UNITS = ['unité', 'm²', 'm³', 'm', 'kg', 'l', 'h', 'jour', 'forfait'];
 
@@ -241,28 +261,15 @@ export default function CreateQuotePage() {
       
       setModelOptions(options || []);
       
-      // Load lines for each BOQ option and map price_ht to total_sale_price_ht
+      // Load lines for each BOQ option and map to internal format
       const boqOptsWithLines: BOQOption[] = await Promise.all(
-        (boqOpts || []).map(async (opt: any) => {
+        (boqOpts || []).map(async (opt: BOQOptionAPIResponse) => {
           try {
             const lines = await api.getBOQCategoryLines(opt.id);
-            return {
-              id: opt.id,
-              name: opt.name,
-              // API returns price_ht, map it to total_sale_price_ht
-              total_sale_price_ht: opt.price_ht ?? opt.total_sale_price_ht ?? 0,
-              image_url: opt.image_url,
-              lines: lines || [],
-            };
+            return mapBOQApiResponseToOption(opt, lines || []);
           } catch (e) {
             console.error('Error loading BOQ lines for option', opt.id, e);
-            return {
-              id: opt.id,
-              name: opt.name,
-              total_sale_price_ht: opt.price_ht ?? opt.total_sale_price_ht ?? 0,
-              image_url: opt.image_url,
-              lines: [],
-            };
+            return mapBOQApiResponseToOption(opt);
           }
         })
       );
@@ -1312,7 +1319,7 @@ export default function CreateQuotePage() {
                     {selectedModel.image_url && (
                       <div 
                         className="relative cursor-pointer group"
-                        onClick={() => setLightbox(selectedModel.image_url!)}
+                        onClick={() => selectedModel.image_url && setLightbox(selectedModel.image_url)}
                       >
                         <p className="text-xs text-gray-500 mb-1">Photo</p>
                         <img 
@@ -1326,7 +1333,7 @@ export default function CreateQuotePage() {
                     {selectedModel.plan_url && (
                       <div 
                         className="relative cursor-pointer group"
-                        onClick={() => setLightbox(selectedModel.plan_url!)}
+                        onClick={() => selectedModel.plan_url && setLightbox(selectedModel.plan_url)}
                       >
                         <p className="text-xs text-gray-500 mb-1">Plan</p>
                         <img 
