@@ -226,12 +226,19 @@ export default function CreateQuotePage() {
 
   const loadModelOptions = async (modelId: number) => {
     try {
-      const [options, boqOpts, baseCats, boqPrice] = await Promise.all([
+      // Use Promise.allSettled to handle partial failures gracefully
+      const results = await Promise.allSettled([
         api.getModelOptions(modelId),
         api.getBOQOptions(modelId),
         api.getBOQBaseCategories(modelId),
         api.getModelBOQPrice(modelId),
       ]);
+      
+      const options = results[0].status === 'fulfilled' ? results[0].value : [];
+      const boqOpts = results[1].status === 'fulfilled' ? results[1].value : [];
+      const baseCats = results[2].status === 'fulfilled' ? results[2].value : [];
+      const boqPrice = results[3].status === 'fulfilled' ? results[3].value : null;
+      
       setModelOptions(options || []);
       
       // Load lines for each BOQ option
@@ -657,6 +664,11 @@ export default function CreateQuotePage() {
         <div 
           className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4" 
           onClick={() => setLightbox(null)}
+          onKeyDown={(e) => e.key === 'Escape' && setLightbox(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Image agrandie"
+          tabIndex={0}
         >
           <img src={lightbox} alt="Zoom" className="max-h-[90vh] object-contain rounded shadow" />
         </div>
@@ -1167,11 +1179,13 @@ export default function CreateQuotePage() {
                                       <div className="flex-1 p-4">
                                         {/* Lines description */}
                                         {option.lines && option.lines.length > 0 && (
-                                          <div className="mb-3">
-                                            <p className="text-sm text-gray-600 whitespace-pre-line">
-                                              {option.lines.map((line: BOQLine) => `• ${line.description}`).join('\n')}
-                                            </p>
-                                          </div>
+                                          <ul className="mb-3 space-y-1">
+                                            {option.lines.map((line: BOQLine) => (
+                                              <li key={line.id} className="text-sm text-gray-600">
+                                                • {line.description}
+                                              </li>
+                                            ))}
+                                          </ul>
                                         )}
                                         {/* Toggle Switch */}
                                         <div 
