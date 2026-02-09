@@ -5,12 +5,15 @@ import {
   Trash2,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   Save,
   Copy,
   UserPlus,
   Image as ImageIcon,
   FileText,
   Calculator,
+  ZoomIn,
+  Check,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -56,8 +59,10 @@ interface Model {
   name: string;
   type: 'container' | 'pool';
   base_price: number;
+  calculated_base_price?: number;
   description?: string;
   image_url?: string;
+  plan_url?: string;
 }
 
 interface Contact {
@@ -95,6 +100,20 @@ interface BOQOption {
   id: number;
   name: string;
   total_sale_price_ht: number;
+  image_url?: string | null;
+  lines?: BOQLine[];
+}
+
+interface BOQLine {
+  id: number;
+  description: string;
+}
+
+interface BOQBaseCategory {
+  id: number;
+  name: string;
+  display_order: number;
+  lines: BOQLine[];
 }
 
 const UNITS = ['unité', 'm²', 'm³', 'm', 'kg', 'l', 'h', 'jour', 'forfait'];
@@ -156,6 +175,10 @@ export default function CreateQuotePage() {
   const [modelOptions, setModelOptions] = useState<Option[]>([]);
   const [boqOptions, setBoqOptions] = useState<BOQOption[]>([]);
   const [selectedOptions, setSelectedOptions] = useState<number[]>([]);
+  const [baseCategories, setBaseCategories] = useState<BOQBaseCategory[]>([]);
+  const [modelBOQPrice, setModelBOQPrice] = useState<number | null>(null);
+  const [expandedOptionCategories, setExpandedOptionCategories] = useState<string[]>([]);
+  const [lightbox, setLightbox] = useState<string | null>(null);
 
   // Free quote
   const [categories, setCategories] = useState<QuoteCategory[]>([]);
@@ -203,12 +226,36 @@ export default function CreateQuotePage() {
 
   const loadModelOptions = async (modelId: number) => {
     try {
-      const [options, boqOpts] = await Promise.all([
+      // Use Promise.allSettled to handle partial failures gracefully
+      const results = await Promise.allSettled([
         api.getModelOptions(modelId),
         api.getBOQOptions(modelId),
+        api.getBOQBaseCategories(modelId),
+        api.getModelBOQPrice(modelId),
       ]);
+      
+      const options = results[0].status === 'fulfilled' ? results[0].value : [];
+      const boqOpts = results[1].status === 'fulfilled' ? results[1].value : [];
+      const baseCats = results[2].status === 'fulfilled' ? results[2].value : [];
+      const boqPrice = results[3].status === 'fulfilled' ? results[3].value : null;
+      
       setModelOptions(options || []);
-      setBoqOptions(boqOpts || []);
+      
+      // Load lines for each BOQ option
+      const boqOptsWithLines: BOQOption[] = await Promise.all(
+        (boqOpts || []).map(async (opt: BOQOption) => {
+          try {
+            const lines = await api.getBOQCategoryLines(opt.id);
+            return { ...opt, lines: lines || [] };
+          } catch (e) {
+            console.error('Error loading BOQ lines for option', opt.id, e);
+            return { ...opt, lines: [] };
+          }
+        })
+      );
+      setBoqOptions(boqOptsWithLines);
+      setBaseCategories(baseCats || []);
+      setModelBOQPrice(boqPrice?.total_sale_price_ht || null);
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
     }
@@ -383,6 +430,12 @@ export default function CreateQuotePage() {
     }
   };
 
+  const toggleOptionCategory = (category: string) => {
+    setExpandedOptionCategories(prev =>
+      prev.includes(category) ? prev.filter(c => c !== category) : [...prev, category]
+    );
+  };
+
   /* ======================================================
      CALCULATIONS
   ====================================================== */
@@ -410,7 +463,8 @@ export default function CreateQuotePage() {
 
   // Model quote totals
   const selectedModel = models.find(m => m.id === selectedModelId);
-  const modelBasePrice = selectedModel?.base_price || 0;
+  // Use BOQ calculated price if available, otherwise fallback to model's base_price
+  const modelBasePrice = modelBOQPrice !== null ? modelBOQPrice : (selectedModel?.base_price || 0);
   
   const selectedModelOptionsTotal = selectedOptions
     .filter(id => id < BOQ_OPTION_ID_OFFSET)
@@ -605,6 +659,21 @@ export default function CreateQuotePage() {
 
   return (
     <div className="space-y-6">
+      {/* Lightbox */}
+      {lightbox && (
+        <div 
+          className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4" 
+          onClick={() => setLightbox(null)}
+          onKeyDown={(e) => e.key === 'Escape' && setLightbox(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Image agrandie"
+          tabIndex={0}
+        >
+          <img src={lightbox} alt="Zoom" className="max-h-[90vh] object-contain rounded shadow" />
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
@@ -947,14 +1016,75 @@ export default function CreateQuotePage() {
                   </Select>
 
                   {selectedModel && (
-                    <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-                      <h4 className="font-medium">{selectedModel.name}</h4>
-                      {selectedModel.description && (
-                        <p className="text-sm text-gray-600 mt-1">{selectedModel.description}</p>
+                    <div className="mt-4 space-y-4">
+                      {/* Model Info */}
+                      <div className="p-4 bg-gray-50 rounded-lg">
+                        <h4 className="font-semibold text-lg">{selectedModel.name}</h4>
+                        {selectedModel.description && (
+                          <p className="text-sm text-gray-600 mt-1">{selectedModel.description}</p>
+                        )}
+                        <p className="text-lg font-bold text-orange-600 mt-2">
+                          Prix de base: {formatPrice(modelBasePrice)}
+                        </p>
+                      </div>
+
+                      {/* Model Images */}
+                      {(selectedModel.image_url || selectedModel.plan_url) && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {selectedModel.image_url && (
+                            <div className="relative">
+                              <img
+                                src={selectedModel.image_url}
+                                alt="Photo principale"
+                                className="h-[120px] w-full object-contain rounded shadow cursor-pointer"
+                                onClick={() => setLightbox(selectedModel.image_url!)}
+                              />
+                              <ZoomIn className="absolute top-2 right-2 w-5 h-5 text-white bg-black/60 p-1 rounded-full" />
+                            </div>
+                          )}
+                          {selectedModel.plan_url && (
+                            <div className="relative">
+                              <img
+                                src={selectedModel.plan_url}
+                                alt="Plan"
+                                className="h-[120px] w-full object-contain rounded shadow cursor-pointer"
+                                onClick={() => setLightbox(selectedModel.plan_url!)}
+                              />
+                              <ZoomIn className="absolute top-2 right-2 w-5 h-5 text-white bg-black/60 p-1 rounded-full" />
+                            </div>
+                          )}
+                        </div>
                       )}
-                      <p className="text-lg font-bold text-orange-600 mt-2">
-                        Prix de base: {formatPrice(selectedModel.base_price)}
-                      </p>
+
+                      {/* Base Categories - Inclusions */}
+                      {baseCategories.length > 0 && (
+                        <div className="bg-green-50 border border-green-200 p-4 rounded">
+                          <h3 className="text-base font-semibold text-green-800 mb-3 flex items-center gap-2">
+                            <Check className="w-4 h-4" />
+                            Inclus dans le prix de base
+                          </h3>
+                          <div className="columns-1 md:columns-2 gap-4">
+                            {baseCategories.map(cat => (
+                              <div key={cat.id} className="inline-block w-full mb-2 break-inside-avoid">
+                                <span className="font-medium text-green-700 text-sm">{cat.name}</span>
+                                {cat.lines && cat.lines.length > 0 && (
+                                  <>
+                                    <span className="text-gray-600 text-xs">: </span>
+                                    <span className="text-xs text-gray-600">
+                                      {cat.lines.map((line, idx) => (
+                                        <React.Fragment key={line.id}>
+                                          {line.description}
+                                          {idx < cat.lines.length - 1 && ', '}
+                                        </React.Fragment>
+                                      ))}
+                                    </span>
+                                  </>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </CardContent>
@@ -1002,24 +1132,79 @@ export default function CreateQuotePage() {
                     {boqOptions.length > 0 && (
                       <div>
                         <h4 className="font-medium mb-2">Options BOQ</h4>
-                        <div className="space-y-2">
-                          {boqOptions.map(option => (
-                            <div
-                              key={option.id}
-                              className={`flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-colors ${
-                                selectedOptions.includes(option.id)
-                                  ? 'border-orange-500 bg-orange-50'
-                                  : 'border-gray-200 hover:border-gray-300'
-                              }`}
-                              onClick={() => toggleOption(option.id)}
-                            >
-                              <div className="flex items-center gap-3">
-                                <Switch checked={selectedOptions.includes(option.id)} />
-                                <p className="font-medium">{option.name}</p>
+                        <div className="space-y-3">
+                          {boqOptions.map(option => {
+                            const isExpanded = expandedOptionCategories.includes(option.name);
+                            return (
+                              <div
+                                key={option.id}
+                                className={`rounded-lg border transition-colors ${
+                                  selectedOptions.includes(option.id)
+                                    ? 'border-orange-500 bg-orange-50'
+                                    : 'border-gray-200'
+                                }`}
+                              >
+                                {/* Option Header */}
+                                <div
+                                  className="flex items-center justify-between p-3 cursor-pointer hover:bg-gray-50"
+                                  onClick={() => toggleOptionCategory(option.name)}
+                                >
+                                  <div className="flex items-center gap-3">
+                                    {isExpanded ? (
+                                      <ChevronUp className="w-4 h-4 text-gray-500" />
+                                    ) : (
+                                      <ChevronDown className="w-4 h-4 text-gray-500" />
+                                    )}
+                                    <p className="font-medium">{option.name}</p>
+                                  </div>
+                                  <span className="font-semibold text-orange-600">{formatPrice(option.total_sale_price_ht)}</span>
+                                </div>
+                                
+                                {/* Option Details (expanded) */}
+                                {isExpanded && (
+                                  <div className="border-t">
+                                    <div className="flex">
+                                      {/* Option Image */}
+                                      {option.image_url && (
+                                        <div className="flex-shrink-0 p-4 border-r">
+                                          <img 
+                                            src={option.image_url} 
+                                            alt={option.name}
+                                            className="w-[100px] h-[100px] object-cover rounded cursor-pointer"
+                                            onClick={() => setLightbox(option.image_url!)}
+                                          />
+                                        </div>
+                                      )}
+                                      {/* Option Lines & Toggle */}
+                                      <div className="flex-1 p-4">
+                                        {/* Lines description */}
+                                        {option.lines && option.lines.length > 0 && (
+                                          <ul className="mb-3 space-y-1">
+                                            {option.lines.map((line: BOQLine) => (
+                                              <li key={line.id} className="text-sm text-gray-600">
+                                                • {line.description}
+                                              </li>
+                                            ))}
+                                          </ul>
+                                        )}
+                                        {/* Toggle Switch */}
+                                        <div 
+                                          className="flex items-center justify-between cursor-pointer"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            toggleOption(option.id);
+                                          }}
+                                        >
+                                          <span className="text-sm text-gray-600">Ajouter cette option</span>
+                                          <Switch checked={selectedOptions.includes(option.id)} />
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
                               </div>
-                              <span className="font-semibold">{formatPrice(option.total_sale_price_ht)}</span>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </div>
                     )}
