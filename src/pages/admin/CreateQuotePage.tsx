@@ -1158,29 +1158,25 @@ export default function CreateQuotePage() {
                         </div>
                       )}
 
-                      {/* Base Categories - Inclusions */}
+                      {/* Base Categories - Inclusions (non-expandable, lines listed vertically) */}
                       {baseCategories.length > 0 && (
                         <div className="bg-green-50 border border-green-200 p-4 rounded">
                           <h3 className="text-base font-semibold text-green-800 mb-3 flex items-center gap-2">
                             <Check className="w-4 h-4" />
                             Inclus dans le prix de base
                           </h3>
-                          <div className="columns-1 md:columns-2 gap-4">
+                          <div className="space-y-4">
                             {baseCategories.map(cat => (
-                              <div key={cat.id} className="inline-block w-full mb-2 break-inside-avoid">
-                                <span className="font-medium text-green-700 text-sm">{cat.name}</span>
+                              <div key={cat.id} className="border-l-2 border-green-300 pl-3">
+                                <p className="font-medium text-green-700 text-sm mb-1">{cat.name}</p>
                                 {cat.lines && cat.lines.length > 0 && (
-                                  <>
-                                    <span className="text-gray-600 text-xs">: </span>
-                                    <span className="text-xs text-gray-600">
-                                      {cat.lines.map((line, idx) => (
-                                        <React.Fragment key={line.id}>
-                                          {line.description}
-                                          {idx < cat.lines.length - 1 && ', '}
-                                        </React.Fragment>
-                                      ))}
-                                    </span>
-                                  </>
+                                  <ul className="space-y-0.5">
+                                    {cat.lines.map((line) => (
+                                      <li key={line.id} className="text-xs text-gray-600 pl-2">
+                                        • {line.description}
+                                      </li>
+                                    ))}
+                                  </ul>
                                 )}
                               </div>
                             ))}
