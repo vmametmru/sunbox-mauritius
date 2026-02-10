@@ -430,7 +430,7 @@ export default function CreateQuotePage() {
       const quote = await api.getQuoteWithDetails(quoteId);
       
       // Set quote info
-      setQuoteTitle((quote.quote_title || quote.model_name || 'Devis') + ' (importé)');
+      setQuoteTitle(`${quote.quote_title || quote.model_name || 'Devis'} (importé)`);
       setMarginPercent(quote.margin_percent || 30);
       setPhotoUrl(quote.photo_url || '');
       setPlanUrl(quote.plan_url || '');
