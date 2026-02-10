@@ -261,6 +261,10 @@ export const api = {
     return this.query('get_quotes');
   },
 
+  getQuotesByContact(contactId: number) {
+    return this.query('get_quotes_by_contact', { contact_id: contactId });
+  },
+
   getQuote(id: number) {
     return this.query('get_quote', { id });
   },

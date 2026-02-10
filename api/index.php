@@ -748,6 +748,22 @@ try {
             break;
         }
 
+        case 'get_quotes_by_contact': {
+            validateRequired($body, ['contact_id']);
+            $contactId = (int)$body['contact_id'];
+            
+            $stmt = $db->prepare("
+                SELECT q.id, q.reference_number, q.model_name, q.model_id, q.base_price, q.options_total, 
+                       q.total_price, q.status, q.created_at, q.is_free_quote, q.quote_title
+                FROM quotes q
+                WHERE q.contact_id = ?
+                ORDER BY q.created_at DESC
+            ");
+            $stmt->execute([$contactId]);
+            ok($stmt->fetchAll());
+            break;
+        }
+
         case 'get_quote': {
             validateRequired($body, ['id']);
             $id = (int)$body['id'];
