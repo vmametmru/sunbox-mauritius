@@ -104,6 +104,15 @@ interface BOQOption {
   lines?: BOQLine[];
 }
 
+// API response type for BOQ options (different from internal BOQOption type)
+interface BOQOptionAPIResponse {
+  id: number;
+  name: string;
+  price_ht?: number;
+  total_sale_price_ht?: number;
+  image_url?: string | null;
+}
+
 interface BOQLine {
   id: number;
   description: string;
@@ -115,6 +124,17 @@ interface BOQBaseCategory {
   display_order: number;
   lines: BOQLine[];
 }
+
+// Helper function to map BOQ API response to internal BOQOption format
+// The API returns 'price_ht' but we use 'total_sale_price_ht' internally
+// The total_sale_price_ht fallback handles cases where the API might already have the correct field name
+const mapBOQApiResponseToOption = (opt: BOQOptionAPIResponse, lines: BOQLine[] = []): BOQOption => ({
+  id: opt.id,
+  name: opt.name,
+  total_sale_price_ht: opt.price_ht ?? opt.total_sale_price_ht ?? 0,
+  image_url: opt.image_url,
+  lines,
+});
 
 const UNITS = ['unité', 'm²', 'm³', 'm', 'kg', 'l', 'h', 'jour', 'forfait'];
 
@@ -241,15 +261,15 @@ export default function CreateQuotePage() {
       
       setModelOptions(options || []);
       
-      // Load lines for each BOQ option
+      // Load lines for each BOQ option and map to internal format
       const boqOptsWithLines: BOQOption[] = await Promise.all(
-        (boqOpts || []).map(async (opt: BOQOption) => {
+        (boqOpts || []).map(async (opt: BOQOptionAPIResponse) => {
           try {
             const lines = await api.getBOQCategoryLines(opt.id);
-            return { ...opt, lines: lines || [] };
+            return mapBOQApiResponseToOption(opt, lines || []);
           } catch (e) {
             console.error('Error loading BOQ lines for option', opt.id, e);
-            return { ...opt, lines: [] };
+            return mapBOQApiResponseToOption(opt);
           }
         })
       );
@@ -779,54 +799,56 @@ export default function CreateQuotePage() {
             </CardContent>
           </Card>
 
-          {/* Quote Details */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Détails du Devis</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="quoteTitle">Titre du devis</Label>
-                  <Input
-                    id="quoteTitle"
-                    value={quoteTitle}
-                    onChange={(e) => setQuoteTitle(e.target.value)}
-                    placeholder="Ex: Maison container T2"
-                  />
+          {/* Quote Details - Only shown for free quotes */}
+          {quoteMode === 'free' && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Détails du Devis</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="quoteTitle">Titre du devis</Label>
+                    <Input
+                      id="quoteTitle"
+                      value={quoteTitle}
+                      onChange={(e) => setQuoteTitle(e.target.value)}
+                      placeholder="Ex: Maison container T2"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="marginPercent">Marge par défaut (%)</Label>
+                    <Input
+                      id="marginPercent"
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={marginPercent}
+                      onChange={(e) => setMarginPercent(Number(e.target.value))}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="photoUrl">URL Photo (optionnel)</Label>
+                    <Input
+                      id="photoUrl"
+                      value={photoUrl}
+                      onChange={(e) => setPhotoUrl(e.target.value)}
+                      placeholder="https://..."
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="planUrl">URL Plan (optionnel)</Label>
+                    <Input
+                      id="planUrl"
+                      value={planUrl}
+                      onChange={(e) => setPlanUrl(e.target.value)}
+                      placeholder="https://..."
+                    />
+                  </div>
                 </div>
-                <div>
-                  <Label htmlFor="marginPercent">Marge par défaut (%)</Label>
-                  <Input
-                    id="marginPercent"
-                    type="number"
-                    min="0"
-                    max="100"
-                    value={marginPercent}
-                    onChange={(e) => setMarginPercent(Number(e.target.value))}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="photoUrl">URL Photo (optionnel)</Label>
-                  <Input
-                    id="photoUrl"
-                    value={photoUrl}
-                    onChange={(e) => setPhotoUrl(e.target.value)}
-                    placeholder="https://..."
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="planUrl">URL Plan (optionnel)</Label>
-                  <Input
-                    id="planUrl"
-                    value={planUrl}
-                    onChange={(e) => setPlanUrl(e.target.value)}
-                    placeholder="https://..."
-                  />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Free Quote: Categories & Lines */}
           {quoteMode === 'free' && (
@@ -1009,7 +1031,7 @@ export default function CreateQuotePage() {
                     <SelectContent>
                       {models.map(model => (
                         <SelectItem key={model.id} value={model.id.toString()}>
-                          {model.name} - {formatPrice(model.base_price)}
+                          {model.name} - {formatPrice(model.calculated_base_price ?? model.base_price)}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -1286,8 +1308,48 @@ export default function CreateQuotePage() {
                 </>
               )}
 
-              {/* Media Preview */}
-              {(photoUrl || planUrl) && (
+              {/* Media Preview - Show model photos for model-based quotes, or custom URLs for free quotes */}
+              {quoteMode === 'model' && selectedModel && (selectedModel.image_url || selectedModel.plan_url) && (
+                <div className="border-t pt-4 space-y-3">
+                  <h4 className="font-medium text-sm flex items-center gap-2">
+                    <ImageIcon className="h-4 w-4" />
+                    Photos du Modèle
+                  </h4>
+                  <div className="grid grid-cols-2 gap-2">
+                    {selectedModel.image_url && (
+                      <div 
+                        className="relative cursor-pointer group"
+                        onClick={() => selectedModel.image_url && setLightbox(selectedModel.image_url)}
+                      >
+                        <p className="text-xs text-gray-500 mb-1">Photo</p>
+                        <img 
+                          src={selectedModel.image_url} 
+                          alt="Photo du modèle" 
+                          className="w-full h-24 object-cover rounded-lg group-hover:opacity-90 transition-opacity" 
+                        />
+                        <ZoomIn className="absolute bottom-2 right-2 w-4 h-4 text-white bg-black/60 p-0.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
+                    )}
+                    {selectedModel.plan_url && (
+                      <div 
+                        className="relative cursor-pointer group"
+                        onClick={() => selectedModel.plan_url && setLightbox(selectedModel.plan_url)}
+                      >
+                        <p className="text-xs text-gray-500 mb-1">Plan</p>
+                        <img 
+                          src={selectedModel.plan_url} 
+                          alt="Plan du modèle" 
+                          className="w-full h-24 object-cover rounded-lg group-hover:opacity-90 transition-opacity" 
+                        />
+                        <ZoomIn className="absolute bottom-2 right-2 w-4 h-4 text-white bg-black/60 p-0.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Custom Media URLs - Only for free quotes */}
+              {quoteMode === 'free' && (photoUrl || planUrl) && (
                 <div className="border-t pt-4 space-y-3">
                   <h4 className="font-medium text-sm">Médias</h4>
                   {photoUrl && (
