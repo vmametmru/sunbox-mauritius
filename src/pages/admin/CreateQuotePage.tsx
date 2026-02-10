@@ -143,8 +143,9 @@ interface ContactQuote {
 // Helper function to map BOQ API response to internal BOQOption format
 // The API returns 'price_ht' but we use 'total_sale_price_ht' internally
 // The total_sale_price_ht fallback handles cases where the API might already have the correct field name
+// NOTE: BOQ option IDs are offset by BOQ_OPTION_ID_OFFSET to distinguish them from standard model options
 const mapBOQApiResponseToOption = (opt: BOQOptionAPIResponse, lines: BOQLine[] = []): BOQOption => ({
-  id: opt.id,
+  id: Number(opt.id) + BOQ_OPTION_ID_OFFSET,
   name: opt.name,
   total_sale_price_ht: opt.price_ht ?? opt.total_sale_price_ht ?? 0,
   image_url: opt.image_url,
