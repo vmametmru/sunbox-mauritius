@@ -14,6 +14,7 @@ import {
   Calculator,
   ZoomIn,
   Check,
+  Download,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -125,6 +126,20 @@ interface BOQBaseCategory {
   lines: BOQLine[];
 }
 
+interface ContactQuote {
+  id: number;
+  reference_number: string;
+  model_name: string;
+  model_id?: number;
+  base_price: number;
+  options_total: number;
+  total_price: number;
+  status: string;
+  created_at: string;
+  is_free_quote?: boolean;
+  quote_title?: string;
+}
+
 // Helper function to map BOQ API response to internal BOQOption format
 // The API returns 'price_ht' but we use 'total_sale_price_ht' internally
 // The total_sale_price_ht fallback handles cases where the API might already have the correct field name
@@ -207,6 +222,10 @@ export default function CreateQuotePage() {
   const [isContactSelectorOpen, setIsContactSelectorOpen] = useState(false);
   const [contactSearchTerm, setContactSearchTerm] = useState('');
 
+  // Contact quotes for import
+  const [contactQuotes, setContactQuotes] = useState<ContactQuote[]>([]);
+  const [loadingContactQuotes, setLoadingContactQuotes] = useState(false);
+
   /* ======================================================
      LOAD DATA
   ====================================================== */
@@ -275,7 +294,7 @@ export default function CreateQuotePage() {
       );
       setBoqOptions(boqOptsWithLines);
       setBaseCategories(baseCats || []);
-      setModelBOQPrice(boqPrice?.total_sale_price_ht || null);
+      setModelBOQPrice(boqPrice?.base_price_ht ?? null);
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
     }
@@ -379,7 +398,7 @@ export default function CreateQuotePage() {
   /* ======================================================
      CONTACT SELECTION
   ====================================================== */
-  const selectContact = (contact: Contact) => {
+  const selectContact = async (contact: Contact) => {
     setSelectedContactId(contact.id);
     setCustomerName(contact.name);
     setCustomerEmail(contact.email);
@@ -387,6 +406,66 @@ export default function CreateQuotePage() {
     setCustomerAddress(contact.address || '');
     setIsContactSelectorOpen(false);
     toast({ title: 'Contact sélectionné', description: contact.name });
+    
+    // Load contact's existing quotes
+    await loadContactQuotes(contact.id);
+  };
+
+  const loadContactQuotes = async (contactId: number) => {
+    try {
+      setLoadingContactQuotes(true);
+      const quotes = await api.getQuotesByContact(contactId);
+      setContactQuotes(quotes || []);
+    } catch (err: any) {
+      console.error('Error loading contact quotes:', err);
+      setContactQuotes([]);
+    } finally {
+      setLoadingContactQuotes(false);
+    }
+  };
+
+  const importExistingQuote = async (quoteId: number) => {
+    try {
+      setLoading(true);
+      const quote = await api.getQuoteWithDetails(quoteId);
+      
+      // Set quote info
+      setQuoteTitle((quote.quote_title || quote.model_name || 'Devis') + ' (importé)');
+      setMarginPercent(quote.margin_percent || 30);
+      setPhotoUrl(quote.photo_url || '');
+      setPlanUrl(quote.plan_url || '');
+      
+      if (quote.is_free_quote) {
+        setQuoteMode('free');
+        // Load categories
+        if (quote.categories) {
+          setCategories(quote.categories.map((c: any) => ({
+            name: c.name,
+            lines: (c.lines || []).map((l: any) => ({
+              description: l.description,
+              quantity: l.quantity,
+              unit: l.unit,
+              unit_cost_ht: l.unit_cost_ht,
+              margin_percent: l.margin_percent,
+            })),
+            expanded: true,
+          })));
+        }
+      } else {
+        setQuoteMode('model');
+        setSelectedModelId(quote.model_id);
+        // Load options
+        if (quote.options) {
+          setSelectedOptions(quote.options.map((o: any) => o.option_id).filter(Boolean));
+        }
+      }
+      
+      toast({ title: 'Devis importé', description: `Les options du devis ${quote.reference_number} ont été importées` });
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const filteredContacts = contacts.filter(c =>
@@ -1153,7 +1232,6 @@ export default function CreateQuotePage() {
                     {/* BOQ Options */}
                     {boqOptions.length > 0 && (
                       <div>
-                        <h4 className="font-medium mb-2">Options BOQ</h4>
                         <div className="space-y-3">
                           {boqOptions.map(option => {
                             const isExpanded = expandedOptionCategories.includes(option.name);
@@ -1306,6 +1384,48 @@ export default function CreateQuotePage() {
                     </div>
                   </div>
                 </>
+              )}
+
+              {/* Import Existing Quotes */}
+              {selectedContactId && contactQuotes.length > 0 && (
+                <div className="border-t pt-4 space-y-3">
+                  <h4 className="font-medium text-sm flex items-center gap-2">
+                    <Download className="h-4 w-4" />
+                    Importer Existant(s)
+                  </h4>
+                  <p className="text-xs text-gray-500">
+                    Importer les options d'un devis existant
+                  </p>
+                  {loadingContactQuotes ? (
+                    <div className="text-center py-2">
+                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-orange-500 mx-auto"></div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-48 overflow-y-auto">
+                      {contactQuotes.map(quote => (
+                        <div
+                          key={quote.id}
+                          className="flex items-center justify-between p-2 border rounded-lg hover:bg-gray-50 transition-colors"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">{quote.reference_number}</p>
+                            <p className="text-xs text-gray-500 truncate">
+                              {quote.model_name || quote.quote_title} - {formatPrice(quote.total_price)}
+                            </p>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => importExistingQuote(quote.id)}
+                            className="ml-2 text-orange-600 hover:text-orange-700 hover:bg-orange-50"
+                          >
+                            <Download className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
 
               {/* Media Preview - Show model photos for model-based quotes, or custom URLs for free quotes */}
