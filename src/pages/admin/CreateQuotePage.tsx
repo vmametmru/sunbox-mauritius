@@ -216,6 +216,9 @@ export default function CreateQuotePage() {
   const [modelBOQPrice, setModelBOQPrice] = useState<number | null>(null);
   const [expandedOptionCategories, setExpandedOptionCategories] = useState<string[]>([]);
   const [lightbox, setLightbox] = useState<string | null>(null);
+  
+  // Counter to force model options reload (incremented when importing same model)
+  const [modelOptionsRefreshKey, setModelOptionsRefreshKey] = useState(0);
 
   // Pending option IDs to be selected after model options load (for import/edit/clone)
   const pendingOptionIdsRef = React.useRef<number[]>([]);
@@ -250,7 +253,7 @@ export default function CreateQuotePage() {
     if (selectedModelId && quoteMode === 'model') {
       loadModelOptions(selectedModelId);
     }
-  }, [selectedModelId, quoteMode]);
+  }, [selectedModelId, quoteMode, modelOptionsRefreshKey]);
 
   const loadInitialData = async () => {
     try {
@@ -315,6 +318,13 @@ export default function CreateQuotePage() {
             const newOptions = validPendingOptions.filter(id => !prev.includes(id));
             return [...prev, ...newOptions];
           });
+          
+          // Expand selected BOQ options (they have IDs >= BOQ_OPTION_ID_OFFSET)
+          // and close unselected ones for better user experience after import/edit/clone
+          const selectedBOQOptionNames = boqOptsWithLines
+            .filter(opt => validPendingOptions.includes(opt.id))
+            .map(opt => opt.name);
+          setExpandedOptionCategories(selectedBOQOptionNames);
         }
         // Clear pending options after applying
         pendingOptionIdsRef.current = [];
@@ -478,13 +488,22 @@ export default function CreateQuotePage() {
           })));
         }
       } else {
+        // For model-based quotes (WCQ), switch to model mode and load the model
         setQuoteMode('model');
-        setSelectedModelId(quote.model_id);
+        
+        // Clear current selected options before import
+        setSelectedOptions([]);
+        
         // Store option IDs to be selected after model options load
         // This ensures BOQ options (WCQ) are properly matched after their offset IDs are created
         if (quote.options) {
           pendingOptionIdsRef.current = quote.options.map((o: any) => o.option_id).filter(Boolean);
         }
+        
+        // Set the model ID and force reload if it's the same model
+        // Using modelOptionsRefreshKey ensures the useEffect triggers even for same model
+        setSelectedModelId(quote.model_id);
+        setModelOptionsRefreshKey(prev => prev + 1);
       }
       
       toast({ title: 'Devis importé', description: `Les options du devis ${quote.reference_number} ont été importées` });
@@ -1487,6 +1506,32 @@ export default function CreateQuotePage() {
                         <ZoomIn className="absolute bottom-2 right-2 w-4 h-4 text-white bg-black/60 p-0.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
                       </div>
                     )}
+                  </div>
+                </div>
+              )}
+
+              {/* Base Categories - Show inclusions for model-based quotes in sidebar */}
+              {quoteMode === 'model' && selectedModel && baseCategories.length > 0 && (
+                <div className="border-t pt-4 space-y-3">
+                  <h4 className="font-medium text-sm flex items-center gap-2">
+                    <Check className="h-4 w-4 text-green-600" />
+                    Inclus dans le prix de base
+                  </h4>
+                  <div className="space-y-2">
+                    {baseCategories.map(cat => (
+                      <div key={cat.id} className="border-l-2 border-green-300 pl-2">
+                        <p className="font-medium text-green-700 text-xs">{cat.name}</p>
+                        {cat.lines && cat.lines.length > 0 && (
+                          <ul className="space-y-0.5 mt-1">
+                            {cat.lines.map((line) => (
+                              <li key={line.id} className="text-xs text-gray-500 pl-1">
+                                • {line.description}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
