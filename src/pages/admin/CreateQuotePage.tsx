@@ -367,7 +367,9 @@ export default function CreateQuotePage() {
       } else {
         setQuoteMode('model');
         // Ensure model_id is converted to number for consistent comparison
-        setSelectedModelId(Number(quote.model_id) || null);
+        // Model IDs are positive integers, so 0 or negative values are invalid
+        const modelId = Number(quote.model_id);
+        setSelectedModelId(modelId > 0 ? modelId : null);
         // Store option IDs to be selected after model options load
         // This ensures BOQ options (WCQ) are properly matched after their offset IDs are created
         if (quote.options) {
@@ -419,7 +421,9 @@ export default function CreateQuotePage() {
       } else {
         setQuoteMode('model');
         // Ensure model_id is converted to number for consistent comparison
-        setSelectedModelId(Number(quote.model_id) || null);
+        // Model IDs are positive integers, so 0 or negative values are invalid
+        const modelId = Number(quote.model_id);
+        setSelectedModelId(modelId > 0 ? modelId : null);
         // Store option IDs to be selected after model options load
         // This ensures BOQ options (WCQ) are properly matched after their offset IDs are created
         if (quote.options) {
@@ -493,8 +497,9 @@ export default function CreateQuotePage() {
         // For model-based quotes (WCQ), switch to model mode and load the model
         
         // Validate model_id exists for model-based quotes
+        // Model IDs are positive integers, so 0, negative, or NaN values are invalid
         const modelId = Number(quote.model_id);
-        if (!modelId || isNaN(modelId)) {
+        if (isNaN(modelId) || modelId <= 0) {
           toast({ 
             title: 'Erreur', 
             description: 'Le devis importé n\'a pas de modèle associé valide', 
