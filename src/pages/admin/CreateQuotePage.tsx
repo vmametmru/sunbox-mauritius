@@ -173,8 +173,10 @@ const emptyCategory: QuoteCategory = {
 };
 
 // Helper function to safely check if a quote is a free quote
-// Handles both boolean and string values from API (string "false" is truthy in JS)
-const isFreeQuote = (value: unknown): boolean => value === true || value === 'true';
+// Handles both boolean and string values from API
+// MySQL BOOLEAN returns 0/1 integers or '0'/'1' strings depending on PDO settings
+const isFreeQuote = (value: unknown): boolean => 
+  value === true || value === 'true' || value === 1 || value === '1';
 
 /* ======================================================
    COMPONENT
@@ -1279,7 +1281,11 @@ export default function CreateQuotePage() {
                   <CardContent className="space-y-4">
                     <Select
                       value={selectedModelId?.toString() || ''}
-                      onValueChange={(v) => setSelectedModelId(Number(v))}
+                      onValueChange={(v) => {
+                        setSelectedModelId(Number(v));
+                        // Auto-advance to options step when model is selected
+                        setModelStep('options');
+                      }}
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="Choisir un modèle..." />
