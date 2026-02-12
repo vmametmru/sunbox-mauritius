@@ -641,7 +641,8 @@ export default function CreateQuotePage() {
   const totalPriceTTC = calculateTTC(totalSalePriceHT, vatRate);
 
   // Model quote totals
-  const selectedModel = models.find(m => m.id === selectedModelId);
+  // Note: model.id from API may be string or number, so we convert both to numbers for comparison
+  const selectedModel = models.find(m => Number(m.id) === selectedModelId);
   // Use BOQ calculated price if available, otherwise fallback to model's calculated_base_price or base_price
   const modelBasePrice = modelBOQPrice !== null ? modelBOQPrice : (selectedModel?.calculated_base_price ?? selectedModel?.base_price ?? 0);
   
