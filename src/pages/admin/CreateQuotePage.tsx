@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   ArrowLeft,
+  ArrowRight,
   Plus,
   Trash2,
   ChevronDown,
@@ -15,6 +16,8 @@ import {
   ZoomIn,
   Check,
   Download,
+  CheckCircle,
+  Loader2,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -233,6 +236,9 @@ export default function CreateQuotePage() {
   // Contact quotes for import
   const [contactQuotes, setContactQuotes] = useState<ContactQuote[]>([]);
   const [loadingContactQuotes, setLoadingContactQuotes] = useState(false);
+
+  // 3-step flow for model-based quote
+  const [modelStep, setModelStep] = useState<'model' | 'options' | 'details'>('model');
 
   /* ======================================================
      LOAD DATA
@@ -523,6 +529,9 @@ export default function CreateQuotePage() {
         // Using modelOptionsRefreshKey ensures the useEffect triggers even for same model
         setSelectedModelId(modelId);
         setModelOptionsRefreshKey(prev => prev + 1);
+        
+        // Navigate directly to options step after import
+        setModelStep('options');
       }
       
       toast({ title: 'Devis importé', description: `Les options du devis ${quote.reference_number} ont été importées` });
@@ -876,75 +885,76 @@ export default function CreateQuotePage() {
         </Tabs>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main Content */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* Customer Information */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle>Informations Client</CardTitle>
-                <Button variant="outline" size="sm" onClick={() => setIsContactSelectorOpen(true)}>
-                  <UserPlus className="h-4 w-4 mr-2" />
-                  Charger un contact
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="customerName">Nom *</Label>
-                  <Input
-                    id="customerName"
-                    value={customerName}
-                    onChange={(e) => setCustomerName(e.target.value)}
-                    placeholder="Nom du client"
-                  />
+      {/* FREE QUOTE MODE - Original layout */}
+      {quoteMode === 'free' && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Main Content */}
+          <div className="lg:col-span-2 space-y-6">
+            {/* Customer Information */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle>Informations Client</CardTitle>
+                  <Button variant="outline" size="sm" onClick={() => setIsContactSelectorOpen(true)}>
+                    <UserPlus className="h-4 w-4 mr-2" />
+                    Charger un contact
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="customerName">Nom *</Label>
+                    <Input
+                      id="customerName"
+                      value={customerName}
+                      onChange={(e) => setCustomerName(e.target.value)}
+                      placeholder="Nom du client"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="customerEmail">Email *</Label>
+                    <Input
+                      id="customerEmail"
+                      type="email"
+                      value={customerEmail}
+                      onChange={(e) => setCustomerEmail(e.target.value)}
+                      placeholder="email@example.com"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="customerPhone">Téléphone *</Label>
+                    <Input
+                      id="customerPhone"
+                      value={customerPhone}
+                      onChange={(e) => setCustomerPhone(e.target.value)}
+                      placeholder="+230 5xxx xxxx"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="customerAddress">Adresse</Label>
+                    <Input
+                      id="customerAddress"
+                      value={customerAddress}
+                      onChange={(e) => setCustomerAddress(e.target.value)}
+                      placeholder="Adresse complète"
+                    />
+                  </div>
                 </div>
                 <div>
-                  <Label htmlFor="customerEmail">Email *</Label>
-                  <Input
-                    id="customerEmail"
-                    type="email"
-                    value={customerEmail}
-                    onChange={(e) => setCustomerEmail(e.target.value)}
-                    placeholder="email@example.com"
+                  <Label htmlFor="customerMessage">Message / Notes</Label>
+                  <Textarea
+                    id="customerMessage"
+                    value={customerMessage}
+                    onChange={(e) => setCustomerMessage(e.target.value)}
+                    placeholder="Notes ou demandes particulières..."
+                    rows={3}
                   />
                 </div>
-                <div>
-                  <Label htmlFor="customerPhone">Téléphone *</Label>
-                  <Input
-                    id="customerPhone"
-                    value={customerPhone}
-                    onChange={(e) => setCustomerPhone(e.target.value)}
-                    placeholder="+230 5xxx xxxx"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="customerAddress">Adresse</Label>
-                  <Input
-                    id="customerAddress"
-                    value={customerAddress}
-                    onChange={(e) => setCustomerAddress(e.target.value)}
-                    placeholder="Adresse complète"
-                  />
-                </div>
-              </div>
-              <div>
-                <Label htmlFor="customerMessage">Message / Notes</Label>
-                <Textarea
-                  id="customerMessage"
-                  value={customerMessage}
-                  onChange={(e) => setCustomerMessage(e.target.value)}
-                  placeholder="Notes ou demandes particulières..."
-                  rows={3}
-                />
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
 
-          {/* Quote Details - Only shown for free quotes */}
-          {quoteMode === 'free' && (
+            {/* Quote Details - Free quotes */}
             <Card>
               <CardHeader>
                 <CardTitle>Détails du Devis</CardTitle>
@@ -992,10 +1002,8 @@ export default function CreateQuotePage() {
                 </div>
               </CardContent>
             </Card>
-          )}
 
-          {/* Free Quote: Categories & Lines */}
-          {quoteMode === 'free' && (
+            {/* Free Quote: Categories & Lines */}
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <h2 className="text-xl font-semibold">Catégories et Lignes</h2>
@@ -1154,429 +1162,826 @@ export default function CreateQuotePage() {
                 ))
               )}
             </div>
-          )}
+          </div>
 
-          {/* Model-based Quote: Model Selection & Options */}
-          {quoteMode === 'model' && (
-            <div className="space-y-4">
-              {/* Model Selection */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Sélection du Modèle</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <Select
-                    value={selectedModelId?.toString() || ''}
-                    onValueChange={(v) => setSelectedModelId(Number(v))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Choisir un modèle..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {models.map(model => (
-                        <SelectItem key={model.id} value={model.id.toString()}>
-                          {model.name} - {formatPrice(model.calculated_base_price ?? model.base_price)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+          {/* Sidebar: Summary for Free Quote */}
+          <div className="space-y-6">
+            <Card className="sticky top-4">
+              <CardHeader>
+                <CardTitle>Récapitulatif</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">Catégories</span>
+                    <span>{categories.length}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">Lignes</span>
+                    <span>{categories.reduce((sum, c) => sum + c.lines.length, 0)}</span>
+                  </div>
+                </div>
+                <div className="border-t pt-4 space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">Coût Total HT</span>
+                    <span>{formatPrice(totalCostHT)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">Marge</span>
+                    <span className="text-green-600">+{formatPrice(totalProfitHT)}</span>
+                  </div>
+                  <div className="flex justify-between font-semibold">
+                    <span>Total HT</span>
+                    <span>{formatPrice(totalSalePriceHT)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm text-gray-600">
+                    <span>TVA ({vatRate}%)</span>
+                    <span>{formatPrice(totalPriceTTC - totalSalePriceHT)}</span>
+                  </div>
+                  <div className="flex justify-between text-lg font-bold text-orange-600 pt-2 border-t">
+                    <span>Total TTC</span>
+                    <span>{formatPrice(totalPriceTTC)}</span>
+                  </div>
+                </div>
 
-                  {selectedModel && (
-                    <div className="mt-4 space-y-4">
-                      {/* Model Info */}
-                      <div className="p-4 bg-gray-50 rounded-lg">
-                        <h4 className="font-semibold text-lg">{selectedModel.name}</h4>
-                        {selectedModel.description && (
-                          <p className="text-sm text-gray-600 mt-1">{selectedModel.description}</p>
-                        )}
-                        <p className="text-lg font-bold text-orange-600 mt-2">
-                          Prix de base: {formatPrice(modelBasePrice)}
-                        </p>
+                {/* Custom Media URLs - Only for free quotes */}
+                {(photoUrl || planUrl) && (
+                  <div className="border-t pt-4 space-y-3">
+                    <h4 className="font-medium text-sm">Médias</h4>
+                    {photoUrl && (
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1">Photo</p>
+                        <img src={photoUrl} alt="Photo" className="w-full h-24 object-cover rounded-lg" />
                       </div>
+                    )}
+                    {planUrl && (
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1">Plan</p>
+                        <img src={planUrl} alt="Plan" className="w-full h-24 object-cover rounded-lg" />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      )}
 
-                      {/* Model Images */}
-                      {(selectedModel.image_url || selectedModel.plan_url) && (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {selectedModel.image_url && (
-                            <div className="relative">
-                              <img
-                                src={selectedModel.image_url}
-                                alt="Photo principale"
-                                className="h-[120px] w-full object-contain rounded shadow cursor-pointer"
-                                onClick={() => setLightbox(selectedModel.image_url!)}
-                              />
-                              <ZoomIn className="absolute top-2 right-2 w-5 h-5 text-white bg-black/60 p-1 rounded-full" />
-                            </div>
+      {/* MODEL-BASED QUOTE MODE - 3-step wizard */}
+      {quoteMode === 'model' && (
+        <div className="space-y-6">
+          {/* Step Indicator */}
+          <div className="flex items-center justify-center gap-2 py-4 bg-white rounded-lg shadow-sm border">
+            <div className={`flex items-center gap-2 ${modelStep === 'model' ? 'text-orange-600' : 'text-gray-400'}`}>
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold ${
+                modelStep === 'model' ? 'bg-orange-600 text-white' : 
+                modelStep === 'options' || modelStep === 'details' ? 'bg-green-500 text-white' : 'bg-gray-200'
+              }`}>
+                {modelStep === 'options' || modelStep === 'details' ? <Check className="w-4 h-4" /> : '1'}
+              </div>
+              <span className="text-sm font-medium hidden sm:inline">Modèle</span>
+            </div>
+            <div className={`w-8 h-0.5 ${modelStep === 'options' || modelStep === 'details' ? 'bg-green-500' : 'bg-gray-200'}`}></div>
+            <div className={`flex items-center gap-2 ${modelStep === 'options' ? 'text-orange-600' : 'text-gray-400'}`}>
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold ${
+                modelStep === 'options' ? 'bg-orange-600 text-white' : 
+                modelStep === 'details' ? 'bg-green-500 text-white' : 'bg-gray-200'
+              }`}>
+                {modelStep === 'details' ? <Check className="w-4 h-4" /> : '2'}
+              </div>
+              <span className="text-sm font-medium hidden sm:inline">Options</span>
+            </div>
+            <div className={`w-8 h-0.5 ${modelStep === 'details' ? 'bg-green-500' : 'bg-gray-200'}`}></div>
+            <div className={`flex items-center gap-2 ${modelStep === 'details' ? 'text-orange-600' : 'text-gray-400'}`}>
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold ${
+                modelStep === 'details' ? 'bg-orange-600 text-white' : 'bg-gray-200'
+              }`}>
+                3
+              </div>
+              <span className="text-sm font-medium hidden sm:inline">Client</span>
+            </div>
+          </div>
+
+          {/* STEP 1: Model Selection + Contact/Import */}
+          {modelStep === 'model' && (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="lg:col-span-2 space-y-6">
+                {/* Model Selection */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Sélection du Modèle</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <Select
+                      value={selectedModelId?.toString() || ''}
+                      onValueChange={(v) => setSelectedModelId(Number(v))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Choisir un modèle..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {models.map(model => (
+                          <SelectItem key={model.id} value={model.id.toString()}>
+                            {model.name} - {formatPrice(model.calculated_base_price ?? model.base_price)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+
+                    {selectedModel && (
+                      <div className="mt-4 space-y-4">
+                        {/* Model Info */}
+                        <div className="p-4 bg-gray-50 rounded-lg">
+                          <h4 className="font-semibold text-lg">{selectedModel.name}</h4>
+                          {selectedModel.description && (
+                            <p className="text-sm text-gray-600 mt-1">{selectedModel.description}</p>
                           )}
-                          {selectedModel.plan_url && (
-                            <div className="relative">
-                              <img
-                                src={selectedModel.plan_url}
-                                alt="Plan"
-                                className="h-[120px] w-full object-contain rounded shadow cursor-pointer"
-                                onClick={() => setLightbox(selectedModel.plan_url!)}
-                              />
-                              <ZoomIn className="absolute top-2 right-2 w-5 h-5 text-white bg-black/60 p-1 rounded-full" />
+                          <p className="text-lg font-bold text-orange-600 mt-2">
+                            Prix de base: {formatPrice(modelBasePrice)}
+                          </p>
+                        </div>
+
+                        {/* Model Images */}
+                        {(selectedModel.image_url || selectedModel.plan_url) && (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {selectedModel.image_url && (
+                              <div className="relative">
+                                <img
+                                  src={selectedModel.image_url}
+                                  alt="Photo principale"
+                                  className="h-[120px] w-full object-contain rounded shadow cursor-pointer"
+                                  onClick={() => setLightbox(selectedModel.image_url!)}
+                                />
+                                <ZoomIn className="absolute top-2 right-2 w-5 h-5 text-white bg-black/60 p-1 rounded-full" />
+                              </div>
+                            )}
+                            {selectedModel.plan_url && (
+                              <div className="relative">
+                                <img
+                                  src={selectedModel.plan_url}
+                                  alt="Plan"
+                                  className="h-[120px] w-full object-contain rounded shadow cursor-pointer"
+                                  onClick={() => setLightbox(selectedModel.plan_url!)}
+                                />
+                                <ZoomIn className="absolute top-2 right-2 w-5 h-5 text-white bg-black/60 p-1 rounded-full" />
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Optional: Load Contact */}
+                <Card>
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <CardTitle>Client (optionnel)</CardTitle>
+                      <Button variant="outline" size="sm" onClick={() => setIsContactSelectorOpen(true)}>
+                        <UserPlus className="h-4 w-4 mr-2" />
+                        Charger un contact
+                      </Button>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    {selectedContactId ? (
+                      <div className="p-4 bg-blue-50 rounded-lg">
+                        <p className="font-medium text-blue-800">{customerName}</p>
+                        <p className="text-sm text-blue-600">{customerEmail}</p>
+                        {customerPhone && <p className="text-sm text-blue-600">{customerPhone}</p>}
+                      </div>
+                    ) : (
+                      <p className="text-gray-500 text-sm">
+                        Vous pouvez charger un client existant pour pré-remplir les informations et voir ses devis existants.
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Import Existing Quote (only shown if contact is selected) */}
+                {selectedContactId && contactQuotes.length > 0 && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Download className="h-5 w-5" />
+                        Importer un devis existant
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-sm text-gray-500 mb-4">
+                        Importer les options d'un devis existant de ce client
+                      </p>
+                      {loadingContactQuotes ? (
+                        <div className="text-center py-4">
+                          <Loader2 className="h-6 w-6 animate-spin text-orange-500 mx-auto" />
+                        </div>
+                      ) : (
+                        <div className="space-y-2 max-h-64 overflow-y-auto">
+                          {contactQuotes.map(quote => (
+                            <div
+                              key={quote.id}
+                              className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 transition-colors"
+                            >
+                              <div className="flex-1 min-w-0">
+                                <p className="font-medium">{quote.reference_number}</p>
+                                <p className="text-sm text-gray-500 truncate">
+                                  {quote.model_name || quote.quote_title} - {formatPrice(quote.total_price)}
+                                </p>
+                                <p className="text-xs text-gray-400">
+                                  {new Date(quote.created_at).toLocaleDateString('fr-FR')}
+                                </p>
+                              </div>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => importExistingQuote(quote.id)}
+                                className="ml-2 text-orange-600 hover:text-orange-700 hover:bg-orange-50"
+                              >
+                                <Download className="h-4 w-4 mr-1" />
+                                Importer
+                              </Button>
                             </div>
-                          )}
+                          ))}
                         </div>
                       )}
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
 
-                      {/* Base Categories - Inclusions (non-expandable, lines listed vertically) */}
-                      {baseCategories.length > 0 && (
-                        <div className="bg-green-50 border border-green-200 p-4 rounded">
-                          <h3 className="text-base font-semibold text-green-800 mb-3 flex items-center gap-2">
-                            <Check className="w-4 h-4" />
-                            Inclus dans le prix de base
-                          </h3>
-                          <div className="space-y-4">
-                            {baseCategories.map(cat => (
-                              <div key={cat.id} className="border-l-2 border-green-300 pl-3">
-                                <p className="font-medium text-green-700 text-sm mb-1">{cat.name}</p>
-                                {cat.lines && cat.lines.length > 0 && (
-                                  <ul className="space-y-0.5">
-                                    {cat.lines.map((line) => (
-                                      <li key={line.id} className="text-xs text-gray-600 pl-2">
-                                        • {line.description}
-                                      </li>
-                                    ))}
-                                  </ul>
-                                )}
+              {/* Sidebar for Step 1 */}
+              <div className="space-y-6">
+                <Card className="sticky top-4">
+                  <CardHeader>
+                    <CardTitle>Récapitulatif</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="space-y-2">
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Modèle</span>
+                        <span className="font-medium">{selectedModel?.name || '-'}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Prix de base</span>
+                        <span>{selectedModel ? formatPrice(modelBasePrice) : '-'}</span>
+                      </div>
+                    </div>
+                    {selectedContactId && (
+                      <div className="border-t pt-4">
+                        <p className="text-sm text-gray-600">Client sélectionné:</p>
+                        <p className="font-medium">{customerName}</p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Next Button */}
+                <Button 
+                  onClick={() => setModelStep('options')}
+                  disabled={!selectedModelId}
+                  className="w-full bg-orange-500 hover:bg-orange-600"
+                >
+                  Continuer vers les options
+                  <ArrowRight className="h-4 w-4 ml-2" />
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* STEP 2: Options Configuration */}
+          {modelStep === 'options' && selectedModel && (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="lg:col-span-2 space-y-6">
+                {/* Model Info Header */}
+                <Card>
+                  <CardContent className="py-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="text-xl font-bold">{selectedModel.name}</h3>
+                        <p className="text-sm text-gray-500">{selectedModel.description}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm text-gray-500">Prix de base</p>
+                        <p className="text-xl font-bold text-orange-600">{formatPrice(modelBasePrice)}</p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Model Images */}
+                {(selectedModel.image_url || selectedModel.plan_url) && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {selectedModel.image_url && (
+                      <div className="relative">
+                        <p className="text-xs text-gray-500 mb-1">Photo</p>
+                        <img
+                          src={selectedModel.image_url}
+                          alt="Photo principale"
+                          className="h-[150px] w-full object-contain rounded shadow cursor-pointer"
+                          onClick={() => setLightbox(selectedModel.image_url!)}
+                        />
+                        <ZoomIn className="absolute top-6 right-2 w-5 h-5 text-white bg-black/60 p-1 rounded-full" />
+                      </div>
+                    )}
+                    {selectedModel.plan_url && (
+                      <div className="relative">
+                        <p className="text-xs text-gray-500 mb-1">Plan</p>
+                        <img
+                          src={selectedModel.plan_url}
+                          alt="Plan"
+                          className="h-[150px] w-full object-contain rounded shadow cursor-pointer"
+                          onClick={() => setLightbox(selectedModel.plan_url!)}
+                        />
+                        <ZoomIn className="absolute top-6 right-2 w-5 h-5 text-white bg-black/60 p-1 rounded-full" />
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Base Categories - Inclusions */}
+                {baseCategories.length > 0 && (
+                  <Card className="bg-green-50 border-green-200">
+                    <CardContent className="py-4">
+                      <h3 className="text-base font-semibold text-green-800 mb-3 flex items-center gap-2">
+                        <Check className="w-4 h-4" />
+                        Inclus dans le prix de base
+                      </h3>
+                      <div className="space-y-3">
+                        {baseCategories.map(cat => (
+                          <div key={cat.id} className="border-l-2 border-green-300 pl-3">
+                            <p className="font-medium text-green-700 text-sm mb-1">{cat.name}</p>
+                            {cat.lines && cat.lines.length > 0 && (
+                              <ul className="space-y-0.5">
+                                {cat.lines.map((line) => (
+                                  <li key={line.id} className="text-xs text-gray-600 pl-2">
+                                    • {line.description}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Options Selection */}
+                {(modelOptions.length > 0 || boqOptions.length > 0) && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Options Disponibles</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {/* Standard Options */}
+                      {modelOptions.length > 0 && (
+                        <div>
+                          <h4 className="font-medium mb-2">Options Standard</h4>
+                          <div className="space-y-2">
+                            {modelOptions.map(option => (
+                              <div
+                                key={option.id}
+                                className={`flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-colors ${
+                                  selectedOptions.includes(option.id)
+                                    ? 'border-orange-500 bg-orange-50'
+                                    : 'border-gray-200 hover:border-gray-300'
+                                }`}
+                                onClick={() => toggleOption(option.id)}
+                              >
+                                <div className="flex items-center gap-3">
+                                  <Switch checked={selectedOptions.includes(option.id)} />
+                                  <div>
+                                    <p className="font-medium">{option.name}</p>
+                                    {option.description && (
+                                      <p className="text-sm text-gray-500">{option.description}</p>
+                                    )}
+                                  </div>
+                                </div>
+                                <span className="font-semibold">{formatPrice(option.price)}</span>
                               </div>
                             ))}
                           </div>
                         </div>
                       )}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
 
-              {/* Options Selection */}
-              {selectedModelId && (modelOptions.length > 0 || boqOptions.length > 0) && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Options Disponibles</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {/* Standard Options */}
-                    {modelOptions.length > 0 && (
-                      <div>
-                        <h4 className="font-medium mb-2">Options Standard</h4>
-                        <div className="space-y-2">
-                          {modelOptions.map(option => (
-                            <div
-                              key={option.id}
-                              className={`flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-colors ${
-                                selectedOptions.includes(option.id)
-                                  ? 'border-orange-500 bg-orange-50'
-                                  : 'border-gray-200 hover:border-gray-300'
-                              }`}
-                              onClick={() => toggleOption(option.id)}
-                            >
-                              <div className="flex items-center gap-3">
-                                <Switch checked={selectedOptions.includes(option.id)} />
-                                <div>
-                                  <p className="font-medium">{option.name}</p>
-                                  {option.description && (
-                                    <p className="text-sm text-gray-500">{option.description}</p>
+                      {/* BOQ Options */}
+                      {boqOptions.length > 0 && (
+                        <div>
+                          <div className="space-y-3">
+                            {boqOptions.map(option => {
+                              const isExpanded = expandedOptionCategories.includes(option.name);
+                              const isOptionSelected = selectedOptions.includes(option.id);
+                              return (
+                                <div
+                                  key={option.id}
+                                  className={`rounded-lg border transition-colors ${
+                                    isOptionSelected
+                                      ? 'border-orange-500 bg-orange-50'
+                                      : 'border-gray-200'
+                                  }`}
+                                >
+                                  {/* Option Header */}
+                                  <div
+                                    className="flex items-center justify-between p-3 cursor-pointer hover:bg-gray-50"
+                                    onClick={() => toggleOptionCategory(option.name)}
+                                  >
+                                    <div className="flex items-center gap-3">
+                                      {isExpanded ? (
+                                        <ChevronUp className="w-4 h-4 text-gray-500" />
+                                      ) : (
+                                        <ChevronDown className="w-4 h-4 text-gray-500" />
+                                      )}
+                                      <p className="font-medium">{option.name}</p>
+                                      {isOptionSelected && (
+                                        <Badge variant="secondary" className="bg-orange-100 text-orange-700">
+                                          Sélectionné
+                                        </Badge>
+                                      )}
+                                    </div>
+                                    <span className="font-semibold text-orange-600">{formatPrice(option.total_sale_price_ht)}</span>
+                                  </div>
+                                  
+                                  {/* Option Details (expanded) */}
+                                  {isExpanded && (
+                                    <div className="border-t">
+                                      <div className="flex">
+                                        {/* Option Image */}
+                                        {option.image_url && (
+                                          <div className="flex-shrink-0 p-4 border-r">
+                                            <img 
+                                              src={option.image_url} 
+                                              alt={option.name}
+                                              className="w-[100px] h-[100px] object-cover rounded cursor-pointer"
+                                              onClick={() => setLightbox(option.image_url!)}
+                                            />
+                                          </div>
+                                        )}
+                                        {/* Option Lines & Toggle */}
+                                        <div className="flex-1 p-4">
+                                          {/* Lines description */}
+                                          {option.lines && option.lines.length > 0 && (
+                                            <ul className="mb-3 space-y-1">
+                                              {option.lines.map((line: BOQLine) => (
+                                                <li key={line.id} className="text-sm text-gray-600">
+                                                  • {line.description}
+                                                </li>
+                                              ))}
+                                            </ul>
+                                          )}
+                                          {/* Toggle Switch */}
+                                          <div 
+                                            className="flex items-center justify-between cursor-pointer"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              toggleOption(option.id);
+                                            }}
+                                          >
+                                            <span className="text-sm text-gray-600">Ajouter cette option</span>
+                                            <Switch checked={isOptionSelected} />
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
                                   )}
                                 </div>
-                              </div>
-                              <span className="font-semibold">{formatPrice(option.price)}</span>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+
+              {/* Sidebar for Step 2 */}
+              <div className="space-y-6">
+                <Card className="sticky top-4">
+                  <CardHeader>
+                    <CardTitle>Récapitulatif</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="space-y-2">
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Prix de base</span>
+                        <span>{formatPrice(modelBasePrice)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Options ({selectedOptions.length})</span>
+                        <span>{formatPrice(modelOptionsTotal)}</span>
+                      </div>
+                    </div>
+                    <div className="border-t pt-4">
+                      <div className="flex justify-between text-lg font-bold text-orange-600">
+                        <span>Total HT</span>
+                        <span>{formatPrice(modelTotalPrice)}</span>
+                      </div>
+                      <div className="flex justify-between text-sm text-gray-600 mt-1">
+                        <span>TVA ({vatRate}%)</span>
+                        <span>{formatPrice(calculateTTC(modelTotalPrice, vatRate) - modelTotalPrice)}</span>
+                      </div>
+                      <div className="flex justify-between font-bold mt-2 pt-2 border-t">
+                        <span>Total TTC</span>
+                        <span>{formatPrice(calculateTTC(modelTotalPrice, vatRate))}</span>
+                      </div>
+                    </div>
+
+                    {/* Photos du Modèle in sidebar */}
+                    {(selectedModel.image_url || selectedModel.plan_url) && (
+                      <div className="border-t pt-4 space-y-3">
+                        <h4 className="font-medium text-sm flex items-center gap-2">
+                          <ImageIcon className="h-4 w-4" />
+                          Photos du Modèle
+                        </h4>
+                        <div className="grid grid-cols-2 gap-2">
+                          {selectedModel.image_url && (
+                            <div 
+                              className="relative cursor-pointer group"
+                              onClick={() => selectedModel.image_url && setLightbox(selectedModel.image_url)}
+                            >
+                              <p className="text-xs text-gray-500 mb-1">Photo</p>
+                              <img 
+                                src={selectedModel.image_url} 
+                                alt="Photo du modèle" 
+                                className="w-full h-24 object-cover rounded-lg group-hover:opacity-90 transition-opacity" 
+                              />
+                              <ZoomIn className="absolute bottom-2 right-2 w-4 h-4 text-white bg-black/60 p-0.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
+                            </div>
+                          )}
+                          {selectedModel.plan_url && (
+                            <div 
+                              className="relative cursor-pointer group"
+                              onClick={() => selectedModel.plan_url && setLightbox(selectedModel.plan_url)}
+                            >
+                              <p className="text-xs text-gray-500 mb-1">Plan</p>
+                              <img 
+                                src={selectedModel.plan_url} 
+                                alt="Plan du modèle" 
+                                className="w-full h-24 object-cover rounded-lg group-hover:opacity-90 transition-opacity" 
+                              />
+                              <ZoomIn className="absolute bottom-2 right-2 w-4 h-4 text-white bg-black/60 p-0.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Base Categories in sidebar */}
+                    {baseCategories.length > 0 && (
+                      <div className="border-t pt-4 space-y-3">
+                        <h4 className="font-medium text-sm flex items-center gap-2">
+                          <Check className="h-4 w-4 text-green-600" />
+                          Inclus dans le prix de base
+                        </h4>
+                        <div className="space-y-2">
+                          {baseCategories.map(cat => (
+                            <div key={cat.id} className="border-l-2 border-green-300 pl-2">
+                              <p className="font-medium text-green-700 text-xs">{cat.name}</p>
+                              {cat.lines && cat.lines.length > 0 && (
+                                <ul className="space-y-0.5 mt-1">
+                                  {cat.lines.map((line) => (
+                                    <li key={line.id} className="text-xs text-gray-500 pl-1">
+                                      • {line.description}
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
                             </div>
                           ))}
                         </div>
                       </div>
                     )}
+                  </CardContent>
+                </Card>
 
-                    {/* BOQ Options */}
-                    {boqOptions.length > 0 && (
+                {/* Navigation Buttons */}
+                <div className="flex gap-2">
+                  <Button 
+                    variant="outline"
+                    onClick={() => setModelStep('model')}
+                    className="flex-1"
+                  >
+                    <ArrowLeft className="h-4 w-4 mr-2" />
+                    Retour
+                  </Button>
+                  <Button 
+                    onClick={() => setModelStep('details')}
+                    className="flex-1 bg-orange-500 hover:bg-orange-600"
+                  >
+                    Continuer
+                    <ArrowRight className="h-4 w-4 ml-2" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* STEP 3: Customer Details */}
+          {modelStep === 'details' && selectedModel && (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="lg:col-span-2 space-y-6">
+                {/* Customer Information */}
+                <Card>
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <CardTitle>Informations Client</CardTitle>
+                      {!selectedContactId && (
+                        <Button variant="outline" size="sm" onClick={() => setIsContactSelectorOpen(true)}>
+                          <UserPlus className="h-4 w-4 mr-2" />
+                          Charger un contact
+                        </Button>
+                      )}
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {selectedContactId && (
+                      <div className="p-3 bg-blue-50 rounded-lg mb-4 flex items-center justify-between">
+                        <div>
+                          <p className="text-sm text-blue-600">Contact pré-chargé</p>
+                          <p className="font-medium text-blue-800">{customerName}</p>
+                        </div>
+                        <Button 
+                          variant="ghost" 
+                          size="sm"
+                          onClick={() => {
+                            setSelectedContactId(null);
+                            setCustomerName('');
+                            setCustomerEmail('');
+                            setCustomerPhone('');
+                            setCustomerAddress('');
+                          }}
+                          className="text-blue-600 hover:text-blue-700"
+                        >
+                          Changer
+                        </Button>
+                      </div>
+                    )}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
-                        <div className="space-y-3">
-                          {boqOptions.map(option => {
-                            const isExpanded = expandedOptionCategories.includes(option.name);
-                            return (
-                              <div
-                                key={option.id}
-                                className={`rounded-lg border transition-colors ${
-                                  selectedOptions.includes(option.id)
-                                    ? 'border-orange-500 bg-orange-50'
-                                    : 'border-gray-200'
-                                }`}
-                              >
-                                {/* Option Header */}
-                                <div
-                                  className="flex items-center justify-between p-3 cursor-pointer hover:bg-gray-50"
-                                  onClick={() => toggleOptionCategory(option.name)}
-                                >
-                                  <div className="flex items-center gap-3">
-                                    {isExpanded ? (
-                                      <ChevronUp className="w-4 h-4 text-gray-500" />
-                                    ) : (
-                                      <ChevronDown className="w-4 h-4 text-gray-500" />
-                                    )}
-                                    <p className="font-medium">{option.name}</p>
-                                  </div>
-                                  <span className="font-semibold text-orange-600">{formatPrice(option.total_sale_price_ht)}</span>
-                                </div>
-                                
-                                {/* Option Details (expanded) */}
-                                {isExpanded && (
-                                  <div className="border-t">
-                                    <div className="flex">
-                                      {/* Option Image */}
-                                      {option.image_url && (
-                                        <div className="flex-shrink-0 p-4 border-r">
-                                          <img 
-                                            src={option.image_url} 
-                                            alt={option.name}
-                                            className="w-[100px] h-[100px] object-cover rounded cursor-pointer"
-                                            onClick={() => setLightbox(option.image_url!)}
-                                          />
-                                        </div>
-                                      )}
-                                      {/* Option Lines & Toggle */}
-                                      <div className="flex-1 p-4">
-                                        {/* Lines description */}
-                                        {option.lines && option.lines.length > 0 && (
-                                          <ul className="mb-3 space-y-1">
-                                            {option.lines.map((line: BOQLine) => (
-                                              <li key={line.id} className="text-sm text-gray-600">
-                                                • {line.description}
-                                              </li>
-                                            ))}
-                                          </ul>
-                                        )}
-                                        {/* Toggle Switch */}
-                                        <div 
-                                          className="flex items-center justify-between cursor-pointer"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            toggleOption(option.id);
-                                          }}
-                                        >
-                                          <span className="text-sm text-gray-600">Ajouter cette option</span>
-                                          <Switch checked={selectedOptions.includes(option.id)} />
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
+                        <Label htmlFor="customerName">Nom *</Label>
+                        <Input
+                          id="customerName"
+                          value={customerName}
+                          onChange={(e) => setCustomerName(e.target.value)}
+                          placeholder="Nom du client"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="customerEmail">Email *</Label>
+                        <Input
+                          id="customerEmail"
+                          type="email"
+                          value={customerEmail}
+                          onChange={(e) => setCustomerEmail(e.target.value)}
+                          placeholder="email@example.com"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="customerPhone">Téléphone *</Label>
+                        <Input
+                          id="customerPhone"
+                          value={customerPhone}
+                          onChange={(e) => setCustomerPhone(e.target.value)}
+                          placeholder="+230 5xxx xxxx"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="customerAddress">Adresse</Label>
+                        <Input
+                          id="customerAddress"
+                          value={customerAddress}
+                          onChange={(e) => setCustomerAddress(e.target.value)}
+                          placeholder="Adresse complète"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <Label htmlFor="customerMessage">Message / Notes</Label>
+                      <Textarea
+                        id="customerMessage"
+                        value={customerMessage}
+                        onChange={(e) => setCustomerMessage(e.target.value)}
+                        placeholder="Notes ou demandes particulières..."
+                        rows={3}
+                      />
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Sidebar for Step 3 */}
+              <div className="space-y-6">
+                <Card className="sticky top-4">
+                  <CardHeader>
+                    <CardTitle>Récapitulatif Final</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-600">Modèle</span>
+                        <span className="font-medium">{selectedModel.name}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Prix de base</span>
+                        <span>{formatPrice(modelBasePrice)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Options ({selectedOptions.length})</span>
+                        <span>{formatPrice(modelOptionsTotal)}</span>
+                      </div>
+                    </div>
+                    <div className="border-t pt-4">
+                      <div className="flex justify-between text-lg font-bold text-orange-600">
+                        <span>Total HT</span>
+                        <span>{formatPrice(modelTotalPrice)}</span>
+                      </div>
+                      <div className="flex justify-between text-sm text-gray-600 mt-1">
+                        <span>TVA ({vatRate}%)</span>
+                        <span>{formatPrice(calculateTTC(modelTotalPrice, vatRate) - modelTotalPrice)}</span>
+                      </div>
+                      <div className="flex justify-between font-bold mt-2 pt-2 border-t">
+                        <span>Total TTC</span>
+                        <span>{formatPrice(calculateTTC(modelTotalPrice, vatRate))}</span>
+                      </div>
+                    </div>
+
+                    {/* Photos du Modèle in sidebar */}
+                    {(selectedModel.image_url || selectedModel.plan_url) && (
+                      <div className="border-t pt-4 space-y-3">
+                        <h4 className="font-medium text-sm flex items-center gap-2">
+                          <ImageIcon className="h-4 w-4" />
+                          Photos du Modèle
+                        </h4>
+                        <div className="grid grid-cols-2 gap-2">
+                          {selectedModel.image_url && (
+                            <div 
+                              className="relative cursor-pointer group"
+                              onClick={() => selectedModel.image_url && setLightbox(selectedModel.image_url)}
+                            >
+                              <p className="text-xs text-gray-500 mb-1">Photo</p>
+                              <img 
+                                src={selectedModel.image_url} 
+                                alt="Photo du modèle" 
+                                className="w-full h-24 object-cover rounded-lg group-hover:opacity-90 transition-opacity" 
+                              />
+                              <ZoomIn className="absolute bottom-2 right-2 w-4 h-4 text-white bg-black/60 p-0.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
+                            </div>
+                          )}
+                          {selectedModel.plan_url && (
+                            <div 
+                              className="relative cursor-pointer group"
+                              onClick={() => selectedModel.plan_url && setLightbox(selectedModel.plan_url)}
+                            >
+                              <p className="text-xs text-gray-500 mb-1">Plan</p>
+                              <img 
+                                src={selectedModel.plan_url} 
+                                alt="Plan du modèle" 
+                                className="w-full h-24 object-cover rounded-lg group-hover:opacity-90 transition-opacity" 
+                              />
+                              <ZoomIn className="absolute bottom-2 right-2 w-4 h-4 text-white bg-black/60 p-0.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
+                            </div>
+                          )}
                         </div>
                       </div>
                     )}
                   </CardContent>
                 </Card>
-              )}
+
+                {/* Navigation Buttons */}
+                <div className="flex gap-2">
+                  <Button 
+                    variant="outline"
+                    onClick={() => setModelStep('options')}
+                    className="flex-1"
+                  >
+                    <ArrowLeft className="h-4 w-4 mr-2" />
+                    Retour
+                  </Button>
+                  <Button 
+                    onClick={saveQuote}
+                    disabled={saving}
+                    className="flex-1 bg-orange-500 hover:bg-orange-600"
+                  >
+                    {saving ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Enregistrement...
+                      </>
+                    ) : (
+                      <>
+                        <Save className="h-4 w-4 mr-2" />
+                        {isEditMode ? 'Mettre à jour' : 'Créer le devis'}
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
             </div>
           )}
         </div>
-
-        {/* Sidebar: Summary */}
-        <div className="space-y-6">
-          <Card className="sticky top-4">
-            <CardHeader>
-              <CardTitle>Récapitulatif</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {quoteMode === 'free' ? (
-                <>
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600">Catégories</span>
-                      <span>{categories.length}</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600">Lignes</span>
-                      <span>{categories.reduce((sum, c) => sum + c.lines.length, 0)}</span>
-                    </div>
-                  </div>
-                  <div className="border-t pt-4 space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600">Coût Total HT</span>
-                      <span>{formatPrice(totalCostHT)}</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600">Marge</span>
-                      <span className="text-green-600">+{formatPrice(totalProfitHT)}</span>
-                    </div>
-                    <div className="flex justify-between font-semibold">
-                      <span>Total HT</span>
-                      <span>{formatPrice(totalSalePriceHT)}</span>
-                    </div>
-                    <div className="flex justify-between text-sm text-gray-600">
-                      <span>TVA ({vatRate}%)</span>
-                      <span>{formatPrice(totalPriceTTC - totalSalePriceHT)}</span>
-                    </div>
-                    <div className="flex justify-between text-lg font-bold text-orange-600 pt-2 border-t">
-                      <span>Total TTC</span>
-                      <span>{formatPrice(totalPriceTTC)}</span>
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Prix de base</span>
-                      <span>{formatPrice(modelBasePrice)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Options ({selectedOptions.length})</span>
-                      <span>{formatPrice(modelOptionsTotal)}</span>
-                    </div>
-                  </div>
-                  <div className="border-t pt-4">
-                    <div className="flex justify-between text-lg font-bold text-orange-600">
-                      <span>Total HT</span>
-                      <span>{formatPrice(modelTotalPrice)}</span>
-                    </div>
-                    <div className="flex justify-between text-sm text-gray-600 mt-1">
-                      <span>TVA ({vatRate}%)</span>
-                      <span>{formatPrice(calculateTTC(modelTotalPrice, vatRate) - modelTotalPrice)}</span>
-                    </div>
-                    <div className="flex justify-between font-bold mt-2 pt-2 border-t">
-                      <span>Total TTC</span>
-                      <span>{formatPrice(calculateTTC(modelTotalPrice, vatRate))}</span>
-                    </div>
-                  </div>
-                </>
-              )}
-
-              {/* Import Existing Quotes */}
-              {selectedContactId && contactQuotes.length > 0 && (
-                <div className="border-t pt-4 space-y-3">
-                  <h4 className="font-medium text-sm flex items-center gap-2">
-                    <Download className="h-4 w-4" />
-                    Importer Existant(s)
-                  </h4>
-                  <p className="text-xs text-gray-500">
-                    Importer les options d'un devis existant
-                  </p>
-                  {loadingContactQuotes ? (
-                    <div className="text-center py-2">
-                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-orange-500 mx-auto"></div>
-                    </div>
-                  ) : (
-                    <div className="space-y-2 max-h-48 overflow-y-auto">
-                      {contactQuotes.map(quote => (
-                        <div
-                          key={quote.id}
-                          className="flex items-center justify-between p-2 border rounded-lg hover:bg-gray-50 transition-colors"
-                        >
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium truncate">{quote.reference_number}</p>
-                            <p className="text-xs text-gray-500 truncate">
-                              {quote.model_name || quote.quote_title} - {formatPrice(quote.total_price)}
-                            </p>
-                          </div>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => importExistingQuote(quote.id)}
-                            className="ml-2 text-orange-600 hover:text-orange-700 hover:bg-orange-50"
-                          >
-                            <Download className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Media Preview - Show model photos for model-based quotes, or custom URLs for free quotes */}
-              {quoteMode === 'model' && selectedModel && (selectedModel.image_url || selectedModel.plan_url) && (
-                <div className="border-t pt-4 space-y-3">
-                  <h4 className="font-medium text-sm flex items-center gap-2">
-                    <ImageIcon className="h-4 w-4" />
-                    Photos du Modèle
-                  </h4>
-                  <div className="grid grid-cols-2 gap-2">
-                    {selectedModel.image_url && (
-                      <div 
-                        className="relative cursor-pointer group"
-                        onClick={() => selectedModel.image_url && setLightbox(selectedModel.image_url)}
-                      >
-                        <p className="text-xs text-gray-500 mb-1">Photo</p>
-                        <img 
-                          src={selectedModel.image_url} 
-                          alt="Photo du modèle" 
-                          className="w-full h-24 object-cover rounded-lg group-hover:opacity-90 transition-opacity" 
-                        />
-                        <ZoomIn className="absolute bottom-2 right-2 w-4 h-4 text-white bg-black/60 p-0.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
-                      </div>
-                    )}
-                    {selectedModel.plan_url && (
-                      <div 
-                        className="relative cursor-pointer group"
-                        onClick={() => selectedModel.plan_url && setLightbox(selectedModel.plan_url)}
-                      >
-                        <p className="text-xs text-gray-500 mb-1">Plan</p>
-                        <img 
-                          src={selectedModel.plan_url} 
-                          alt="Plan du modèle" 
-                          className="w-full h-24 object-cover rounded-lg group-hover:opacity-90 transition-opacity" 
-                        />
-                        <ZoomIn className="absolute bottom-2 right-2 w-4 h-4 text-white bg-black/60 p-0.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Base Categories - Show inclusions for model-based quotes in sidebar */}
-              {quoteMode === 'model' && selectedModel && baseCategories.length > 0 && (
-                <div className="border-t pt-4 space-y-3">
-                  <h4 className="font-medium text-sm flex items-center gap-2">
-                    <Check className="h-4 w-4 text-green-600" />
-                    Inclus dans le prix de base
-                  </h4>
-                  <div className="space-y-2">
-                    {baseCategories.map(cat => (
-                      <div key={cat.id} className="border-l-2 border-green-300 pl-2">
-                        <p className="font-medium text-green-700 text-xs">{cat.name}</p>
-                        {cat.lines && cat.lines.length > 0 && (
-                          <ul className="space-y-0.5 mt-1">
-                            {cat.lines.map((line) => (
-                              <li key={line.id} className="text-xs text-gray-500 pl-1">
-                                • {line.description}
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Custom Media URLs - Only for free quotes */}
-              {quoteMode === 'free' && (photoUrl || planUrl) && (
-                <div className="border-t pt-4 space-y-3">
-                  <h4 className="font-medium text-sm">Médias</h4>
-                  {photoUrl && (
-                    <div>
-                      <p className="text-xs text-gray-500 mb-1">Photo</p>
-                      <img src={photoUrl} alt="Photo" className="w-full h-24 object-cover rounded-lg" />
-                    </div>
-                  )}
-                  {planUrl && (
-                    <div>
-                      <p className="text-xs text-gray-500 mb-1">Plan</p>
-                      <img src={planUrl} alt="Plan" className="w-full h-24 object-cover rounded-lg" />
-                    </div>
-                  )}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+      )}
 
       {/* Contact Selector Dialog */}
       <Dialog open={isContactSelectorOpen} onOpenChange={setIsContactSelectorOpen}>
