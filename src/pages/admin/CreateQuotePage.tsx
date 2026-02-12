@@ -144,10 +144,11 @@ interface ContactQuote {
 // The API returns 'price_ht' but we use 'total_sale_price_ht' internally
 // The total_sale_price_ht fallback handles cases where the API might already have the correct field name
 // NOTE: BOQ option IDs are offset by BOQ_OPTION_ID_OFFSET to distinguish them from standard model options
+// IMPORTANT: API returns price_ht as string, must convert to number to avoid string concatenation in calculations
 const mapBOQApiResponseToOption = (opt: BOQOptionAPIResponse, lines: BOQLine[] = []): BOQOption => ({
   id: Number(opt.id) + BOQ_OPTION_ID_OFFSET,
   name: opt.name,
-  total_sale_price_ht: opt.price_ht ?? opt.total_sale_price_ht ?? 0,
+  total_sale_price_ht: Number(opt.price_ht ?? opt.total_sale_price_ht ?? 0),
   image_url: opt.image_url,
   lines,
 });
@@ -215,6 +216,9 @@ export default function CreateQuotePage() {
   const [modelBOQPrice, setModelBOQPrice] = useState<number | null>(null);
   const [expandedOptionCategories, setExpandedOptionCategories] = useState<string[]>([]);
   const [lightbox, setLightbox] = useState<string | null>(null);
+
+  // Pending option IDs to be selected after model options load (for import/edit/clone)
+  const pendingOptionIdsRef = React.useRef<number[]>([]);
 
   // Free quote
   const [categories, setCategories] = useState<QuoteCategory[]>([]);
@@ -296,6 +300,25 @@ export default function CreateQuotePage() {
       setBoqOptions(boqOptsWithLines);
       setBaseCategories(baseCats || []);
       setModelBOQPrice(boqPrice?.base_price_ht ?? null);
+      
+      // Apply pending options after model options are loaded
+      // This handles import/edit/clone scenarios where options are set before model options load
+      if (pendingOptionIdsRef.current.length > 0) {
+        const allOptionIds = [
+          ...(options || []).map((o: Option) => o.id),
+          ...boqOptsWithLines.map(o => o.id),
+        ];
+        // Filter pending options to only include those that exist in the loaded options
+        const validPendingOptions = pendingOptionIdsRef.current.filter(id => allOptionIds.includes(id));
+        if (validPendingOptions.length > 0) {
+          setSelectedOptions(prev => {
+            const newOptions = validPendingOptions.filter(id => !prev.includes(id));
+            return [...prev, ...newOptions];
+          });
+        }
+        // Clear pending options after applying
+        pendingOptionIdsRef.current = [];
+      }
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
     }
@@ -334,9 +357,10 @@ export default function CreateQuotePage() {
       } else {
         setQuoteMode('model');
         setSelectedModelId(quote.model_id);
-        // Load options
+        // Store option IDs to be selected after model options load
+        // This ensures BOQ options (WCQ) are properly matched after their offset IDs are created
         if (quote.options) {
-          setSelectedOptions(quote.options.map((o: any) => o.option_id).filter(Boolean));
+          pendingOptionIdsRef.current = quote.options.map((o: any) => o.option_id).filter(Boolean);
         }
       }
     } catch (err: any) {
@@ -384,9 +408,10 @@ export default function CreateQuotePage() {
       } else {
         setQuoteMode('model');
         setSelectedModelId(quote.model_id);
-        // Load options
+        // Store option IDs to be selected after model options load
+        // This ensures BOQ options (WCQ) are properly matched after their offset IDs are created
         if (quote.options) {
-          setSelectedOptions(quote.options.map((o: any) => o.option_id).filter(Boolean));
+          pendingOptionIdsRef.current = quote.options.map((o: any) => o.option_id).filter(Boolean);
         }
       }
     } catch (err: any) {
@@ -455,9 +480,10 @@ export default function CreateQuotePage() {
       } else {
         setQuoteMode('model');
         setSelectedModelId(quote.model_id);
-        // Load options
+        // Store option IDs to be selected after model options load
+        // This ensures BOQ options (WCQ) are properly matched after their offset IDs are created
         if (quote.options) {
-          setSelectedOptions(quote.options.map((o: any) => o.option_id).filter(Boolean));
+          pendingOptionIdsRef.current = quote.options.map((o: any) => o.option_id).filter(Boolean);
         }
       }
       
