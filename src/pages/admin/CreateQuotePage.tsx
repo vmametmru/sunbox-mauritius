@@ -1481,64 +1481,6 @@ export default function CreateQuotePage() {
                   </CardContent>
                 </Card>
 
-                {/* Model Images */}
-                {(selectedModel.image_url || selectedModel.plan_url) && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {selectedModel.image_url && (
-                      <div className="relative">
-                        <p className="text-xs text-gray-500 mb-1">Photo</p>
-                        <img
-                          src={selectedModel.image_url}
-                          alt="Photo principale"
-                          className="h-[150px] w-full object-contain rounded shadow cursor-pointer"
-                          onClick={() => setLightbox(selectedModel.image_url!)}
-                        />
-                        <ZoomIn className="absolute top-6 right-2 w-5 h-5 text-white bg-black/60 p-1 rounded-full" />
-                      </div>
-                    )}
-                    {selectedModel.plan_url && (
-                      <div className="relative">
-                        <p className="text-xs text-gray-500 mb-1">Plan</p>
-                        <img
-                          src={selectedModel.plan_url}
-                          alt="Plan"
-                          className="h-[150px] w-full object-contain rounded shadow cursor-pointer"
-                          onClick={() => setLightbox(selectedModel.plan_url!)}
-                        />
-                        <ZoomIn className="absolute top-6 right-2 w-5 h-5 text-white bg-black/60 p-1 rounded-full" />
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Base Categories - Inclusions */}
-                {baseCategories.length > 0 && (
-                  <Card className="bg-green-50 border-green-200">
-                    <CardContent className="py-4">
-                      <h3 className="text-base font-semibold text-green-800 mb-3 flex items-center gap-2">
-                        <Check className="w-4 h-4" />
-                        Inclus dans le prix de base
-                      </h3>
-                      <div className="space-y-3">
-                        {baseCategories.map(cat => (
-                          <div key={cat.id} className="border-l-2 border-green-300 pl-3">
-                            <p className="font-medium text-green-700 text-sm mb-1">{cat.name}</p>
-                            {cat.lines && cat.lines.length > 0 && (
-                              <ul className="space-y-0.5">
-                                {cat.lines.map((line) => (
-                                  <li key={line.id} className="text-xs text-gray-600 pl-2">
-                                    • {line.description}
-                                  </li>
-                                ))}
-                              </ul>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
-
                 {/* Options Selection */}
                 {(modelOptions.length > 0 || boqOptions.length > 0) && (
                   <Card>
