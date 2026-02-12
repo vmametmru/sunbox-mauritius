@@ -172,6 +172,10 @@ const emptyCategory: QuoteCategory = {
   expanded: true,
 };
 
+// Helper function to safely check if a quote is a free quote
+// Handles both boolean and string values from API (string "false" is truthy in JS)
+const isFreeQuote = (value: unknown): boolean => value === true || value === 'true';
+
 /* ======================================================
    COMPONENT
 ====================================================== */
@@ -359,7 +363,7 @@ export default function CreateQuotePage() {
       setPhotoUrl(quote.photo_url || '');
       setPlanUrl(quote.plan_url || '');
       
-      if (quote.is_free_quote) {
+      if (isFreeQuote(quote.is_free_quote)) {
         setQuoteMode('free');
         // Load categories
         if (quote.categories) {
@@ -408,7 +412,7 @@ export default function CreateQuotePage() {
       setPhotoUrl(quote.photo_url || '');
       setPlanUrl(quote.plan_url || '');
       
-      if (quote.is_free_quote) {
+      if (isFreeQuote(quote.is_free_quote)) {
         setQuoteMode('free');
         // Load categories
         if (quote.categories) {
@@ -483,7 +487,7 @@ export default function CreateQuotePage() {
       setPhotoUrl(quote.photo_url || '');
       setPlanUrl(quote.plan_url || '');
       
-      if (quote.is_free_quote) {
+      if (isFreeQuote(quote.is_free_quote)) {
         setQuoteMode('free');
         // Load categories
         if (quote.categories) {
@@ -1361,7 +1365,7 @@ export default function CreateQuotePage() {
                 </Card>
 
                 {/* Import Existing Quote (only shown if contact is selected and has model-based quotes) */}
-                {selectedContactId && contactQuotes.filter(q => !q.is_free_quote).length > 0 && (
+                {selectedContactId && contactQuotes.filter(q => !isFreeQuote(q.is_free_quote)).length > 0 && (
                   <Card>
                     <CardHeader>
                       <CardTitle className="flex items-center gap-2">
@@ -1379,7 +1383,7 @@ export default function CreateQuotePage() {
                         </div>
                       ) : (
                         <div className="space-y-2 max-h-64 overflow-y-auto">
-                          {contactQuotes.filter(q => !q.is_free_quote).map(quote => (
+                          {contactQuotes.filter(q => !isFreeQuote(q.is_free_quote)).map(quote => (
                             <div
                               key={quote.id}
                               className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 transition-colors"
