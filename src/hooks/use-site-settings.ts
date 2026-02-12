@@ -8,6 +8,7 @@ export interface SiteSettingsData {
   pdf_logo?: string;
   site_slogan?: string;
   vat_rate?: string;
+  dev_mode_no_password?: string;
 }
 
 export function useSiteSettings() {
