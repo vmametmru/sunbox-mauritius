@@ -315,6 +315,13 @@ export default function CreateQuotePage() {
             const newOptions = validPendingOptions.filter(id => !prev.includes(id));
             return [...prev, ...newOptions];
           });
+          
+          // Expand selected BOQ options (they have IDs >= BOQ_OPTION_ID_OFFSET)
+          // and close unselected ones for better user experience after import/edit/clone
+          const selectedBOQOptionNames = boqOptsWithLines
+            .filter(opt => validPendingOptions.includes(opt.id))
+            .map(opt => opt.name);
+          setExpandedOptionCategories(selectedBOQOptionNames);
         }
         // Clear pending options after applying
         pendingOptionIdsRef.current = [];
@@ -1487,6 +1494,32 @@ export default function CreateQuotePage() {
                         <ZoomIn className="absolute bottom-2 right-2 w-4 h-4 text-white bg-black/60 p-0.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
                       </div>
                     )}
+                  </div>
+                </div>
+              )}
+
+              {/* Base Categories - Show inclusions for model-based quotes in sidebar */}
+              {quoteMode === 'model' && selectedModel && baseCategories.length > 0 && (
+                <div className="border-t pt-4 space-y-3">
+                  <h4 className="font-medium text-sm flex items-center gap-2">
+                    <Check className="h-4 w-4 text-green-600" />
+                    Inclus dans le prix de base
+                  </h4>
+                  <div className="space-y-2">
+                    {baseCategories.map(cat => (
+                      <div key={cat.id} className="border-l-2 border-green-300 pl-2">
+                        <p className="font-medium text-green-700 text-xs">{cat.name}</p>
+                        {cat.lines && cat.lines.length > 0 && (
+                          <ul className="space-y-0.5 mt-1">
+                            {cat.lines.map((line) => (
+                              <li key={line.id} className="text-xs text-gray-500 pl-1">
+                                • {line.description}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
