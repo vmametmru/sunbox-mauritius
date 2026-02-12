@@ -636,8 +636,8 @@ export default function CreateQuotePage() {
 
   // Model quote totals
   const selectedModel = models.find(m => m.id === selectedModelId);
-  // Use BOQ calculated price if available, otherwise fallback to model's base_price
-  const modelBasePrice = modelBOQPrice !== null ? modelBOQPrice : (selectedModel?.base_price || 0);
+  // Use BOQ calculated price if available, otherwise fallback to model's calculated_base_price or base_price
+  const modelBasePrice = modelBOQPrice !== null ? modelBOQPrice : (selectedModel?.calculated_base_price ?? selectedModel?.base_price ?? 0);
   
   const selectedModelOptionsTotal = selectedOptions
     .filter(id => id < BOQ_OPTION_ID_OFFSET)
@@ -1360,8 +1360,8 @@ export default function CreateQuotePage() {
                   </CardContent>
                 </Card>
 
-                {/* Import Existing Quote (only shown if contact is selected) */}
-                {selectedContactId && contactQuotes.length > 0 && (
+                {/* Import Existing Quote (only shown if contact is selected and has model-based quotes) */}
+                {selectedContactId && contactQuotes.filter(q => !q.is_free_quote).length > 0 && (
                   <Card>
                     <CardHeader>
                       <CardTitle className="flex items-center gap-2">
@@ -1371,7 +1371,7 @@ export default function CreateQuotePage() {
                     </CardHeader>
                     <CardContent>
                       <p className="text-sm text-gray-500 mb-4">
-                        Importer les options d'un devis existant de ce client
+                        Importer les options d'un devis modèle existant de ce client
                       </p>
                       {loadingContactQuotes ? (
                         <div className="text-center py-4">
@@ -1379,7 +1379,7 @@ export default function CreateQuotePage() {
                         </div>
                       ) : (
                         <div className="space-y-2 max-h-64 overflow-y-auto">
-                          {contactQuotes.map(quote => (
+                          {contactQuotes.filter(q => !q.is_free_quote).map(quote => (
                             <div
                               key={quote.id}
                               className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 transition-colors"
