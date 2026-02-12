@@ -870,10 +870,13 @@ export default function CreateQuotePage() {
             </p>
           </div>
         </div>
-        <Button onClick={saveQuote} disabled={saving} className="bg-orange-500 hover:bg-orange-600">
-          <Save className="h-4 w-4 mr-2" />
-          {saving ? 'Enregistrement...' : (isEditMode ? 'Mettre à jour' : 'Créer le devis')}
-        </Button>
+        {/* Show save button only for free quotes or when in edit mode, not during model-based quote wizard */}
+        {(quoteMode === 'free' || isEditMode) && (
+          <Button onClick={saveQuote} disabled={saving} className="bg-orange-500 hover:bg-orange-600">
+            <Save className="h-4 w-4 mr-2" />
+            {saving ? 'Enregistrement...' : (isEditMode ? 'Mettre à jour' : 'Créer le devis')}
+          </Button>
+        )}
       </div>
 
       {/* Quote Mode Selection (only for new quotes) */}
