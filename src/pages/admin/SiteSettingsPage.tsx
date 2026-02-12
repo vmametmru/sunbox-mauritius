@@ -145,7 +145,7 @@ export default function SiteSettingsPage() {
                 <div className="space-y-1">
                   <Label className="text-base text-yellow-800">Mode développement (sans mot de passe)</Label>
                   <p className="text-sm text-yellow-700">
-                    ⚠️ Désactive l'authentification admin. À utiliser uniquement en développement pour permettre à Copilot de tester les pages admin.
+                    ⚠️ Désactive l'authentification admin. À utiliser uniquement en développement (API_DEBUG=true) pour permettre aux outils de développement de tester les pages admin.
                   </p>
                 </div>
                 <Switch

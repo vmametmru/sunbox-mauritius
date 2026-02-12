@@ -28,8 +28,8 @@ function isDevModeNoPasswordEnabled(): bool {
 }
 
 try {
-    // Check if dev mode no password is enabled
-    $devModeNoPassword = isDevModeNoPasswordEnabled();
+    // Check if dev mode no password is enabled (only effective if API_DEBUG is also true)
+    $devModeNoPassword = API_DEBUG && isDevModeNoPasswordEnabled();
 
     // If dev mode is enabled and user is not already admin, auto-login
     if ($devModeNoPassword && $action === 'me' && empty($_SESSION['is_admin'])) {
@@ -62,8 +62,10 @@ try {
         }
     }
 
-    // 3) Validation - skip if dev mode is enabled (no password needed)
-    if (!$devModeNoPassword && ($adminHash === '' || strlen($adminHash) < 20 || strpos($adminHash, '$2') !== 0)) {
+    // 3) Validation - always validate password hash is configured properly
+    // Dev mode only allows bypassing the login check, not the configuration
+    $hasValidAdminHash = $adminHash !== '' && strlen($adminHash) >= 20 && strpos($adminHash, '$2') === 0;
+    if (!$devModeNoPassword && !$hasValidAdminHash) {
         fail("ADMIN_PASSWORD_HASH invalide côté serveur (.env).", 500);
     }
 
