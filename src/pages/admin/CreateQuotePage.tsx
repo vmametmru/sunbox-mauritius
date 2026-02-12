@@ -216,6 +216,9 @@ export default function CreateQuotePage() {
   const [modelBOQPrice, setModelBOQPrice] = useState<number | null>(null);
   const [expandedOptionCategories, setExpandedOptionCategories] = useState<string[]>([]);
   const [lightbox, setLightbox] = useState<string | null>(null);
+  
+  // Counter to force model options reload (incremented when importing same model)
+  const [modelOptionsRefreshKey, setModelOptionsRefreshKey] = useState(0);
 
   // Pending option IDs to be selected after model options load (for import/edit/clone)
   const pendingOptionIdsRef = React.useRef<number[]>([]);
@@ -250,7 +253,7 @@ export default function CreateQuotePage() {
     if (selectedModelId && quoteMode === 'model') {
       loadModelOptions(selectedModelId);
     }
-  }, [selectedModelId, quoteMode]);
+  }, [selectedModelId, quoteMode, modelOptionsRefreshKey]);
 
   const loadInitialData = async () => {
     try {
@@ -497,18 +500,10 @@ export default function CreateQuotePage() {
           pendingOptionIdsRef.current = quote.options.map((o: any) => o.option_id).filter(Boolean);
         }
         
-        // Force reload of model options by temporarily clearing the model ID
-        // This ensures the useEffect triggers even if importing from the same model
-        const targetModelId = quote.model_id;
-        if (selectedModelId === targetModelId) {
-          setSelectedModelId(null);
-          // Use setTimeout to ensure state update happens before setting the model ID
-          setTimeout(() => {
-            setSelectedModelId(targetModelId);
-          }, 0);
-        } else {
-          setSelectedModelId(targetModelId);
-        }
+        // Set the model ID and force reload if it's the same model
+        // Using modelOptionsRefreshKey ensures the useEffect triggers even for same model
+        setSelectedModelId(quote.model_id);
+        setModelOptionsRefreshKey(prev => prev + 1);
       }
       
       toast({ title: 'Devis importé', description: `Les options du devis ${quote.reference_number} ont été importées` });
