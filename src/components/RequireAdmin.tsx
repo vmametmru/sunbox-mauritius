@@ -6,6 +6,9 @@ type MeResponse = {
   data?: { is_admin?: boolean };
 };
 
+// Allow admin access in development mode for testing
+const DEV_BYPASS_AUTH = import.meta.env.DEV;
+
 export default function RequireAdmin() {
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -13,6 +16,13 @@ export default function RequireAdmin() {
 
   useEffect(() => {
     (async () => {
+      // In development mode, bypass authentication for testing
+      if (DEV_BYPASS_AUTH) {
+        setIsAdmin(true);
+        setLoading(false);
+        return;
+      }
+      
       try {
         const r = await fetch("/api/auth.php?action=me", {
           method: "GET",

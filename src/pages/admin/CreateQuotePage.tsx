@@ -485,12 +485,29 @@ export default function CreateQuotePage() {
           })));
         }
       } else {
+        // For model-based quotes (WCQ), switch to model mode and load the model
         setQuoteMode('model');
-        setSelectedModelId(quote.model_id);
+        
+        // Clear current selected options before import
+        setSelectedOptions([]);
+        
         // Store option IDs to be selected after model options load
         // This ensures BOQ options (WCQ) are properly matched after their offset IDs are created
         if (quote.options) {
           pendingOptionIdsRef.current = quote.options.map((o: any) => o.option_id).filter(Boolean);
+        }
+        
+        // Force reload of model options by temporarily clearing the model ID
+        // This ensures the useEffect triggers even if importing from the same model
+        const targetModelId = quote.model_id;
+        if (selectedModelId === targetModelId) {
+          setSelectedModelId(null);
+          // Use setTimeout to ensure state update happens before setting the model ID
+          setTimeout(() => {
+            setSelectedModelId(targetModelId);
+          }, 0);
+        } else {
+          setSelectedModelId(targetModelId);
         }
       }
       
