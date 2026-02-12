@@ -12,7 +12,25 @@ $body   = getRequestBody();
 function fail(string $msg, int $code = 401): void { errorResponse($msg, $code); }
 function ok(array $data = []): void { successResponse($data); }
 
+/**
+ * Check if dev_mode_no_password is enabled in database settings
+ */
+function isDevModeNoPasswordEnabled(): bool {
+    try {
+        $db = getDB();
+        $stmt = $db->prepare("SELECT setting_value FROM settings WHERE setting_key = 'dev_mode_no_password' AND setting_group = 'site'");
+        $stmt->execute();
+        $row = $stmt->fetch();
+        return $row && strtolower((string)$row['setting_value']) === 'true';
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
 try {
+    // Check if dev mode no password is enabled (only effective if API_DEBUG is also true)
+    $devModeNoPassword = API_DEBUG && isDevModeNoPasswordEnabled();
+
     // 1) Lecture du hash depuis .env (format normal bcrypt: $2y$...)
     $adminHash = (string) env('ADMIN_PASSWORD_HASH', '');
     $adminHash = trim($adminHash);
@@ -34,13 +52,26 @@ try {
         }
     }
 
-    // 3) Validation
-    if ($adminHash === '' || strlen($adminHash) < 20 || strpos($adminHash, '$2') !== 0) {
+    // 3) Validation - always validate password hash is configured properly
+    // Even in dev mode, we require proper configuration
+    $hasValidAdminHash = $adminHash !== '' && strlen($adminHash) >= 20 && strpos($adminHash, '$2') === 0;
+    if (!$hasValidAdminHash) {
         fail("ADMIN_PASSWORD_HASH invalide côté serveur (.env).", 500);
     }
 
     switch ($action) {
         case 'login': {
+            // In dev mode, auto-login without password
+            if ($devModeNoPassword) {
+                session_regenerate_id(true);
+                $_SESSION['is_admin'] = true;
+                $_SESSION['admin_login_at'] = time();
+                $_SESSION['login_tries'] = 0;
+                $_SESSION['dev_mode_login'] = true;
+                ok(['is_admin' => true, 'dev_mode' => true]);
+                break;
+            }
+
             validateRequired($body, ['password']);
 
             $_SESSION['login_tries'] = $_SESSION['login_tries'] ?? 0;

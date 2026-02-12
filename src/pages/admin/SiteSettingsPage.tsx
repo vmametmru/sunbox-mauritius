@@ -16,6 +16,7 @@ interface SiteSettings {
   pdf_logo: string;
   site_slogan: string;
   vat_rate: string;
+  dev_mode_no_password: string;
 }
 
 const defaultValues: SiteSettings = {
@@ -25,6 +26,7 @@ const defaultValues: SiteSettings = {
   pdf_logo: "",
   site_slogan: "container home - swimming-pools",
   vat_rate: "15",
+  dev_mode_no_password: "false",
 };
 
 export default function SiteSettingsPage() {
@@ -57,6 +59,7 @@ export default function SiteSettingsPage() {
         { key: "pdf_logo", value: settings.pdf_logo, group: "site" },
         { key: "site_slogan", value: settings.site_slogan, group: "site" },
         { key: "vat_rate", value: settings.vat_rate, group: "site" },
+        { key: "dev_mode_no_password", value: settings.dev_mode_no_password, group: "site" },
       ]);
       toast({ title: "Succès", description: "Paramètres enregistrés." });
     } catch (err: any) {
@@ -132,6 +135,25 @@ export default function SiteSettingsPage() {
                     setSettings((prev) => ({
                       ...prev,
                       site_under_construction: v ? "true" : "false",
+                    }))
+                  }
+                />
+              </div>
+
+              {/* Dev Mode - No Password */}
+              <div className="flex items-center justify-between gap-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <div className="space-y-1">
+                  <Label className="text-base text-yellow-800">Mode développement (sans mot de passe)</Label>
+                  <p className="text-sm text-yellow-700">
+                    ⚠️ Désactive l'authentification admin. À utiliser uniquement en développement (API_DEBUG=true) pour permettre aux outils de développement de tester les pages admin.
+                  </p>
+                </div>
+                <Switch
+                  checked={settings.dev_mode_no_password === "true"}
+                  onCheckedChange={(v) =>
+                    setSettings((prev) => ({
+                      ...prev,
+                      dev_mode_no_password: v ? "true" : "false",
                     }))
                   }
                 />
