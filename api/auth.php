@@ -31,16 +31,6 @@ try {
     // Check if dev mode no password is enabled (only effective if API_DEBUG is also true)
     $devModeNoPassword = API_DEBUG && isDevModeNoPasswordEnabled();
 
-    // If dev mode is enabled and user is not already admin, auto-login
-    if ($devModeNoPassword && $action === 'me' && empty($_SESSION['is_admin'])) {
-        session_regenerate_id(true);
-        $_SESSION['is_admin'] = true;
-        $_SESSION['admin_login_at'] = time();
-        $_SESSION['dev_mode_login'] = true;
-        ok(['is_admin' => true, 'dev_mode' => true]);
-        exit;
-    }
-
     // 1) Lecture du hash depuis .env (format normal bcrypt: $2y$...)
     $adminHash = (string) env('ADMIN_PASSWORD_HASH', '');
     $adminHash = trim($adminHash);
@@ -63,9 +53,9 @@ try {
     }
 
     // 3) Validation - always validate password hash is configured properly
-    // Dev mode only allows bypassing the login check, not the configuration
+    // Even in dev mode, we require proper configuration
     $hasValidAdminHash = $adminHash !== '' && strlen($adminHash) >= 20 && strpos($adminHash, '$2') === 0;
-    if (!$devModeNoPassword && !$hasValidAdminHash) {
+    if (!$hasValidAdminHash) {
         fail("ADMIN_PASSWORD_HASH invalide côté serveur (.env).", 500);
     }
 
