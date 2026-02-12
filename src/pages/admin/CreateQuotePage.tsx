@@ -366,7 +366,10 @@ export default function CreateQuotePage() {
         }
       } else {
         setQuoteMode('model');
-        setSelectedModelId(quote.model_id);
+        // Ensure model_id is converted to number for consistent comparison
+        // Model IDs are positive integers, so 0 or negative values are invalid
+        const modelId = Number(quote.model_id);
+        setSelectedModelId(modelId > 0 ? modelId : null);
         // Store option IDs to be selected after model options load
         // This ensures BOQ options (WCQ) are properly matched after their offset IDs are created
         if (quote.options) {
@@ -417,7 +420,10 @@ export default function CreateQuotePage() {
         }
       } else {
         setQuoteMode('model');
-        setSelectedModelId(quote.model_id);
+        // Ensure model_id is converted to number for consistent comparison
+        // Model IDs are positive integers, so 0 or negative values are invalid
+        const modelId = Number(quote.model_id);
+        setSelectedModelId(modelId > 0 ? modelId : null);
         // Store option IDs to be selected after model options load
         // This ensures BOQ options (WCQ) are properly matched after their offset IDs are created
         if (quote.options) {
@@ -489,6 +495,19 @@ export default function CreateQuotePage() {
         }
       } else {
         // For model-based quotes (WCQ), switch to model mode and load the model
+        
+        // Validate model_id exists for model-based quotes
+        // Model IDs are positive integers, so 0, negative, or NaN values are invalid
+        const modelId = Number(quote.model_id);
+        if (isNaN(modelId) || modelId <= 0) {
+          toast({ 
+            title: 'Erreur', 
+            description: 'Le devis importé n\'a pas de modèle associé valide', 
+            variant: 'destructive' 
+          });
+          return;
+        }
+        
         setQuoteMode('model');
         
         // Clear current selected options before import
@@ -500,9 +519,9 @@ export default function CreateQuotePage() {
           pendingOptionIdsRef.current = quote.options.map((o: any) => o.option_id).filter(Boolean);
         }
         
-        // Set the model ID and force reload if it's the same model
+        // Set the model ID (ensure it's a number) and force reload if it's the same model
         // Using modelOptionsRefreshKey ensures the useEffect triggers even for same model
-        setSelectedModelId(quote.model_id);
+        setSelectedModelId(modelId);
         setModelOptionsRefreshKey(prev => prev + 1);
       }
       
