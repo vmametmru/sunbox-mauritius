@@ -20,6 +20,8 @@ import {
   Loader2,
   Upload,
   X,
+  AlertTriangle,
+  RefreshCw,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -131,6 +133,19 @@ interface BOQBaseCategory {
   lines: BOQLine[];
 }
 
+// Interface for pending options during import (stores both ID and name for BOQ option matching)
+interface PendingOption {
+  option_id: number | null;
+  option_name: string;
+  option_price: number;
+}
+
+// Interface for imported option prices (to show variance when current price differs)
+interface ImportedOptionPrice {
+  option_id: number;
+  imported_price: number;
+}
+
 interface ContactQuote {
   id: number;
   reference_number: string;
@@ -235,8 +250,12 @@ export default function CreateQuotePage() {
   // Counter to force model options reload (incremented when importing same model)
   const [modelOptionsRefreshKey, setModelOptionsRefreshKey] = useState(0);
 
-  // Pending option IDs to be selected after model options load (for import/edit/clone)
-  const pendingOptionIdsRef = React.useRef<number[]>([]);
+  // Pending options to be selected after model options load (for import/edit/clone)
+  // Stores name and price for matching BOQ options which have NULL option_id in database
+  const pendingOptionsRef = React.useRef<PendingOption[]>([]);
+  
+  // Imported option prices to show variance when current model price differs
+  const [importedOptionPrices, setImportedOptionPrices] = useState<ImportedOptionPrice[]>([]);
 
   // Free quote
   const [categories, setCategories] = useState<QuoteCategory[]>([]);
@@ -324,28 +343,59 @@ export default function CreateQuotePage() {
       
       // Apply pending options after model options are loaded
       // This handles import/edit/clone scenarios where options are set before model options load
-      if (pendingOptionIdsRef.current.length > 0) {
-        const allOptionIds = [
-          ...(options || []).map((o: Option) => o.id),
-          ...boqOptsWithLines.map(o => o.id),
-        ];
-        // Filter pending options to only include those that exist in the loaded options
-        const validPendingOptions = pendingOptionIdsRef.current.filter(id => allOptionIds.includes(id));
-        if (validPendingOptions.length > 0) {
+      if (pendingOptionsRef.current.length > 0) {
+        const matchedOptionIds: number[] = [];
+        const newImportedPrices: ImportedOptionPrice[] = [];
+        
+        for (const pending of pendingOptionsRef.current) {
+          // First try to match by ID for standard options
+          if (pending.option_id !== null) {
+            const standardOpt = (options || []).find((o: Option) => o.id === pending.option_id);
+            if (standardOpt) {
+              matchedOptionIds.push(standardOpt.id);
+              // Store imported price if different from current price
+              if (Math.abs(pending.option_price - standardOpt.price) > 0.01) {
+                newImportedPrices.push({
+                  option_id: standardOpt.id,
+                  imported_price: pending.option_price,
+                });
+              }
+              continue;
+            }
+          }
+          
+          // For BOQ options (option_id is NULL), match by name
+          const boqOpt = boqOptsWithLines.find(o => o.name === pending.option_name);
+          if (boqOpt) {
+            matchedOptionIds.push(boqOpt.id);
+            // Store imported price if different from current price
+            if (Math.abs(pending.option_price - boqOpt.total_sale_price_ht) > 0.01) {
+              newImportedPrices.push({
+                option_id: boqOpt.id,
+                imported_price: pending.option_price,
+              });
+            }
+          }
+        }
+        
+        if (matchedOptionIds.length > 0) {
           setSelectedOptions(prev => {
-            const newOptions = validPendingOptions.filter(id => !prev.includes(id));
+            const newOptions = matchedOptionIds.filter(id => !prev.includes(id));
             return [...prev, ...newOptions];
           });
+          
+          // Set imported prices for variance display
+          setImportedOptionPrices(newImportedPrices);
           
           // Expand selected BOQ options (they have IDs >= BOQ_OPTION_ID_OFFSET)
           // and close unselected ones for better user experience after import/edit/clone
           const selectedBOQOptionNames = boqOptsWithLines
-            .filter(opt => validPendingOptions.includes(opt.id))
+            .filter(opt => matchedOptionIds.includes(opt.id))
             .map(opt => opt.name);
           setExpandedOptionCategories(selectedBOQOptionNames);
         }
         // Clear pending options after applying
-        pendingOptionIdsRef.current = [];
+        pendingOptionsRef.current = [];
       }
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
@@ -388,10 +438,14 @@ export default function CreateQuotePage() {
         // Model IDs are positive integers, so 0 or negative values are invalid
         const modelId = Number(quote.model_id);
         setSelectedModelId(modelId > 0 ? modelId : null);
-        // Store option IDs to be selected after model options load
-        // This ensures BOQ options (WCQ) are properly matched after their offset IDs are created
+        // Store options to be selected after model options load
+        // This stores name and price for BOQ option matching (they have NULL option_id in database)
         if (quote.options) {
-          pendingOptionIdsRef.current = quote.options.map((o: any) => o.option_id).filter(Boolean);
+          pendingOptionsRef.current = quote.options.map((o: any) => ({
+            option_id: o.option_id ? Number(o.option_id) : null,
+            option_name: o.option_name || '',
+            option_price: Number(o.option_price) || 0,
+          }));
         }
       }
     } catch (err: any) {
@@ -442,10 +496,14 @@ export default function CreateQuotePage() {
         // Model IDs are positive integers, so 0 or negative values are invalid
         const modelId = Number(quote.model_id);
         setSelectedModelId(modelId > 0 ? modelId : null);
-        // Store option IDs to be selected after model options load
-        // This ensures BOQ options (WCQ) are properly matched after their offset IDs are created
+        // Store options to be selected after model options load
+        // This stores name and price for BOQ option matching (they have NULL option_id in database)
         if (quote.options) {
-          pendingOptionIdsRef.current = quote.options.map((o: any) => o.option_id).filter(Boolean);
+          pendingOptionsRef.current = quote.options.map((o: any) => ({
+            option_id: o.option_id ? Number(o.option_id) : null,
+            option_name: o.option_name || '',
+            option_price: Number(o.option_price) || 0,
+          }));
         }
       }
     } catch (err: any) {
@@ -527,13 +585,18 @@ export default function CreateQuotePage() {
           return;
         }
         
-        // Clear current selected options before import
+        // Clear current selected options and imported prices before import
         setSelectedOptions([]);
+        setImportedOptionPrices([]);
         
-        // Store option IDs to be selected after model options load
-        // This ensures BOQ options (WCQ) are properly matched after their offset IDs are created
+        // Store options to be selected after model options load
+        // This stores name and price for BOQ option matching (they have NULL option_id in database)
         if (quote.options) {
-          pendingOptionIdsRef.current = quote.options.map((o: any) => o.option_id).filter(Boolean);
+          pendingOptionsRef.current = quote.options.map((o: any) => ({
+            option_id: o.option_id ? Number(o.option_id) : null,
+            option_name: o.option_name || '',
+            option_price: Number(o.option_price) || 0,
+          }));
         }
         
         // Set the model ID (ensure it's a number) and force reload if it's the same model
@@ -647,6 +710,20 @@ export default function CreateQuotePage() {
     setExpandedOptionCategories(prev =>
       prev.includes(category) ? prev.filter(c => c !== category) : [...prev, category]
     );
+  };
+
+  // Get imported price variance for an option (returns null if no variance)
+  const getImportedPriceVariance = (optionId: number, currentPrice: number): { importedPrice: number; variance: number } | null => {
+    const imported = importedOptionPrices.find(p => p.option_id === optionId);
+    if (!imported) return null;
+    const variance = currentPrice - imported.imported_price;
+    if (Math.abs(variance) < 0.01) return null;
+    return { importedPrice: imported.imported_price, variance };
+  };
+
+  // Clear imported price variance when user acknowledges the change
+  const clearImportedPriceVariance = (optionId: number) => {
+    setImportedOptionPrices(prev => prev.filter(p => p.option_id !== optionId));
   };
 
   /* ======================================================
@@ -1047,7 +1124,7 @@ export default function CreateQuotePage() {
                     <Label>Photo (optionnel)</Label>
                     {photoUrl ? (
                       <div className="relative mt-2">
-                        <img src={photoUrl} alt="Photo" className="w-full h-24 object-cover rounded-lg" />
+                        <img src={photoUrl} alt="Photo" className="w-full h-48 object-cover rounded-lg" />
                         <Button
                           variant="destructive"
                           size="icon"
@@ -1093,7 +1170,7 @@ export default function CreateQuotePage() {
                     <Label>Plan (optionnel)</Label>
                     {planUrl ? (
                       <div className="relative mt-2">
-                        <img src={planUrl} alt="Plan" className="w-full h-24 object-cover rounded-lg" />
+                        <img src={planUrl} alt="Plan" className="w-full h-48 object-cover rounded-lg" />
                         <Button
                           variant="destructive"
                           size="icon"
@@ -1340,24 +1417,6 @@ export default function CreateQuotePage() {
                   </div>
                 </div>
 
-                {/* Custom Media URLs - Only for free quotes */}
-                {(photoUrl || planUrl) && (
-                  <div className="border-t pt-4 space-y-3">
-                    <h4 className="font-medium text-sm">Médias</h4>
-                    {photoUrl && (
-                      <div>
-                        <p className="text-xs text-gray-500 mb-1">Photo</p>
-                        <img src={photoUrl} alt="Photo" className="w-full h-24 object-cover rounded-lg" />
-                      </div>
-                    )}
-                    {planUrl && (
-                      <div>
-                        <p className="text-xs text-gray-500 mb-1">Plan</p>
-                        <img src={planUrl} alt="Plan" className="w-full h-24 object-cover rounded-lg" />
-                      </div>
-                    )}
-                  </div>
-                )}
 
                 {/* Import Existing Quote for Free Quotes - only show WFQ quotes */}
                 {selectedContactId && contactQuotes.filter(q => isFreeQuote(q.is_free_quote)).length > 0 && (
@@ -1665,28 +1724,63 @@ export default function CreateQuotePage() {
                         <div>
                           <h4 className="font-medium mb-2">Options Standard</h4>
                           <div className="space-y-2">
-                            {modelOptions.map(option => (
-                              <div
-                                key={option.id}
-                                className={`flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-colors ${
-                                  selectedOptions.includes(option.id)
-                                    ? 'border-orange-500 bg-orange-50'
-                                    : 'border-gray-200 hover:border-gray-300'
-                                }`}
-                                onClick={() => toggleOption(option.id)}
-                              >
-                                <div className="flex items-center gap-3">
-                                  <Switch checked={selectedOptions.includes(option.id)} />
-                                  <div>
-                                    <p className="font-medium">{option.name}</p>
-                                    {option.description && (
-                                      <p className="text-sm text-gray-500">{option.description}</p>
-                                    )}
+                            {modelOptions.map(option => {
+                              const priceVariance = getImportedPriceVariance(option.id, option.price);
+                              return (
+                                <div
+                                  key={option.id}
+                                  className={`p-3 rounded-lg border transition-colors ${
+                                    selectedOptions.includes(option.id)
+                                      ? 'border-orange-500 bg-orange-50'
+                                      : 'border-gray-200 hover:border-gray-300'
+                                  }`}
+                                >
+                                  <div
+                                    className="flex items-center justify-between cursor-pointer"
+                                    onClick={() => toggleOption(option.id)}
+                                  >
+                                    <div className="flex items-center gap-3">
+                                      <Switch checked={selectedOptions.includes(option.id)} />
+                                      <div>
+                                        <p className="font-medium">{option.name}</p>
+                                        {option.description && (
+                                          <p className="text-sm text-gray-500">{option.description}</p>
+                                        )}
+                                      </div>
+                                    </div>
+                                    <span className="font-semibold">{formatPrice(option.price)}</span>
                                   </div>
+                                  {/* Price variance display */}
+                                  {priceVariance && selectedOptions.includes(option.id) && (
+                                    <div className="mt-2 pt-2 border-t border-orange-200 flex items-center justify-between text-sm">
+                                      <div className="flex items-center gap-2 text-amber-600">
+                                        <AlertTriangle className="h-4 w-4" />
+                                        <span>
+                                          Prix importé: {formatPrice(priceVariance.importedPrice)}
+                                          {priceVariance.variance > 0 ? (
+                                            <span className="text-red-600 ml-1">(+{formatPrice(priceVariance.variance)})</span>
+                                          ) : (
+                                            <span className="text-green-600 ml-1">({formatPrice(priceVariance.variance)})</span>
+                                          )}
+                                        </span>
+                                      </div>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-7 text-xs"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          clearImportedPriceVariance(option.id);
+                                        }}
+                                      >
+                                        <RefreshCw className="h-3 w-3 mr-1" />
+                                        OK
+                                      </Button>
+                                    </div>
+                                  )}
                                 </div>
-                                <span className="font-semibold">{formatPrice(option.price)}</span>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         </div>
                       )}
@@ -1698,6 +1792,7 @@ export default function CreateQuotePage() {
                             {boqOptions.map(option => {
                               const isExpanded = expandedOptionCategories.includes(option.name);
                               const isOptionSelected = selectedOptions.includes(option.id);
+                              const priceVariance = getImportedPriceVariance(option.id, option.total_sale_price_ht);
                               return (
                                 <div
                                   key={option.id}
@@ -1727,6 +1822,35 @@ export default function CreateQuotePage() {
                                     </div>
                                     <span className="font-semibold text-orange-600">{formatPrice(option.total_sale_price_ht)}</span>
                                   </div>
+                                  
+                                  {/* Price variance display for BOQ options */}
+                                  {priceVariance && isOptionSelected && (
+                                    <div className="mx-3 mb-3 p-2 bg-amber-50 border border-amber-200 rounded flex items-center justify-between text-sm">
+                                      <div className="flex items-center gap-2 text-amber-600">
+                                        <AlertTriangle className="h-4 w-4" />
+                                        <span>
+                                          Prix importé: {formatPrice(priceVariance.importedPrice)}
+                                          {priceVariance.variance > 0 ? (
+                                            <span className="text-red-600 ml-1">(+{formatPrice(priceVariance.variance)})</span>
+                                          ) : (
+                                            <span className="text-green-600 ml-1">({formatPrice(priceVariance.variance)})</span>
+                                          )}
+                                        </span>
+                                      </div>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-7 text-xs"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          clearImportedPriceVariance(option.id);
+                                        }}
+                                      >
+                                        <RefreshCw className="h-3 w-3 mr-1" />
+                                        OK
+                                      </Button>
+                                    </div>
+                                  )}
                                   
                                   {/* Option Details (expanded) */}
                                   {isExpanded && (
