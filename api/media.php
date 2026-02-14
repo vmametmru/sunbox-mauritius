@@ -343,6 +343,21 @@ try {
       break;
     }
 
+    /* ---------- FREE QUOTE PHOTO UPLOAD ---------- */
+    case 'free_quote_upload': {
+      requireAdmin();
+      $mediaType = $_POST['media_type'] ?? 'photo';
+
+      if (!in_array($mediaType, ['photo','plan'], true)) {
+        $mediaType = 'photo';
+      }
+
+      $up = uploadOne('uploads/free-quotes', $ALLOWED_MIME, $MAX_BYTES);
+
+      ok(['file' => $up, 'url' => $up['url']]);
+      break;
+    }
+
     default:
       fail("Action invalide.", 400);
   }

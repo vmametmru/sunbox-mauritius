@@ -18,6 +18,8 @@ import {
   Download,
   CheckCircle,
   Loader2,
+  Upload,
+  X,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -188,10 +190,14 @@ export default function CreateQuotePage() {
   const { data: siteSettings } = useSiteSettings();
   const vatRate = Number(siteSettings?.vat_rate) || 15;
 
-  // Mode: 'free' for free-form quote, 'model' for model-based quote
-  const [quoteMode, setQuoteMode] = useState<'free' | 'model'>('free');
+  // Mode: 'free' for free-form quote, 'model' for model-based quote, 'pool' for pool quote (placeholder)
+  const [quoteMode, setQuoteMode] = useState<'free' | 'model' | 'pool'>('free');
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
+  
+  // Upload state for free quote photos
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [uploadingPlan, setUploadingPlan] = useState(false);
 
   // Edit mode
   const editQuoteId = searchParams.get('edit');
@@ -489,9 +495,10 @@ export default function CreateQuotePage() {
       setPhotoUrl(quote.photo_url || '');
       setPlanUrl(quote.plan_url || '');
       
-      if (isFreeQuote(quote.is_free_quote)) {
-        setQuoteMode('free');
-        // Load categories
+      // Import based on current mode, not quote type
+      // Quotes are already filtered by type in the UI, so we just import accordingly
+      if (quoteMode === 'free') {
+        // Importing into free quote mode - load categories
         if (quote.categories) {
           setCategories(quote.categories.map((c: any) => ({
             name: c.name,
@@ -506,7 +513,7 @@ export default function CreateQuotePage() {
           })));
         }
       } else {
-        // For model-based quotes (WCQ), switch to model mode and load the model
+        // For model-based quotes (WCQ), stay in model mode and load the model
         
         // Validate model_id exists for model-based quotes
         // Model IDs are positive integers, so 0, negative, or NaN values are invalid
@@ -519,8 +526,6 @@ export default function CreateQuotePage() {
           });
           return;
         }
-        
-        setQuoteMode('model');
         
         // Clear current selected options before import
         setSelectedOptions([]);
@@ -545,6 +550,35 @@ export default function CreateQuotePage() {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Upload handler for free quote photos
+  const handleFreeQuotePhotoUpload = async (file: File, type: 'photo' | 'plan') => {
+    try {
+      if (type === 'photo') {
+        setUploadingPhoto(true);
+      } else {
+        setUploadingPlan(true);
+      }
+      
+      const url = await api.uploadFreeQuotePhoto(file, type);
+      
+      if (type === 'photo') {
+        setPhotoUrl(url);
+      } else {
+        setPlanUrl(url);
+      }
+      
+      toast({ title: 'Photo téléchargée', description: 'La photo a été téléchargée avec succès' });
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      if (type === 'photo') {
+        setUploadingPhoto(false);
+      } else {
+        setUploadingPlan(false);
+      }
     }
   };
 
@@ -881,8 +915,8 @@ export default function CreateQuotePage() {
 
       {/* Quote Mode Selection (only for new quotes) */}
       {!isEditMode && !cloneQuoteId && (
-        <Tabs value={quoteMode} onValueChange={(v) => setQuoteMode(v as 'free' | 'model')}>
-          <TabsList className="grid w-full grid-cols-2 max-w-md">
+        <Tabs value={quoteMode} onValueChange={(v) => setQuoteMode(v as 'free' | 'model' | 'pool')}>
+          <TabsList className="grid w-full grid-cols-3 max-w-lg">
             <TabsTrigger value="free">
               <Calculator className="h-4 w-4 mr-2" />
               Devis Libre
@@ -891,8 +925,26 @@ export default function CreateQuotePage() {
               <FileText className="h-4 w-4 mr-2" />
               Depuis Modèle
             </TabsTrigger>
+            <TabsTrigger value="pool">
+              <ImageIcon className="h-4 w-4 mr-2" />
+              Devis Piscine
+            </TabsTrigger>
           </TabsList>
         </Tabs>
+      )}
+      
+      {/* POOL QUOTE MODE - Placeholder */}
+      {quoteMode === 'pool' && (
+        <div className="flex items-center justify-center py-24">
+          <Card className="max-w-md text-center p-8">
+            <CardContent className="pt-6">
+              <ImageIcon className="h-16 w-16 mx-auto mb-4 text-gray-300" />
+              <h3 className="text-xl font-semibold text-gray-700 mb-2">Devis Piscine</h3>
+              <p className="text-gray-500">Cette fonctionnalité est en cours de développement.</p>
+              <Badge variant="secondary" className="mt-4">En dev</Badge>
+            </CardContent>
+          </Card>
+        </div>
       )}
 
       {/* FREE QUOTE MODE - Original layout */}
@@ -992,22 +1044,96 @@ export default function CreateQuotePage() {
                     />
                   </div>
                   <div>
-                    <Label htmlFor="photoUrl">URL Photo (optionnel)</Label>
-                    <Input
-                      id="photoUrl"
-                      value={photoUrl}
-                      onChange={(e) => setPhotoUrl(e.target.value)}
-                      placeholder="https://..."
-                    />
+                    <Label>Photo (optionnel)</Label>
+                    {photoUrl ? (
+                      <div className="relative mt-2">
+                        <img src={photoUrl} alt="Photo" className="w-full h-24 object-cover rounded-lg" />
+                        <Button
+                          variant="destructive"
+                          size="icon"
+                          className="absolute -top-2 -right-2 h-6 w-6 rounded-full"
+                          onClick={() => setPhotoUrl('')}
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="mt-2">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          id="freeQuotePhotoUpload"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) handleFreeQuotePhotoUpload(file, 'photo');
+                            e.target.value = '';
+                          }}
+                        />
+                        <label htmlFor="freeQuotePhotoUpload">
+                          <Button
+                            variant="outline"
+                            className="w-full cursor-pointer"
+                            disabled={uploadingPhoto}
+                            asChild
+                          >
+                            <span>
+                              {uploadingPhoto ? (
+                                <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Chargement...</>
+                              ) : (
+                                <><Upload className="h-4 w-4 mr-2" /> Charger une photo</>
+                              )}
+                            </span>
+                          </Button>
+                        </label>
+                      </div>
+                    )}
                   </div>
                   <div>
-                    <Label htmlFor="planUrl">URL Plan (optionnel)</Label>
-                    <Input
-                      id="planUrl"
-                      value={planUrl}
-                      onChange={(e) => setPlanUrl(e.target.value)}
-                      placeholder="https://..."
-                    />
+                    <Label>Plan (optionnel)</Label>
+                    {planUrl ? (
+                      <div className="relative mt-2">
+                        <img src={planUrl} alt="Plan" className="w-full h-24 object-cover rounded-lg" />
+                        <Button
+                          variant="destructive"
+                          size="icon"
+                          className="absolute -top-2 -right-2 h-6 w-6 rounded-full"
+                          onClick={() => setPlanUrl('')}
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="mt-2">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          id="freeQuotePlanUpload"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) handleFreeQuotePhotoUpload(file, 'plan');
+                            e.target.value = '';
+                          }}
+                        />
+                        <label htmlFor="freeQuotePlanUpload">
+                          <Button
+                            variant="outline"
+                            className="w-full cursor-pointer"
+                            disabled={uploadingPlan}
+                            asChild
+                          >
+                            <span>
+                              {uploadingPlan ? (
+                                <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Chargement...</>
+                              ) : (
+                                <><Upload className="h-4 w-4 mr-2" /> Charger un plan</>
+                              )}
+                            </span>
+                          </Button>
+                        </label>
+                      </div>
+                    )}
                   </div>
                 </div>
               </CardContent>
@@ -1228,6 +1354,49 @@ export default function CreateQuotePage() {
                       <div>
                         <p className="text-xs text-gray-500 mb-1">Plan</p>
                         <img src={planUrl} alt="Plan" className="w-full h-24 object-cover rounded-lg" />
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Import Existing Quote for Free Quotes - only show WFQ quotes */}
+                {selectedContactId && contactQuotes.filter(q => isFreeQuote(q.is_free_quote)).length > 0 && (
+                  <div className="border-t pt-4 space-y-3">
+                    <h4 className="font-medium text-sm flex items-center gap-2">
+                      <Download className="h-4 w-4" />
+                      Importer un devis existant
+                    </h4>
+                    <p className="text-xs text-gray-500">
+                      Importer les données d'un devis libre existant de ce client
+                    </p>
+                    {loadingContactQuotes ? (
+                      <div className="text-center py-2">
+                        <Loader2 className="h-4 w-4 animate-spin text-orange-500 mx-auto" />
+                      </div>
+                    ) : (
+                      <div className="space-y-2 max-h-48 overflow-y-auto">
+                        {contactQuotes.filter(q => isFreeQuote(q.is_free_quote)).map(quote => (
+                          <div
+                            key={quote.id}
+                            className="flex items-center justify-between p-2 border rounded-lg hover:bg-gray-50 transition-colors text-sm"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium truncate">{quote.reference_number}</p>
+                              <p className="text-xs text-gray-500 truncate">
+                                {quote.quote_title || 'Devis libre'} - {formatPrice(quote.total_price)}
+                              </p>
+                            </div>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => importExistingQuote(quote.id)}
+                              className="ml-2 text-orange-600 hover:text-orange-700 hover:bg-orange-50 h-7 text-xs"
+                            >
+                              <Download className="h-3 w-3 mr-1" />
+                              Importer
+                            </Button>
+                          </div>
+                        ))}
                       </div>
                     )}
                   </div>

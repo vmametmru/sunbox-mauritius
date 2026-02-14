@@ -594,6 +594,23 @@ export const api = {
     return result.data?.url || result.url;
   },
 
+  async uploadFreeQuotePhoto(file: File, mediaType: 'photo' | 'plan') {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('media_type', mediaType);
+    
+    const response = await fetch(`${API_BASE_URL}/media.php?action=free_quote_upload`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    const result = await response.json();
+    if (!response.ok || result.error) {
+      throw new Error(result.error || 'Failed to upload photo');
+    }
+    return result.data?.url || result.url;
+  },
+
   /* =====================================================
      DEVELOPMENT IDEAS
   ===================================================== */
