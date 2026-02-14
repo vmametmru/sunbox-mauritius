@@ -354,13 +354,11 @@ export default function CreateQuotePage() {
             const standardOpt = (options || []).find((o: Option) => o.id === pending.option_id);
             if (standardOpt) {
               matchedOptionIds.push(standardOpt.id);
-              // Store imported price if different from current price
-              if (Math.abs(pending.option_price - standardOpt.price) > 0.01) {
-                newImportedPrices.push({
-                  option_id: standardOpt.id,
-                  imported_price: pending.option_price,
-                });
-              }
+              // Always store imported price to show it as the main price
+              newImportedPrices.push({
+                option_id: standardOpt.id,
+                imported_price: pending.option_price,
+              });
               continue;
             }
           }
@@ -369,13 +367,11 @@ export default function CreateQuotePage() {
           const boqOpt = boqOptsWithLines.find(o => o.name === pending.option_name);
           if (boqOpt) {
             matchedOptionIds.push(boqOpt.id);
-            // Store imported price if different from current price
-            if (Math.abs(pending.option_price - boqOpt.total_sale_price_ht) > 0.01) {
-              newImportedPrices.push({
-                option_id: boqOpt.id,
-                imported_price: pending.option_price,
-              });
-            }
+            // Always store imported price to show it as the main price
+            newImportedPrices.push({
+              option_id: boqOpt.id,
+              imported_price: pending.option_price,
+            });
           }
         }
         
@@ -385,7 +381,7 @@ export default function CreateQuotePage() {
             return [...prev, ...newOptions];
           });
           
-          // Set imported prices for variance display
+          // Set imported prices - these will be displayed as main price with BOQ price as reference
           setImportedOptionPrices(newImportedPrices);
           
           // Expand selected BOQ options (they have IDs >= BOQ_OPTION_ID_OFFSET)
@@ -730,18 +726,64 @@ export default function CreateQuotePage() {
     );
   };
 
-  // Get imported price variance for an option (returns null if no variance)
-  const getImportedPriceVariance = (optionId: number, currentPrice: number): { importedPrice: number; variance: number } | null => {
+  // Get imported price for an option (returns null if no imported price)
+  const getImportedPrice = (optionId: number): number | null => {
     const imported = importedOptionPrices.find(p => p.option_id === optionId);
-    if (!imported) return null;
-    const variance = currentPrice - imported.imported_price;
-    if (Math.abs(variance) < 0.01) return null;
-    return { importedPrice: imported.imported_price, variance };
+    return imported ? imported.imported_price : null;
   };
 
-  // Clear imported price variance when user acknowledges the change
-  const clearImportedPriceVariance = (optionId: number) => {
+  // Get price info for an option - returns imported price as main if available, otherwise current BOQ price
+  // Also returns variance if imported price differs from current BOQ price
+  const getOptionPriceInfo = (optionId: number, currentBOQPrice: number): { 
+    displayPrice: number; 
+    boqPrice: number; 
+    hasVariance: boolean; 
+    variance: number;
+    isImported: boolean;
+  } => {
+    const importedPrice = getImportedPrice(optionId);
+    if (importedPrice !== null) {
+      const variance = currentBOQPrice - importedPrice;
+      return {
+        displayPrice: importedPrice,
+        boqPrice: currentBOQPrice,
+        hasVariance: Math.abs(variance) > 0.01,
+        variance,
+        isImported: true,
+      };
+    }
+    return {
+      displayPrice: currentBOQPrice,
+      boqPrice: currentBOQPrice,
+      hasVariance: false,
+      variance: 0,
+      isImported: false,
+    };
+  };
+
+  // Update option to use current BOQ price (clears imported price)
+  const updateOptionToCurrentPrice = (optionId: number) => {
     setImportedOptionPrices(prev => prev.filter(p => p.option_id !== optionId));
+    toast({ title: 'Prix mis à jour', description: 'Le prix a été mis à jour avec le prix BOQ actuel' });
+  };
+
+  // Update all options to use current BOQ prices
+  const updateAllOptionsToCurrentPrices = () => {
+    setImportedOptionPrices([]);
+    toast({ title: 'Prix mis à jour', description: 'Tous les prix ont été mis à jour avec les prix BOQ actuels' });
+  };
+
+  // Check if any selected options have price variance
+  const hasAnyPriceVariance = (): boolean => {
+    return selectedOptions.some(optId => {
+      const imported = importedOptionPrices.find(p => p.option_id === optId);
+      if (!imported) return false;
+      // Get current BOQ price
+      const boqOpt = boqOptions.find(o => o.id === optId);
+      const standardOpt = modelOptions.find(o => o.id === optId);
+      const currentPrice = boqOpt?.total_sale_price_ht ?? standardOpt?.price ?? 0;
+      return Math.abs(currentPrice - imported.imported_price) > 0.01;
+    });
   };
 
   /* ======================================================
@@ -775,18 +817,23 @@ export default function CreateQuotePage() {
   // Use BOQ calculated price if available, otherwise fallback to model's calculated_base_price or base_price
   const modelBasePrice = modelBOQPrice !== null ? modelBOQPrice : (selectedModel?.calculated_base_price ?? selectedModel?.base_price ?? 0);
   
+  // Calculate options totals using imported prices when available
   const selectedModelOptionsTotal = selectedOptions
     .filter(id => id < BOQ_OPTION_ID_OFFSET)
     .reduce((sum, id) => {
       const opt = modelOptions.find(o => o.id === id);
-      return sum + (opt?.price || 0);
+      const importedPrice = getImportedPrice(id);
+      // Use imported price if available, otherwise current BOQ price
+      return sum + (importedPrice !== null ? importedPrice : (opt?.price || 0));
     }, 0);
   
   const selectedBOQOptionsTotal = selectedOptions
     .filter(id => id >= BOQ_OPTION_ID_OFFSET)
     .reduce((sum, id) => {
       const opt = boqOptions.find(o => o.id === id);
-      return sum + (opt?.total_sale_price_ht || 0);
+      const importedPrice = getImportedPrice(id);
+      // Use imported price if available, otherwise current BOQ price
+      return sum + (importedPrice !== null ? importedPrice : (opt?.total_sale_price_ht || 0));
     }, 0);
   
   const modelOptionsTotal = selectedModelOptionsTotal + selectedBOQOptionsTotal;
@@ -1757,7 +1804,21 @@ export default function CreateQuotePage() {
                 {(modelOptions.length > 0 || boqOptions.length > 0) && (
                   <Card>
                     <CardHeader>
-                      <CardTitle>Options Disponibles</CardTitle>
+                      <div className="flex items-center justify-between">
+                        <CardTitle>Options Disponibles</CardTitle>
+                        {/* Update all prices button - only shown if there are price variances */}
+                        {hasAnyPriceVariance() && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+                            onClick={updateAllOptionsToCurrentPrices}
+                          >
+                            <RefreshCw className="h-4 w-4 mr-2" />
+                            Mettre tous les prix à jour
+                          </Button>
+                        )}
+                      </div>
                     </CardHeader>
                     <CardContent className="space-y-4">
                       {/* Standard Options */}
@@ -1766,7 +1827,7 @@ export default function CreateQuotePage() {
                           <h4 className="font-medium mb-2">Options Standard</h4>
                           <div className="space-y-2">
                             {modelOptions.map(option => {
-                              const priceVariance = getImportedPriceVariance(option.id, option.price);
+                              const priceInfo = getOptionPriceInfo(option.id, option.price);
                               return (
                                 <div
                                   key={option.id}
@@ -1789,33 +1850,33 @@ export default function CreateQuotePage() {
                                         )}
                                       </div>
                                     </div>
-                                    <span className="font-semibold">{formatPrice(option.price)}</span>
+                                    <span className="font-semibold">{formatPrice(priceInfo.displayPrice)}</span>
                                   </div>
-                                  {/* Price variance display */}
-                                  {priceVariance && selectedOptions.includes(option.id) && (
+                                  {/* Price variance display - shows BOQ price as reference when imported price differs */}
+                                  {priceInfo.hasVariance && selectedOptions.includes(option.id) && (
                                     <div className="mt-2 pt-2 border-t border-orange-200 flex items-center justify-between text-sm">
                                       <div className="flex items-center gap-2 text-amber-600">
                                         <AlertTriangle className="h-4 w-4" />
                                         <span>
-                                          Prix importé: {formatPrice(priceVariance.importedPrice)}
-                                          {priceVariance.variance > 0 ? (
-                                            <span className="text-red-600 ml-1">(+{formatPrice(priceVariance.variance)})</span>
+                                          Prix BOQ actuel: {formatPrice(priceInfo.boqPrice)}
+                                          {priceInfo.variance > 0 ? (
+                                            <span className="text-red-600 ml-1">(+{formatPrice(priceInfo.variance)})</span>
                                           ) : (
-                                            <span className="text-green-600 ml-1">({formatPrice(priceVariance.variance)})</span>
+                                            <span className="text-green-600 ml-1">({formatPrice(priceInfo.variance)})</span>
                                           )}
                                         </span>
                                       </div>
                                       <Button
                                         size="sm"
                                         variant="outline"
-                                        className="h-7 text-xs"
+                                        className="h-7 text-xs text-amber-600 hover:text-amber-700"
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          clearImportedPriceVariance(option.id);
+                                          updateOptionToCurrentPrice(option.id);
                                         }}
                                       >
                                         <RefreshCw className="h-3 w-3 mr-1" />
-                                        OK
+                                        Mettre à jour
                                       </Button>
                                     </div>
                                   )}
@@ -1833,7 +1894,7 @@ export default function CreateQuotePage() {
                             {boqOptions.map(option => {
                               const isExpanded = expandedOptionCategories.includes(option.name);
                               const isOptionSelected = selectedOptions.includes(option.id);
-                              const priceVariance = getImportedPriceVariance(option.id, option.total_sale_price_ht);
+                              const priceInfo = getOptionPriceInfo(option.id, option.total_sale_price_ht);
                               return (
                                 <div
                                   key={option.id}
@@ -1861,34 +1922,34 @@ export default function CreateQuotePage() {
                                         </Badge>
                                       )}
                                     </div>
-                                    <span className="font-semibold text-orange-600">{formatPrice(option.total_sale_price_ht)}</span>
+                                    <span className="font-semibold text-orange-600">{formatPrice(priceInfo.displayPrice)}</span>
                                   </div>
                                   
-                                  {/* Price variance display for BOQ options */}
-                                  {priceVariance && isOptionSelected && (
+                                  {/* Price variance display for BOQ options - shows BOQ price as reference */}
+                                  {priceInfo.hasVariance && isOptionSelected && (
                                     <div className="mx-3 mb-3 p-2 bg-amber-50 border border-amber-200 rounded flex items-center justify-between text-sm">
                                       <div className="flex items-center gap-2 text-amber-600">
                                         <AlertTriangle className="h-4 w-4" />
                                         <span>
-                                          Prix importé: {formatPrice(priceVariance.importedPrice)}
-                                          {priceVariance.variance > 0 ? (
-                                            <span className="text-red-600 ml-1">(+{formatPrice(priceVariance.variance)})</span>
+                                          Prix BOQ actuel: {formatPrice(priceInfo.boqPrice)}
+                                          {priceInfo.variance > 0 ? (
+                                            <span className="text-red-600 ml-1">(+{formatPrice(priceInfo.variance)})</span>
                                           ) : (
-                                            <span className="text-green-600 ml-1">({formatPrice(priceVariance.variance)})</span>
+                                            <span className="text-green-600 ml-1">({formatPrice(priceInfo.variance)})</span>
                                           )}
                                         </span>
                                       </div>
                                       <Button
                                         size="sm"
                                         variant="outline"
-                                        className="h-7 text-xs"
+                                        className="h-7 text-xs text-amber-600 hover:text-amber-700"
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          clearImportedPriceVariance(option.id);
+                                          updateOptionToCurrentPrice(option.id);
                                         }}
                                       >
                                         <RefreshCw className="h-3 w-3 mr-1" />
-                                        OK
+                                        Mettre à jour
                                       </Button>
                                     </div>
                                   )}
