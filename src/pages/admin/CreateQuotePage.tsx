@@ -910,19 +910,21 @@ export default function CreateQuotePage() {
           updateData.options_total = modelOptionsTotal;
           updateData.total_price = modelTotalPrice;
           updateData.selected_options = selectedOptions.map(id => {
+            // Use imported price if available, otherwise current BOQ price
+            const importedPrice = getImportedPrice(id);
             if (id >= BOQ_OPTION_ID_OFFSET) {
               const opt = boqOptions.find(o => o.id === id);
               return {
                 option_id: id,
                 option_name: opt?.name || '',
-                option_price: opt?.total_sale_price_ht || 0,
+                option_price: importedPrice !== null ? importedPrice : (opt?.total_sale_price_ht || 0),
               };
             } else {
               const opt = modelOptions.find(o => o.id === id);
               return {
                 option_id: id,
                 option_name: opt?.name || '',
-                option_price: opt?.price || 0,
+                option_price: importedPrice !== null ? importedPrice : (opt?.price || 0),
               };
             }
           });
@@ -969,19 +971,21 @@ export default function CreateQuotePage() {
           quoteData.options_total = modelOptionsTotal;
           quoteData.total_price = modelTotalPrice;
           quoteData.selected_options = selectedOptions.map(id => {
+            // Use imported price if available, otherwise current BOQ price
+            const importedPrice = getImportedPrice(id);
             if (id >= BOQ_OPTION_ID_OFFSET) {
               const opt = boqOptions.find(o => o.id === id);
               return {
                 option_id: id,
                 option_name: opt?.name || '',
-                option_price: opt?.total_sale_price_ht || 0,
+                option_price: importedPrice !== null ? importedPrice : (opt?.total_sale_price_ht || 0),
               };
             } else {
               const opt = modelOptions.find(o => o.id === id);
               return {
                 option_id: id,
                 option_name: opt?.name || '',
-                option_price: opt?.price || 0,
+                option_price: importedPrice !== null ? importedPrice : (opt?.price || 0),
               };
             }
           });
