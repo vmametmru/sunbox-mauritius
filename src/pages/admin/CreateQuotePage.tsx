@@ -22,6 +22,7 @@ import {
   X,
   AlertTriangle,
   RefreshCw,
+  Eraser,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -654,7 +655,7 @@ export default function CreateQuotePage() {
      CATEGORIES & LINES (FREE QUOTE)
   ====================================================== */
   const addCategory = () => {
-    setCategories([...categories, { ...emptyCategory, name: `Catégorie ${categories.length + 1}` }]);
+    setCategories([...categories, { name: `Catégorie ${categories.length + 1}`, lines: [], expanded: true }]);
   };
 
   const updateCategory = (index: number, updates: Partial<QuoteCategory>) => {
@@ -693,6 +694,23 @@ export default function CreateQuotePage() {
     const newCategories = [...categories];
     newCategories[categoryIndex].lines = newCategories[categoryIndex].lines.filter((_, i) => i !== lineIndex);
     setCategories(newCategories);
+  };
+
+  // Clear all data in free quote mode
+  const clearFreeQuote = () => {
+    if (!confirm('Effacer toutes les données du devis libre ?')) return;
+    setCategories([]);
+    setQuoteTitle('');
+    setMarginPercent(30);
+    setPhotoUrl('');
+    setPlanUrl('');
+    setCustomerName('');
+    setCustomerEmail('');
+    setCustomerPhone('');
+    setCustomerAddress('');
+    setCustomerMessage('');
+    setSelectedContactId(null);
+    toast({ title: 'Données effacées', description: 'Le devis libre a été réinitialisé' });
   };
 
   /* ======================================================
@@ -1460,6 +1478,29 @@ export default function CreateQuotePage() {
                     )}
                   </div>
                 )}
+
+                {/* Action Buttons for Free Quote */}
+                <div className="border-t pt-4 space-y-2">
+                  <Button 
+                    onClick={saveQuote} 
+                    disabled={saving} 
+                    className="w-full bg-orange-500 hover:bg-orange-600"
+                  >
+                    {saving ? (
+                      <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Enregistrement...</>
+                    ) : (
+                      <><Save className="h-4 w-4 mr-2" /> {isEditMode ? 'Mettre à jour' : 'Créer le devis'}</>
+                    )}
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    className="w-full text-red-600 hover:text-red-700 hover:bg-red-50"
+                    onClick={clearFreeQuote}
+                  >
+                    <Eraser className="h-4 w-4 mr-2" />
+                    Effacer tout
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           </div>
