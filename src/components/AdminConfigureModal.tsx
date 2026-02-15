@@ -600,21 +600,9 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
     onClose();
   };
 
-  // Only show loading state when dialog is open and model is not yet loaded
-  if (open && !model && !loading) {
-    return (
-      <Dialog open={open} onOpenChange={handleClose}>
-        <DialogContent className="max-w-md">
-          <VisuallyHidden>
-            <DialogTitle>Chargement</DialogTitle>
-            <DialogDescription>Chargement du devis en cours</DialogDescription>
-          </VisuallyHidden>
-          <div className="text-center py-8 text-gray-500">
-            Chargement du devis...
-          </div>
-        </DialogContent>
-      </Dialog>
-    );
+  // Don't render anything if dialog should be closed or model is not loaded yet
+  if (!open || (!model && !loading)) {
+    return null;
   }
 
   return (
