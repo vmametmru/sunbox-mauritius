@@ -21,13 +21,14 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import AdminConfigureModal from '@/components/AdminConfigureModal';
 import { useSiteSettings, calculateTTC } from '@/hooks/use-site-settings';
+import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
 
 export default function QuotesPage() {
   const [quotes, setQuotes] = useState<any[]>([]);
@@ -455,6 +456,9 @@ export default function QuotesPage() {
               Détails du Devis
             </DialogTitle>
           </DialogHeader>
+          <VisuallyHidden>
+            <DialogDescription>Détails complets du devis sélectionné</DialogDescription>
+          </VisuallyHidden>
           
           {detailsLoading ? (
             <div className="flex items-center justify-center py-12">
