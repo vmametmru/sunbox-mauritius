@@ -448,6 +448,16 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
   const isSelected = (id: number) => selectedOptions.some(o => o.id === id);
 
   // Calculations - use imported prices when available
+  // Note: opt.price is stored in HT, model.base_price is stored in TTC (calculated at load time)
+  
+  const calculateOptionsTotalHT = () => {
+    return selectedOptions.reduce((sum, opt) => {
+      const importedPrice = getImportedPrice(opt.id);
+      const priceToUse = importedPrice !== null ? importedPrice : Number(opt.price || 0);
+      return sum + priceToUse;
+    }, 0);
+  };
+  
   const calculateOptionsTotalTTC = () => {
     return selectedOptions.reduce((sum, opt) => {
       const importedPrice = getImportedPrice(opt.id);
@@ -455,10 +465,17 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
       return sum + calculateTTC(priceToUse, vatRate);
     }, 0);
   };
+  
+  // Get base price HT (reverse TTC to HT)
+  const basePriceHT = Number(model?.base_price ?? 0) / (1 + vatRate / 100);
+  const basePriceTTC = Number(model?.base_price ?? 0);
+  
+  const calculateTotalHT = () => {
+    return basePriceHT + calculateOptionsTotalHT();
+  };
 
   const calculateTotalTTC = () => {
-    const base = Number(model?.base_price ?? 0);
-    return base + calculateOptionsTotalTTC();
+    return basePriceTTC + calculateOptionsTotalTTC();
   };
 
   // Contact selection
@@ -726,9 +743,21 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
                 {/* Total */}
                 <div className="bg-gray-50 rounded-lg p-4 space-y-2">
                   <div className="flex justify-between items-center">
+                    <p className="text-sm text-gray-500">Prix de base HT</p>
+                    <p className="text-sm font-medium text-gray-700">
+                      Rs {Math.round(basePriceHT).toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="flex justify-between items-center">
                     <p className="text-sm text-gray-500">Prix de base TTC</p>
                     <p className="text-sm font-medium text-gray-700">
-                      Rs {Number(model.base_price ?? 0).toLocaleString()}
+                      Rs {basePriceTTC.toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <p className="text-sm text-gray-500">Total options HT</p>
+                    <p className="text-sm font-medium text-gray-700">
+                      Rs {Math.round(calculateOptionsTotalHT()).toLocaleString()}
                     </p>
                   </div>
                   <div className="flex justify-between items-center">
@@ -738,8 +767,14 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
                     </p>
                   </div>
                   <div className="flex justify-between items-center pt-2 border-t border-gray-200">
+                    <p className="text-sm text-gray-500">Total général HT</p>
+                    <p className="text-lg font-bold text-gray-700">
+                      Rs {Math.round(calculateTotalHT()).toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="flex justify-between items-center">
                     <p className="text-sm text-gray-500">Total général TTC</p>
-                    <p className="text-xl font-bold text-gray-800">
+                    <p className="text-xl font-bold text-orange-600">
                       Rs {calculateTotalTTC().toLocaleString()}
                     </p>
                   </div>
@@ -796,8 +831,11 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
                                             {opt.description}
                                           </p>
                                         )}
-                                        <p className={`text-sm text-orange-600 font-medium ${opt.description ? 'mt-2' : 'mt-1'}`}>
-                                          Rs {calculateTTC(priceInfo.displayPrice, vatRate).toLocaleString()}
+                                        <p className={`text-sm text-gray-500 ${opt.description ? 'mt-2' : 'mt-1'}`}>
+                                          HT: Rs {Math.round(priceInfo.displayPrice).toLocaleString()}
+                                        </p>
+                                        <p className="text-sm text-orange-600 font-medium">
+                                          TTC: Rs {calculateTTC(priceInfo.displayPrice, vatRate).toLocaleString()}
                                         </p>
                                       </div>
                                       <Switch
@@ -1005,16 +1043,30 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
                     <span className="font-medium">{model.name}</span>
                   </div>
                   <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-600">Prix de base HT</span>
+                    <span className="font-medium">Rs {Math.round(basePriceHT).toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm">
                     <span className="text-gray-600">Prix de base TTC</span>
-                    <span className="font-medium">Rs {Number(model.base_price ?? 0).toLocaleString()}</span>
+                    <span className="font-medium">Rs {basePriceTTC.toLocaleString()}</span>
                   </div>
                   {selectedOptions.length > 0 && (
-                    <div className="flex justify-between items-center text-sm">
-                      <span className="text-gray-600">Options ({selectedOptions.length})</span>
-                      <span className="font-medium">Rs {calculateOptionsTotalTTC().toLocaleString()}</span>
-                    </div>
+                    <>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-gray-600">Options HT ({selectedOptions.length})</span>
+                        <span className="font-medium">Rs {Math.round(calculateOptionsTotalHT()).toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-gray-600">Options TTC ({selectedOptions.length})</span>
+                        <span className="font-medium">Rs {calculateOptionsTotalTTC().toLocaleString()}</span>
+                      </div>
+                    </>
                   )}
                   <div className="flex justify-between items-center pt-2 border-t border-gray-200">
+                    <span className="font-semibold">Total HT</span>
+                    <span className="text-lg font-bold text-gray-700">Rs {Math.round(calculateTotalHT()).toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
                     <span className="font-semibold">Total TTC</span>
                     <span className="text-xl font-bold text-orange-600">Rs {calculateTotalTTC().toLocaleString()}</span>
                   </div>
@@ -1075,6 +1127,10 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
                     <div className="flex justify-between">
                       <span className="text-gray-600">Modèle</span>
                       <span className="font-medium">{model.name}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Total HT</span>
+                      <span className="font-bold text-gray-700">Rs {Math.round(calculateTotalHT()).toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">Total TTC</span>
