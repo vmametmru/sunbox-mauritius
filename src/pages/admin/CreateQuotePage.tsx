@@ -434,7 +434,11 @@ export default function CreateQuotePage() {
         // Ensure model_id is converted to number for consistent comparison
         // Model IDs are positive integers, so 0 or negative values are invalid
         const modelId = Number(quote.model_id);
-        setSelectedModelId(modelId > 0 ? modelId : null);
+        
+        // Clear current selected options and imported prices before loading
+        setSelectedOptions([]);
+        setImportedOptionPrices([]);
+        
         // Store options to be selected after model options load
         // This stores name and price for BOQ option matching (they have NULL option_id in database)
         if (quote.options) {
@@ -444,6 +448,11 @@ export default function CreateQuotePage() {
             option_price: Number(o.option_price) || 0,
           }));
         }
+        
+        setSelectedModelId(modelId > 0 ? modelId : null);
+        
+        // Navigate to options step for model-based quotes in edit mode
+        setModelStep('options');
       }
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
@@ -492,7 +501,11 @@ export default function CreateQuotePage() {
         // Ensure model_id is converted to number for consistent comparison
         // Model IDs are positive integers, so 0 or negative values are invalid
         const modelId = Number(quote.model_id);
-        setSelectedModelId(modelId > 0 ? modelId : null);
+        
+        // Clear current selected options and imported prices before loading
+        setSelectedOptions([]);
+        setImportedOptionPrices([]);
+        
         // Store options to be selected after model options load
         // This stores name and price for BOQ option matching (they have NULL option_id in database)
         if (quote.options) {
@@ -502,6 +515,11 @@ export default function CreateQuotePage() {
             option_price: Number(o.option_price) || 0,
           }));
         }
+        
+        setSelectedModelId(modelId > 0 ? modelId : null);
+        
+        // Navigate to options step for model-based quotes in clone mode
+        setModelStep('options');
       }
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });

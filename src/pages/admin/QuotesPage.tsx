@@ -15,7 +15,6 @@ import {
   Plus,
   Copy,
   Edit,
-  Calculator,
   Settings
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
@@ -371,15 +370,7 @@ export default function QuotesPage() {
                 {filteredQuotes.map((quote) => (
                   <tr key={quote.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-sm text-blue-600">{quote.reference_number}</span>
-                        {isFreeQuote(quote) && (
-                          <Badge variant="outline" className="text-xs">
-                            <Calculator className="h-3 w-3 mr-1" />
-                            Libre
-                          </Badge>
-                        )}
-                      </div>
+                      <span className="font-mono text-sm text-blue-600">{quote.reference_number}</span>
                     </td>
                     <td className="px-6 py-4">
                       <div>
