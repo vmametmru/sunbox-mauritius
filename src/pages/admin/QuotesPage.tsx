@@ -27,6 +27,7 @@ import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import AdminConfigureModal from '@/components/AdminConfigureModal';
+import { useSiteSettings, calculateTTC } from '@/hooks/use-site-settings';
 
 export default function QuotesPage() {
   const [quotes, setQuotes] = useState<any[]>([]);
@@ -45,6 +46,10 @@ export default function QuotesPage() {
   const { toast } = useToast();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  
+  // Get VAT rate from site settings
+  const { data: siteSettings } = useSiteSettings();
+  const vatRate = Number(siteSettings?.vat_rate) || 15;
 
   useEffect(() => {
     loadQuotes();
@@ -530,9 +535,17 @@ export default function QuotesPage() {
                     <span className="text-gray-600">Options</span>
                     <span className="font-medium">{formatPrice(selectedQuote.options_total)}</span>
                   </div>
+                  <div className="flex justify-between p-3">
+                    <span className="font-bold">Total HT</span>
+                    <span className="font-bold text-lg">{formatPrice(selectedQuote.total_price)}</span>
+                  </div>
+                  <div className="flex justify-between p-3">
+                    <span className="text-gray-600">TVA ({vatRate}%)</span>
+                    <span className="font-medium">{formatPrice(calculateTTC(selectedQuote.total_price, vatRate) - selectedQuote.total_price)}</span>
+                  </div>
                   <div className="flex justify-between p-3 bg-orange-50">
-                    <span className="font-bold">Total</span>
-                    <span className="font-bold text-orange-600 text-lg">{formatPrice(selectedQuote.total_price)}</span>
+                    <span className="font-bold">Total TTC</span>
+                    <span className="font-bold text-orange-600 text-lg">{formatPrice(calculateTTC(selectedQuote.total_price, vatRate))}</span>
                   </div>
                 </div>
               </div>
