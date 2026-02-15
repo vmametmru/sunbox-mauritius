@@ -583,7 +583,8 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
     onClose();
   };
 
-  if (!model && !loading) {
+  // Only show loading state when dialog is open and model is not yet loaded
+  if (open && !model && !loading) {
     return (
       <Dialog open={open} onOpenChange={handleClose}>
         <DialogContent className="max-w-md">
