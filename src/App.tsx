@@ -34,6 +34,8 @@ import SiteSettingsPage from "./pages/admin/SiteSettingsPage";
 import MediaPage from "./pages/admin/MediaPage";
 import SuppliersPage from "./pages/admin/SuppliersPage";
 import BOQPage from "./pages/admin/BOQPage";
+import PoolBOQVariablesPage from "./pages/admin/PoolBOQVariablesPage";
+import PoolBOQPriceListPage from "./pages/admin/PoolBOQPriceListPage";
 import DevIdeasPage from "./pages/admin/DevIdeasPage";
 
 const queryClient = new QueryClient();
@@ -69,6 +71,8 @@ const App = () => (
                   <Route path="models" element={<AdminModelsPage />} />
                   <Route path="media" element={<MediaPage />} />
                   <Route path="boq" element={<BOQPage />} />
+                  <Route path="pool-variables" element={<PoolBOQVariablesPage />} />
+                  <Route path="pool-prices" element={<PoolBOQPriceListPage />} />
                   <Route path="suppliers" element={<SuppliersPage />} />
                   <Route path="email" element={<EmailSettingsPage />} />
                   <Route path="site" element={<SiteSettingsPage />} />

@@ -15,6 +15,8 @@ import {
   Calculator,
   Building2,
   Lightbulb,
+  Waves,
+  DollarSign,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -30,6 +32,12 @@ const menuItems = [
 
   // ✅ NEW: BOQ Management
   { icon: Calculator, label: 'BOQ', path: '/admin/boq' },
+
+  // ✅ NEW: Pool BOQ Variables
+  { icon: Waves, label: 'Variables Piscine', path: '/admin/pool-variables' },
+
+  // ✅ NEW: Pool BOQ Price List
+  { icon: DollarSign, label: 'Prix Piscine', path: '/admin/pool-prices' },
 
   // ✅ NEW: Suppliers Management  
   { icon: Building2, label: 'Fournisseurs', path: '/admin/suppliers' },
