@@ -17,6 +17,7 @@ import {
   Lightbulb,
   Waves,
   DollarSign,
+  FileCode,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -38,6 +39,9 @@ const menuItems = [
 
   // ✅ NEW: Pool BOQ Price List
   { icon: DollarSign, label: 'Prix Piscine', path: '/admin/pool-prices' },
+
+  // ✅ NEW: Pool BOQ Template Viewer
+  { icon: FileCode, label: 'Modèle Piscine', path: '/admin/pool-template' },
 
   // ✅ NEW: Suppliers Management  
   { icon: Building2, label: 'Fournisseurs', path: '/admin/suppliers' },

@@ -435,7 +435,10 @@ export default function BOQPage() {
   ====================================================== */
   const generatePoolBOQ = async () => {
     if (!selectedModelId || !isPoolModel) return;
-    if (!confirm('Générer le BOQ piscine à partir du modèle par défaut ?\nCela va créer toutes les catégories, sous-catégories et lignes avec les formules et prix.')) return;
+    const confirmMessage = categories.length > 0
+      ? 'ATTENTION: Des catégories existent déjà pour ce modèle.\n\nGénérer le BOQ piscine va AJOUTER de nouvelles catégories, sous-catégories et lignes (cela créera des DOUBLONS si vous avez déjà généré le modèle).\n\nPour éviter les doublons, supprimez d\'abord toutes les catégories existantes.\n\nContinuer ?'
+      : 'Générer le BOQ piscine à partir du modèle par défaut ?\nCela va créer toutes les catégories, sous-catégories et lignes avec les formules et prix.';
+    if (!confirm(confirmMessage)) return;
     try {
       setSaving(true);
       const baseTemplate = getDefaultPoolBOQTemplate();
@@ -498,7 +501,12 @@ export default function BOQPage() {
         title: 'Succès',
         description: `BOQ piscine généré : ${createdCategories} catégories et ${createdLines} lignes créées`,
       });
-      loadCategories();
+      const loadedCategories = await api.getBOQCategories(selectedModelId);
+      setCategories(loadedCategories);
+      
+      // Auto-expand all top-level categories to show subcategories
+      const topCats = loadedCategories.filter((c: any) => !c.parent_id);
+      setExpandedCategories(topCats.map((c: any) => c.id));
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
     } finally {
@@ -699,7 +707,9 @@ export default function BOQPage() {
                 <Badge variant="secondary">Option</Badge>
               )}
               {hasSubCategories && (
-                <Badge variant="outline" className="text-xs">{subCategories.length} sous-cat.</Badge>
+                <Badge className="bg-blue-700 hover:bg-blue-800 text-white text-xs font-semibold">
+                  {subCategories.length} sous-catégorie{subCategories.length > 1 ? 's' : ''}
+                </Badge>
               )}
             </div>
             
@@ -838,7 +848,7 @@ export default function BOQPage() {
           <p className="text-gray-500 mt-1">Gestion des prix de base et options par modèle (TVA: {vatRate}%)</p>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
           <Select
             value={selectedModelId?.toString()}
             onValueChange={(v) => setSelectedModelId(Number(v))}
@@ -849,11 +859,18 @@ export default function BOQPage() {
             <SelectContent>
               {models.map(m => (
                 <SelectItem key={m.id} value={String(m.id)}>
-                  {m.name} ({m.type})
+                  {m.type === 'pool' ? '🏊 ' : '📦 '}{m.name}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
+
+          {isPoolModel && (
+            <Badge className="bg-blue-100 text-blue-800 border-blue-300">
+              <Waves className="h-3 w-3 mr-1" />
+              Modèle Piscine
+            </Badge>
+          )}
 
           <Button onClick={openNewCategory} className="bg-orange-500 hover:bg-orange-600">
             <Plus className="h-4 w-4 mr-2" /> Catégorie
@@ -863,13 +880,13 @@ export default function BOQPage() {
             <Copy className="h-4 w-4 mr-2" /> Cloner
           </Button>
 
-          {isPoolModel && categories.length === 0 && (
+          {isPoolModel && (
             <Button
               onClick={generatePoolBOQ}
               disabled={saving}
               className="bg-blue-500 hover:bg-blue-600"
             >
-              <Waves className="h-4 w-4 mr-2" /> Générer BOQ Piscine
+              <Waves className="h-4 w-4 mr-2" /> {categories.length > 0 ? 'Régénérer BOQ Piscine' : 'Générer BOQ Piscine'}
             </Button>
           )}
         </div>
@@ -1006,6 +1023,17 @@ export default function BOQPage() {
           </div>
 
           {/* Base categories list */}
+          {isPoolModel && baseCategories.length > 0 && (
+            <Card className="mb-4 border-blue-200 bg-blue-50">
+              <CardContent className="p-4 flex items-start gap-3">
+                <div className="text-blue-600 mt-0.5">ℹ️</div>
+                <div className="text-sm text-blue-900">
+                  <strong>Astuce :</strong> Cliquez sur une catégorie pour voir ses sous-catégories et lignes détaillées.
+                  Les catégories avec sous-catégories affichent un badge bleu avec le nombre.
+                </div>
+              </CardContent>
+            </Card>
+          )}
           {baseCategories.map(category => renderCategoryCard(category))}
 
           {baseCategories.length === 0 && (
