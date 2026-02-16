@@ -12,28 +12,80 @@
 -- ALTER quotes table for admin quote features
 -- ============================================
 
--- Add is_free_quote flag to distinguish free quotes from model-based
-ALTER TABLE quotes 
-ADD COLUMN IF NOT EXISTS is_free_quote BOOLEAN DEFAULT FALSE COMMENT 'True for free-form quotes created by admin';
+-- Add columns for admin quote features
+DROP PROCEDURE IF EXISTS _add_cols_quotes_admin;
+DELIMITER //
+CREATE PROCEDURE _add_cols_quotes_admin()
+BEGIN
+    -- Add is_free_quote flag to distinguish free quotes from model-based
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'quotes'
+          AND COLUMN_NAME = 'is_free_quote'
+    ) THEN
+        ALTER TABLE quotes
+            ADD COLUMN is_free_quote BOOLEAN DEFAULT FALSE COMMENT 'True for free-form quotes created by admin';
+    END IF;
 
--- Add photo_url and plan_url for quote visuals
-ALTER TABLE quotes 
-ADD COLUMN IF NOT EXISTS photo_url VARCHAR(500) NULL COMMENT 'Optional photo URL for the quote';
+    -- Add photo_url for quote visuals
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'quotes'
+          AND COLUMN_NAME = 'photo_url'
+    ) THEN
+        ALTER TABLE quotes
+            ADD COLUMN photo_url VARCHAR(500) NULL COMMENT 'Optional photo URL for the quote';
+    END IF;
 
-ALTER TABLE quotes 
-ADD COLUMN IF NOT EXISTS plan_url VARCHAR(500) NULL COMMENT 'Optional plan/blueprint URL for the quote';
+    -- Add plan_url for quote visuals
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'quotes'
+          AND COLUMN_NAME = 'plan_url'
+    ) THEN
+        ALTER TABLE quotes
+            ADD COLUMN plan_url VARCHAR(500) NULL COMMENT 'Optional plan/blueprint URL for the quote';
+    END IF;
 
--- Add margin_percent for free quotes
-ALTER TABLE quotes 
-ADD COLUMN IF NOT EXISTS margin_percent DECIMAL(5, 2) DEFAULT 30.00 COMMENT 'Margin percentage for free quotes';
+    -- Add margin_percent for free quotes
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'quotes'
+          AND COLUMN_NAME = 'margin_percent'
+    ) THEN
+        ALTER TABLE quotes
+            ADD COLUMN margin_percent DECIMAL(5, 2) DEFAULT 30.00 COMMENT 'Margin percentage for free quotes';
+    END IF;
 
--- Add cloned_from_id to track quote cloning
-ALTER TABLE quotes 
-ADD COLUMN IF NOT EXISTS cloned_from_id INT NULL COMMENT 'Reference to original quote if cloned';
+    -- Add cloned_from_id to track quote cloning
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'quotes'
+          AND COLUMN_NAME = 'cloned_from_id'
+    ) THEN
+        ALTER TABLE quotes
+            ADD COLUMN cloned_from_id INT NULL COMMENT 'Reference to original quote if cloned';
+    END IF;
 
--- Add quote_title for free quotes (descriptive name)
-ALTER TABLE quotes 
-ADD COLUMN IF NOT EXISTS quote_title VARCHAR(255) NULL COMMENT 'Custom title for free quotes';
+    -- Add quote_title for free quotes (descriptive name)
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'quotes'
+          AND COLUMN_NAME = 'quote_title'
+    ) THEN
+        ALTER TABLE quotes
+            ADD COLUMN quote_title VARCHAR(255) NULL COMMENT 'Custom title for free quotes';
+    END IF;
+END //
+DELIMITER ;
+CALL _add_cols_quotes_admin();
+DROP PROCEDURE IF EXISTS _add_cols_quotes_admin;
 
 -- Modify status enum to include new statuses
 -- Note: MySQL requires recreating the column to modify ENUM values
@@ -42,12 +94,40 @@ ALTER TABLE quotes
 MODIFY COLUMN status ENUM('draft', 'open', 'validated', 'cancelled', 'pending', 'approved', 'rejected', 'completed') DEFAULT 'pending';
 
 -- Add index for cloned_from_id
-ALTER TABLE quotes 
-ADD INDEX IF NOT EXISTS idx_cloned_from (cloned_from_id);
+DROP PROCEDURE IF EXISTS _add_idx_quotes_cloned_from;
+DELIMITER //
+CREATE PROCEDURE _add_idx_quotes_cloned_from()
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.STATISTICS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'quotes'
+          AND INDEX_NAME = 'idx_cloned_from'
+    ) THEN
+        ALTER TABLE quotes ADD INDEX idx_cloned_from (cloned_from_id);
+    END IF;
+END //
+DELIMITER ;
+CALL _add_idx_quotes_cloned_from();
+DROP PROCEDURE IF EXISTS _add_idx_quotes_cloned_from;
 
 -- Add index for is_free_quote
-ALTER TABLE quotes 
-ADD INDEX IF NOT EXISTS idx_is_free_quote (is_free_quote);
+DROP PROCEDURE IF EXISTS _add_idx_quotes_is_free_quote;
+DELIMITER //
+CREATE PROCEDURE _add_idx_quotes_is_free_quote()
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.STATISTICS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'quotes'
+          AND INDEX_NAME = 'idx_is_free_quote'
+    ) THEN
+        ALTER TABLE quotes ADD INDEX idx_is_free_quote (is_free_quote);
+    END IF;
+END //
+DELIMITER ;
+CALL _add_idx_quotes_is_free_quote();
+DROP PROCEDURE IF EXISTS _add_idx_quotes_is_free_quote;
 
 -- ============================================
 -- TABLE: quote_categories (Categories for free-form quotes)

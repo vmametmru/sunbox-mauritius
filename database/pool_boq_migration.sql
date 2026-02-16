@@ -130,8 +130,23 @@ INSERT IGNORE INTO pool_boq_price_list (name, unit, unit_price, has_vat, display
 -- ============================================
 -- ALTER: boq_categories - add parent_id for sub-categories
 -- ============================================
-ALTER TABLE boq_categories
-    ADD COLUMN IF NOT EXISTS parent_id INT NULL AFTER model_id;
+DROP PROCEDURE IF EXISTS _add_col_boq_categories_parent_id;
+DELIMITER //
+CREATE PROCEDURE _add_col_boq_categories_parent_id()
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'boq_categories'
+          AND COLUMN_NAME = 'parent_id'
+    ) THEN
+        ALTER TABLE boq_categories
+            ADD COLUMN parent_id INT NULL AFTER model_id;
+    END IF;
+END //
+DELIMITER ;
+CALL _add_col_boq_categories_parent_id();
+DROP PROCEDURE IF EXISTS _add_col_boq_categories_parent_id;
 
 -- Add FK only if it does not already exist
 DROP PROCEDURE IF EXISTS _add_fk_boq_categories_parent;
@@ -156,11 +171,41 @@ DROP PROCEDURE IF EXISTS _add_fk_boq_categories_parent;
 -- ============================================
 -- ALTER: boq_lines - add quantity_formula and price_list_id
 -- ============================================
-ALTER TABLE boq_lines
-    ADD COLUMN IF NOT EXISTS quantity_formula TEXT NULL AFTER quantity;
+DROP PROCEDURE IF EXISTS _add_col_boq_lines_quantity_formula;
+DELIMITER //
+CREATE PROCEDURE _add_col_boq_lines_quantity_formula()
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'boq_lines'
+          AND COLUMN_NAME = 'quantity_formula'
+    ) THEN
+        ALTER TABLE boq_lines
+            ADD COLUMN quantity_formula TEXT NULL AFTER quantity;
+    END IF;
+END //
+DELIMITER ;
+CALL _add_col_boq_lines_quantity_formula();
+DROP PROCEDURE IF EXISTS _add_col_boq_lines_quantity_formula;
 
-ALTER TABLE boq_lines
-    ADD COLUMN IF NOT EXISTS price_list_id INT NULL AFTER unit_cost_ht;
+DROP PROCEDURE IF EXISTS _add_col_boq_lines_price_list_id;
+DELIMITER //
+CREATE PROCEDURE _add_col_boq_lines_price_list_id()
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'boq_lines'
+          AND COLUMN_NAME = 'price_list_id'
+    ) THEN
+        ALTER TABLE boq_lines
+            ADD COLUMN price_list_id INT NULL AFTER unit_cost_ht;
+    END IF;
+END //
+DELIMITER ;
+CALL _add_col_boq_lines_price_list_id();
+DROP PROCEDURE IF EXISTS _add_col_boq_lines_price_list_id;
 
 -- Add FK only if it does not already exist
 DROP PROCEDURE IF EXISTS _add_fk_boq_lines_price_list;
