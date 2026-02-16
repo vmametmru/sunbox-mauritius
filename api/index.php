@@ -475,6 +475,8 @@ try {
             $categories = $stmt->fetchAll();
             
             foreach ($categories as &$cat) {
+                $cat['id'] = (int)$cat['id'];
+                $cat['model_id'] = (int)$cat['model_id'];
                 $cat['is_option'] = (bool)$cat['is_option'];
                 $cat['parent_id'] = $cat['parent_id'] ? (int)$cat['parent_id'] : null;
                 $cat['total_profit_ht'] = round((float)$cat['total_sale_price_ht'] - (float)$cat['total_cost_ht'], 2);
