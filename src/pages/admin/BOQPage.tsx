@@ -49,6 +49,8 @@ import { useSiteSettings, calculateTTC } from '@/hooks/use-site-settings';
 import {
   evaluatePoolVariables,
   evaluateFormula,
+  getDefaultPoolBOQTemplate,
+  getDefaultPoolBOQOptionsTemplate,
   type PoolVariable,
   type PoolDimensions,
 } from '@/lib/pool-formulas';
@@ -427,6 +429,83 @@ export default function BOQPage() {
   };
 
   /* ======================================================
+     GENERATE POOL BOQ FROM TEMPLATE
+  ====================================================== */
+  const generatePoolBOQ = async () => {
+    if (!selectedModelId || !isPoolModel) return;
+    if (!confirm('Générer le BOQ piscine à partir du modèle par défaut ?\nCela va créer toutes les catégories, sous-catégories et lignes avec les formules et prix.')) return;
+    try {
+      setSaving(true);
+      const baseTemplate = getDefaultPoolBOQTemplate();
+      const optionsTemplate = getDefaultPoolBOQOptionsTemplate();
+      const allTemplates = [...baseTemplate, ...optionsTemplate];
+
+      // Build a lookup map: price_list_name -> price_list_item
+      const priceMap: Record<string, { id: number; unit_price: number; unit: string }> = {};
+      for (const p of priceListItems) {
+        priceMap[p.name] = { id: p.id, unit_price: p.unit_price, unit: p.unit };
+      }
+
+      let createdCategories = 0;
+      let createdLines = 0;
+
+      for (const cat of allTemplates) {
+        // Create the parent category
+        const catResult = await api.createBOQCategory({
+          model_id: selectedModelId,
+          name: cat.name,
+          is_option: cat.is_option,
+          display_order: cat.display_order,
+          parent_id: null,
+        });
+        const parentCatId = catResult.id;
+        createdCategories++;
+
+        // Create sub-categories and their lines
+        for (const subCat of cat.subcategories) {
+          const subCatResult = await api.createBOQCategory({
+            model_id: selectedModelId,
+            name: subCat.name,
+            is_option: cat.is_option,
+            display_order: subCat.display_order,
+            parent_id: parentCatId,
+          });
+          const subCatId = subCatResult.id;
+          createdCategories++;
+
+          // Create lines for this sub-category
+          for (let i = 0; i < subCat.lines.length; i++) {
+            const line = subCat.lines[i];
+            const priceItem = priceMap[line.price_list_name];
+            await api.createBOQLine({
+              category_id: subCatId,
+              description: line.description,
+              quantity: line.quantity,
+              quantity_formula: line.quantity_formula,
+              unit: priceItem ? priceItem.unit : line.unit,
+              unit_cost_ht: priceItem ? priceItem.unit_price : 0,
+              price_list_id: priceItem ? priceItem.id : null,
+              margin_percent: 30,
+              display_order: i + 1,
+            });
+            createdLines++;
+          }
+        }
+      }
+
+      toast({
+        title: 'Succès',
+        description: `BOQ piscine généré : ${createdCategories} catégories et ${createdLines} lignes créées`,
+      });
+      loadCategories();
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  /* ======================================================
      EXPAND/COLLAPSE
   ====================================================== */
   const toggleCategory = (categoryId: number) => {
@@ -782,6 +861,16 @@ export default function BOQPage() {
           <Button variant="outline" onClick={() => setIsCloneDialogOpen(true)}>
             <Copy className="h-4 w-4 mr-2" /> Cloner
           </Button>
+
+          {isPoolModel && categories.length === 0 && (
+            <Button
+              onClick={generatePoolBOQ}
+              disabled={saving}
+              className="bg-blue-500 hover:bg-blue-600"
+            >
+              <Waves className="h-4 w-4 mr-2" /> Générer BOQ Piscine
+            </Button>
+          )}
         </div>
       </div>
 
@@ -1014,9 +1103,20 @@ export default function BOQPage() {
         <Card>
           <CardContent className="p-8 text-center">
             <p className="text-gray-500">Aucune catégorie BOQ pour ce modèle.</p>
-            <Button onClick={openNewCategory} className="mt-4 bg-orange-500 hover:bg-orange-600">
-              <Plus className="h-4 w-4 mr-2" /> Créer la première catégorie
-            </Button>
+            <div className="flex justify-center gap-3 mt-4">
+              <Button onClick={openNewCategory} className="bg-orange-500 hover:bg-orange-600">
+                <Plus className="h-4 w-4 mr-2" /> Créer la première catégorie
+              </Button>
+              {isPoolModel && (
+                <Button
+                  onClick={generatePoolBOQ}
+                  disabled={saving}
+                  className="bg-blue-500 hover:bg-blue-600"
+                >
+                  <Waves className="h-4 w-4 mr-2" /> {saving ? 'Génération...' : 'Générer BOQ Piscine'}
+                </Button>
+              )}
+            </div>
           </CardContent>
         </Card>
       )}
