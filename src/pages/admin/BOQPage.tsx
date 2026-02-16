@@ -186,8 +186,14 @@ export default function BOQPage() {
   const [poolVariables, setPoolVariables] = useState<PoolVariable[]>([]);
   const [priceListItems, setPriceListItems] = useState<PriceListItem[]>([]);
 
-  const selectedModel = models.find(m => m.id === selectedModelId);
-  const isPoolModel = selectedModel?.type === 'pool';
+  const selectedModel = useMemo(() => 
+    models.find(m => m.id === selectedModelId),
+    [models, selectedModelId]
+  );
+  const isPoolModel = useMemo(() => 
+    selectedModel?.type === 'pool',
+    [selectedModel]
+  );
 
   // Calculate pool variable values
   const poolVarContext = useMemo(() => {
@@ -504,17 +510,14 @@ export default function BOQPage() {
         title: 'Succès',
         description: `BOQ piscine généré : ${createdCategories} catégories et ${createdLines} lignes créées`,
       });
+      
+      // Load categories first
       const loadedCategories = await api.getBOQCategories(selectedModelId);
-      setCategories(loadedCategories);
       
-      // Auto-expand ALL categories (top-level and subcategories) to show their lines
-      const allCategoryIds = loadedCategories.map((c: any) => c.id);
-      setExpandedCategories(allCategoryIds);
-      
-      // Load lines for all categories that have lines (subcategories)
+      // Load lines for all subcategories BEFORE setting any state
       const subCats = loadedCategories.filter((c: any) => c.parent_id);
       const linesData: Record<number, any[]> = {};
-      for (const subCat of subCats) {
+      const loadPromises = subCats.map(async (subCat) => {
         try {
           const lines = await api.getBOQLines(subCat.id);
           linesData[subCat.id] = lines;
@@ -522,8 +525,18 @@ export default function BOQPage() {
           // Category may not have lines yet - this is expected for newly created subcategories
           console.debug(`No lines found for subcategory ${subCat.id}`);
         }
-      }
+      });
+      
+      // Wait for all lines to load
+      await Promise.all(loadPromises);
+      
+      // Now update state all at once
+      setCategories(loadedCategories);
       setCategoryLines(linesData);
+      
+      // Auto-expand ALL categories (top-level and subcategories) to show their lines
+      const allCategoryIds = loadedCategories.map((c: any) => c.id);
+      setExpandedCategories(allCategoryIds);
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
     } finally {
