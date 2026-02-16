@@ -475,8 +475,11 @@ try {
             $categories = $stmt->fetchAll();
             
             foreach ($categories as &$cat) {
+                $cat['id'] = (int)$cat['id'];
                 $cat['is_option'] = (bool)$cat['is_option'];
                 $cat['parent_id'] = $cat['parent_id'] ? (int)$cat['parent_id'] : null;
+                $cat['total_cost_ht'] = round((float)$cat['total_cost_ht'], 2);
+                $cat['total_sale_price_ht'] = round((float)$cat['total_sale_price_ht'], 2);
                 $cat['total_profit_ht'] = round((float)$cat['total_sale_price_ht'] - (float)$cat['total_cost_ht'], 2);
                 $cat['image_url'] = $cat['image_path'] ? '/' . ltrim($cat['image_path'], '/') : null;
                 unset($cat['image_path']);
@@ -500,7 +503,7 @@ try {
                 (int)($body['display_order'] ?? 0),
                 !empty($body['image_id']) ? (int)$body['image_id'] : null,
             ]);
-            ok(['id' => $db->lastInsertId()]);
+            ok(['id' => (int)$db->lastInsertId()]);
             break;
         }
 
@@ -571,7 +574,7 @@ try {
                 (float)($body['margin_percent'] ?? 30),
                 (int)($body['display_order'] ?? 0),
             ]);
-            ok(['id' => $db->lastInsertId()]);
+            ok(['id' => (int)$db->lastInsertId()]);
             break;
         }
 
