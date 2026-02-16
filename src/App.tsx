@@ -25,6 +25,7 @@ import AdminLayout from "./pages/admin/AdminLayout";
 import DashboardPage from "./pages/admin/DashboardPage";
 import QuotesPage from "./pages/admin/QuotesPage";
 import CreateQuotePage from "./pages/admin/CreateQuotePage";
+import QuoteDetailPage from "./pages/admin/QuoteDetailPage";
 import ContactsPage from "./pages/admin/ContactsPage";
 import AdminModelsPage from "./pages/admin/ModelsPage";
 import EmailSettingsPage from "./pages/admin/EmailSettingsPage";
@@ -63,6 +64,7 @@ const App = () => (
                   <Route index element={<DashboardPage />} />
                   <Route path="quotes" element={<QuotesPage />} />
                   <Route path="quotes/new" element={<CreateQuotePage />} />
+                  <Route path="quotes/:id" element={<QuoteDetailPage />} />
                   <Route path="contacts" element={<ContactsPage />} />
                   <Route path="models" element={<AdminModelsPage />} />
                   <Route path="media" element={<MediaPage />} />

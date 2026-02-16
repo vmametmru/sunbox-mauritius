@@ -263,7 +263,7 @@ export default function DashboardPage() {
                     <tr key={quote.id} className="hover:bg-gray-50">
                       <td className="py-4 font-mono text-sm">
                         <Link
-                          to={`/admin/quotes?quote=${quote.id}`}
+                          to={`/admin/quotes/${quote.id}`}
                           className="text-blue-600 hover:text-blue-800 hover:underline"
                         >
                           {quote.reference_number}
