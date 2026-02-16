@@ -209,10 +209,13 @@ export function evaluateLineFormula(
 }
 
 /**
- * Get the default BOQ template structure for a pool model.
- * Returns categories with sub-categories and lines with quantity formulas.
+ * Get the BOQ template structure for a pool model.
+ * Returns saved customisations from localStorage if available,
+ * otherwise returns the hardcoded defaults.
  */
 export function getDefaultPoolBOQTemplate(): PoolBOQTemplateCategory[] {
+  const saved = getSavedPoolBOQTemplate();
+  if (saved) return saved;
   return [
     // 1/ Préparation du terrain
     {
@@ -406,9 +409,13 @@ export function getDefaultPoolBOQTemplate(): PoolBOQTemplateCategory[] {
 }
 
 /**
- * Get the default pool BOQ options template.
+ * Get the pool BOQ options template.
+ * Returns saved customisations from localStorage if available,
+ * otherwise returns the hardcoded defaults.
  */
 export function getDefaultPoolBOQOptionsTemplate(): PoolBOQTemplateCategory[] {
+  const saved = getSavedPoolBOQOptionsTemplate();
+  if (saved) return saved;
   return [
     // OPT1 Électrique
     {
@@ -539,4 +546,59 @@ export interface PoolBOQTemplateCategory {
   is_option: boolean;
   display_order: number;
   subcategories: PoolBOQTemplateSubcategory[];
+}
+
+/* ======================================================
+   Template persistence (localStorage)
+====================================================== */
+
+const STORAGE_KEY_BASE = 'pool_boq_template_base';
+const STORAGE_KEY_OPTIONS = 'pool_boq_template_options';
+
+/**
+ * Save customised base template to localStorage.
+ */
+export function savePoolBOQTemplate(template: PoolBOQTemplateCategory[]): void {
+  try {
+    localStorage.setItem(STORAGE_KEY_BASE, JSON.stringify(template));
+  } catch { /* quota exceeded – silently ignore */ }
+}
+
+/**
+ * Save customised options template to localStorage.
+ */
+export function savePoolBOQOptionsTemplate(template: PoolBOQTemplateCategory[]): void {
+  try {
+    localStorage.setItem(STORAGE_KEY_OPTIONS, JSON.stringify(template));
+  } catch { /* quota exceeded – silently ignore */ }
+}
+
+/**
+ * Load the saved base template from localStorage, or return null if none exists.
+ */
+export function getSavedPoolBOQTemplate(): PoolBOQTemplateCategory[] | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_BASE);
+    if (raw) return JSON.parse(raw) as PoolBOQTemplateCategory[];
+  } catch { /* corrupt data – ignore */ }
+  return null;
+}
+
+/**
+ * Load the saved options template from localStorage, or return null if none exists.
+ */
+export function getSavedPoolBOQOptionsTemplate(): PoolBOQTemplateCategory[] | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_OPTIONS);
+    if (raw) return JSON.parse(raw) as PoolBOQTemplateCategory[];
+  } catch { /* corrupt data – ignore */ }
+  return null;
+}
+
+/**
+ * Clear any saved template overrides so the hardcoded defaults are used again.
+ */
+export function clearSavedPoolBOQTemplates(): void {
+  localStorage.removeItem(STORAGE_KEY_BASE);
+  localStorage.removeItem(STORAGE_KEY_OPTIONS);
 }

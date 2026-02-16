@@ -1,17 +1,29 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   ChevronDown,
   ChevronRight,
   FileText,
   Waves,
-  AlertCircle
+  AlertCircle,
+  Save,
+  RotateCcw,
+  Edit,
+  Check,
+  X,
+  Plus,
+  Trash2,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import {
   getDefaultPoolBOQTemplate,
   getDefaultPoolBOQOptionsTemplate,
+  savePoolBOQTemplate,
+  savePoolBOQOptionsTemplate,
+  clearSavedPoolBOQTemplates,
   PoolBOQTemplateCategory,
   PoolBOQTemplateSubcategory,
   PoolBOQTemplateLine
@@ -20,12 +32,11 @@ import {
 /**
  * Pool BOQ Template Editor Page
  * 
- * This page allows administrators to view and understand the pool BOQ template structure.
+ * This page allows administrators to view and edit the pool BOQ template structure.
  * The template defines all categories, subcategories, and lines that are created when
  * generating a BOQ for a pool model.
  * 
- * NOTE: Currently the template is read-only from pool-formulas.ts
- * Future enhancement: Store template in database for full editability
+ * Templates are persisted in localStorage and used by the BOQ generator.
  */
 
 const PoolBOQTemplatePage: React.FC = () => {
@@ -36,6 +47,16 @@ const PoolBOQTemplatePage: React.FC = () => {
   const [optionsTemplate, setOptionsTemplate] = useState<PoolBOQTemplateCategory[]>([]);
   const [expandedCategories, setExpandedCategories] = useState<number[]>([]);
   const [expandedSubcategories, setExpandedSubcategories] = useState<string[]>([]);
+  const [hasChanges, setHasChanges] = useState(false);
+
+  // Editing state: tracks which line is currently being edited
+  const [editingLine, setEditingLine] = useState<{
+    type: 'base' | 'options';
+    catIndex: number;
+    subIndex: number;
+    lineIndex: number;
+  } | null>(null);
+  const [editForm, setEditForm] = useState<Partial<PoolBOQTemplateLine>>({});
 
   useEffect(() => {
     loadTemplates();
@@ -47,10 +68,7 @@ const PoolBOQTemplatePage: React.FC = () => {
       const options = getDefaultPoolBOQOptionsTemplate();
       setBaseTemplate(base);
       setOptionsTemplate(options);
-      toast({
-        title: 'Modèle chargé',
-        description: `${base.length} catégories de base, ${options.length} catégories d'options`,
-      });
+      setHasChanges(false);
     } catch (err: any) {
       toast({
         title: 'Erreur',
@@ -76,9 +94,234 @@ const PoolBOQTemplatePage: React.FC = () => {
     }
   };
 
-  const renderLine = (line: PoolBOQTemplateLine, index: number) => {
+  /* ======================================================
+     SAVE / RESET
+  ====================================================== */
+  const saveTemplates = useCallback(() => {
+    try {
+      savePoolBOQTemplate(baseTemplate);
+      savePoolBOQOptionsTemplate(optionsTemplate);
+      setHasChanges(false);
+      toast({
+        title: 'Modèle sauvegardé',
+        description: 'Les modifications du modèle ont été enregistrées.',
+      });
+    } catch (err: any) {
+      toast({
+        title: 'Erreur',
+        description: err.message,
+        variant: 'destructive',
+      });
+    }
+  }, [baseTemplate, optionsTemplate, toast]);
+
+  const resetToDefaults = useCallback(() => {
+    if (!confirm('Réinitialiser le modèle aux valeurs par défaut ?\nToutes les modifications seront perdues.')) return;
+    clearSavedPoolBOQTemplates();
+    loadTemplates();
+    toast({
+      title: 'Modèle réinitialisé',
+      description: 'Le modèle a été réinitialisé aux valeurs par défaut.',
+    });
+  }, [toast]);
+
+  /* ======================================================
+     LINE EDITING
+  ====================================================== */
+  const startEditLine = (
+    type: 'base' | 'options',
+    catIndex: number,
+    subIndex: number,
+    lineIndex: number,
+    line: PoolBOQTemplateLine,
+  ) => {
+    setEditingLine({ type, catIndex, subIndex, lineIndex });
+    setEditForm({ ...line });
+  };
+
+  const cancelEdit = () => {
+    setEditingLine(null);
+    setEditForm({});
+  };
+
+  const applyEdit = () => {
+    if (!editingLine) return;
+    const { type, catIndex, subIndex, lineIndex } = editingLine;
+
+    const updateTemplate = (template: PoolBOQTemplateCategory[]) => {
+      const updated = template.map((cat, ci) => {
+        if (ci !== catIndex) return cat;
+        return {
+          ...cat,
+          subcategories: cat.subcategories.map((sub, si) => {
+            if (si !== subIndex) return sub;
+            return {
+              ...sub,
+              lines: sub.lines.map((line, li) => {
+                if (li !== lineIndex) return line;
+                const newFormula = editForm.quantity_formula ?? line.quantity_formula;
+                const parsedQty = Number(newFormula);
+                return {
+                  ...line,
+                  description: editForm.description ?? line.description,
+                  quantity: isNaN(parsedQty) ? line.quantity : parsedQty,
+                  quantity_formula: newFormula,
+                  unit: editForm.unit ?? line.unit,
+                  price_list_name: editForm.price_list_name ?? line.price_list_name,
+                };
+              }),
+            };
+          }),
+        };
+      });
+      return updated;
+    };
+
+    if (type === 'base') {
+      setBaseTemplate(prev => updateTemplate(prev));
+    } else {
+      setOptionsTemplate(prev => updateTemplate(prev));
+    }
+
+    setHasChanges(true);
+    setEditingLine(null);
+    setEditForm({});
+  };
+
+  const deleteLine = (
+    type: 'base' | 'options',
+    catIndex: number,
+    subIndex: number,
+    lineIndex: number,
+  ) => {
+    if (!confirm('Supprimer cette ligne du modèle ?')) return;
+
+    const updateTemplate = (template: PoolBOQTemplateCategory[]) =>
+      template.map((cat, ci) => {
+        if (ci !== catIndex) return cat;
+        return {
+          ...cat,
+          subcategories: cat.subcategories.map((sub, si) => {
+            if (si !== subIndex) return sub;
+            return { ...sub, lines: sub.lines.filter((_, li) => li !== lineIndex) };
+          }),
+        };
+      });
+
+    if (type === 'base') {
+      setBaseTemplate(prev => updateTemplate(prev));
+    } else {
+      setOptionsTemplate(prev => updateTemplate(prev));
+    }
+    setHasChanges(true);
+  };
+
+  const addLine = (
+    type: 'base' | 'options',
+    catIndex: number,
+    subIndex: number,
+  ) => {
+    const newLine: PoolBOQTemplateLine = {
+      description: 'Nouvelle ligne',
+      quantity: 1,
+      quantity_formula: '1',
+      unit: 'unité',
+      price_list_name: '',
+    };
+
+    const updateTemplate = (template: PoolBOQTemplateCategory[]) =>
+      template.map((cat, ci) => {
+        if (ci !== catIndex) return cat;
+        return {
+          ...cat,
+          subcategories: cat.subcategories.map((sub, si) => {
+            if (si !== subIndex) return sub;
+            return { ...sub, lines: [...sub.lines, newLine] };
+          }),
+        };
+      });
+
+    if (type === 'base') {
+      setBaseTemplate(prev => updateTemplate(prev));
+    } else {
+      setOptionsTemplate(prev => updateTemplate(prev));
+    }
+    setHasChanges(true);
+  };
+
+  /* ======================================================
+     RENDER HELPERS
+  ====================================================== */
+  const renderLine = (
+    line: PoolBOQTemplateLine,
+    index: number,
+    type: 'base' | 'options',
+    catIndex: number,
+    subIndex: number,
+  ) => {
+    const isEditing =
+      editingLine?.type === type &&
+      editingLine.catIndex === catIndex &&
+      editingLine.subIndex === subIndex &&
+      editingLine.lineIndex === index;
+
+    if (isEditing) {
+      return (
+        <div key={index} className="border-l-2 border-blue-400 pl-4 py-2 bg-blue-50 rounded-r">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-xs text-gray-500 min-w-[30px]">{index + 1}.</span>
+              <Input
+                value={editForm.description ?? ''}
+                onChange={(e) => setEditForm(prev => ({ ...prev, description: e.target.value }))}
+                placeholder="Description"
+                className="flex-1 h-8 text-sm"
+              />
+            </div>
+            <div className="flex flex-wrap gap-2 ml-[38px]">
+              <div className="flex-1 min-w-[200px]">
+                <label className="text-xs text-gray-500 font-medium">Formule quantité</label>
+                <Input
+                  value={editForm.quantity_formula ?? ''}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, quantity_formula: e.target.value }))}
+                  placeholder="Ex: surface_m2 * 1.6"
+                  className="h-8 text-sm font-mono"
+                />
+              </div>
+              <div className="w-24">
+                <label className="text-xs text-gray-500 font-medium">Unité</label>
+                <Input
+                  value={editForm.unit ?? ''}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, unit: e.target.value }))}
+                  placeholder="Unité"
+                  className="h-8 text-sm"
+                />
+              </div>
+              <div className="flex-1 min-w-[180px]">
+                <label className="text-xs text-gray-500 font-medium">Référence prix</label>
+                <Input
+                  value={editForm.price_list_name ?? ''}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, price_list_name: e.target.value }))}
+                  placeholder="Nom dans la liste de prix"
+                  className="h-8 text-sm"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 ml-[38px]">
+              <Button size="sm" onClick={applyEdit} className="h-7 text-xs bg-green-600 hover:bg-green-700">
+                <Check className="h-3 w-3 mr-1" /> Valider
+              </Button>
+              <Button size="sm" variant="outline" onClick={cancelEdit} className="h-7 text-xs">
+                <X className="h-3 w-3 mr-1" /> Annuler
+              </Button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
-      <div key={index} className="border-l-2 border-gray-300 pl-4 py-2 text-sm">
+      <div key={index} className="border-l-2 border-gray-300 pl-4 py-2 text-sm group hover:bg-gray-50 rounded-r">
         <div className="flex items-start gap-2">
           <span className="font-mono text-xs text-gray-500 min-w-[30px]">{index + 1}.</span>
           <div className="flex-1">
@@ -100,12 +343,35 @@ const PoolBOQTemplatePage: React.FC = () => {
               </div>
             )}
           </div>
+          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 w-7 p-0"
+              onClick={() => startEditLine(type, catIndex, subIndex, index, line)}
+            >
+              <Edit className="h-3 w-3" />
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 w-7 p-0 text-red-600 hover:text-red-700"
+              onClick={() => deleteLine(type, catIndex, subIndex, index)}
+            >
+              <Trash2 className="h-3 w-3" />
+            </Button>
+          </div>
         </div>
       </div>
     );
   };
 
-  const renderSubcategory = (subcat: PoolBOQTemplateSubcategory, catIndex: number, subcatIndex: number) => {
+  const renderSubcategory = (
+    subcat: PoolBOQTemplateSubcategory,
+    catIndex: number,
+    subcatIndex: number,
+    type: 'base' | 'options',
+  ) => {
     const key = `${catIndex}-${subcatIndex}`;
     const isExpanded = expandedSubcategories.includes(key);
 
@@ -131,14 +397,29 @@ const PoolBOQTemplatePage: React.FC = () => {
 
         {isExpanded && (
           <div className="mt-3 space-y-1">
-            {subcat.lines.map((line, idx) => renderLine(line, idx))}
+            {subcat.lines.map((line, idx) =>
+              renderLine(line, idx, type, catIndex, subcatIndex)
+            )}
+            <Button
+              size="sm"
+              variant="outline"
+              className="mt-2 h-7 text-xs"
+              onClick={() => addLine(type, catIndex, subcatIndex)}
+            >
+              <Plus className="h-3 w-3 mr-1" /> Ajouter une ligne
+            </Button>
           </div>
         )}
       </div>
     );
   };
 
-  const renderCategory = (category: PoolBOQTemplateCategory, index: number) => {
+  const renderCategory = (
+    category: PoolBOQTemplateCategory,
+    index: number,
+    type: 'base' | 'options',
+    catIndex: number,
+  ) => {
     const isExpanded = expandedCategories.includes(index);
     const totalLines = category.subcategories.reduce((sum, sub) => sum + sub.lines.length, 0);
 
@@ -178,7 +459,7 @@ const PoolBOQTemplatePage: React.FC = () => {
           <CardContent>
             <div className="space-y-3">
               {category.subcategories.map((subcat, idx) => 
-                renderSubcategory(subcat, index, idx)
+                renderSubcategory(subcat, catIndex, idx, type)
               )}
             </div>
           </CardContent>
@@ -202,15 +483,32 @@ const PoolBOQTemplatePage: React.FC = () => {
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <div className="mb-6">
-        <div className="flex items-center gap-3 mb-2">
-          <div className="w-10 h-10 bg-blue-500 rounded-lg flex items-center justify-center">
-            <Waves className="h-6 w-6 text-white" />
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-10 h-10 bg-blue-500 rounded-lg flex items-center justify-center">
+              <Waves className="h-6 w-6 text-white" />
+            </div>
+            <div>
+              <h1 className="text-3xl font-bold text-gray-900">Modèle BOQ Piscine</h1>
+              <p className="text-gray-600">
+                Structure du modèle utilisé lors de la génération d'un BOQ piscine
+              </p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">Modèle BOQ Piscine</h1>
-            <p className="text-gray-600">
-              Structure du modèle par défaut utilisé lors de la génération d'un BOQ piscine
-            </p>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={resetToDefaults}
+            >
+              <RotateCcw className="h-4 w-4 mr-2" /> Réinitialiser
+            </Button>
+            <Button
+              onClick={saveTemplates}
+              disabled={!hasChanges}
+              className="bg-green-600 hover:bg-green-700"
+            >
+              <Save className="h-4 w-4 mr-2" /> Sauvegarder
+            </Button>
           </div>
         </div>
       </div>
@@ -224,16 +522,40 @@ const PoolBOQTemplatePage: React.FC = () => {
               <p className="font-semibold mb-1">À propos de ce modèle</p>
               <p>
                 Ce modèle définit la structure complète d'un BOQ piscine : catégories, sous-catégories, 
-                et lignes avec leurs formules de calcul. Actuellement, ce modèle est défini dans le code 
-                source (pool-formulas.ts) et est en <strong>lecture seule</strong>.
+                et lignes avec leurs formules de calcul. Cliquez sur l'icône <Edit className="inline h-3 w-3" /> 
+                pour modifier une ligne. Les modifications sont sauvegardées localement et utilisées lors de la 
+                génération de nouveaux BOQ.
               </p>
               <p className="mt-2">
-                Pour personnaliser le modèle : modifiez le fichier <code className="bg-blue-100 px-1 rounded">src/lib/pool-formulas.ts</code>
+                <strong>Variables disponibles :</strong>{' '}
+                <code className="bg-blue-100 px-1 rounded">longueur</code>{' '}
+                <code className="bg-blue-100 px-1 rounded">largeur</code>{' '}
+                <code className="bg-blue-100 px-1 rounded">profondeur</code>{' '}
+                <code className="bg-blue-100 px-1 rounded">surface_m2</code>{' '}
+                <code className="bg-blue-100 px-1 rounded">volume_m3</code>{' '}
+                <code className="bg-blue-100 px-1 rounded">perimetre_m</code>{' '}
+                <code className="bg-blue-100 px-1 rounded">surface_interieur_m2</code>{' '}
+                — Fonctions : <code className="bg-blue-100 px-1 rounded">CEIL()</code>{' '}
+                <code className="bg-blue-100 px-1 rounded">FLOOR()</code>{' '}
+                <code className="bg-blue-100 px-1 rounded">ROUND()</code>
               </p>
             </div>
           </div>
         </CardContent>
       </Card>
+
+      {hasChanges && (
+        <Card className="mb-6 border-yellow-300 bg-yellow-50">
+          <CardContent className="p-3 flex items-center justify-between">
+            <span className="text-sm text-yellow-800 font-medium">
+              ⚠️ Modifications non sauvegardées
+            </span>
+            <Button size="sm" onClick={saveTemplates} className="bg-green-600 hover:bg-green-700">
+              <Save className="h-3 w-3 mr-1" /> Sauvegarder
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Statistics */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
@@ -292,7 +614,9 @@ const PoolBOQTemplatePage: React.FC = () => {
       <div className="mb-8">
         <h2 className="text-xl font-bold text-gray-900 mb-4">Catégories de Base</h2>
         <div className="space-y-4">
-          {baseTemplate.map((category, index) => renderCategory(category, index))}
+          {baseTemplate.map((category, index) =>
+            renderCategory(category, index, 'base', index)
+          )}
         </div>
       </div>
 
@@ -301,7 +625,7 @@ const PoolBOQTemplatePage: React.FC = () => {
         <h2 className="text-xl font-bold text-gray-900 mb-4">Catégories Options</h2>
         <div className="space-y-4">
           {optionsTemplate.map((category, index) => 
-            renderCategory(category, baseTemplate.length + index)
+            renderCategory(category, baseTemplate.length + index, 'options', index)
           )}
         </div>
       </div>
