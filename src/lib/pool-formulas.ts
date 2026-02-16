@@ -10,6 +10,8 @@
  * Example: "(longueur + 1) * 2 + (largeur + 1) * 2"
  */
 
+import { api } from './api';
+
 export interface PoolDimensions {
   longueur: number;
   largeur: number;
@@ -216,6 +218,13 @@ export function evaluateLineFormula(
 export function getDefaultPoolBOQTemplate(): PoolBOQTemplateCategory[] {
   const saved = getSavedPoolBOQTemplate();
   if (saved) return saved;
+  return getHardcodedBaseTemplate();
+}
+
+/**
+ * Return the hardcoded base template (no localStorage check).
+ */
+export function getHardcodedBaseTemplate(): PoolBOQTemplateCategory[] {
   return [
     // 1/ Préparation du terrain
     {
@@ -416,6 +425,13 @@ export function getDefaultPoolBOQTemplate(): PoolBOQTemplateCategory[] {
 export function getDefaultPoolBOQOptionsTemplate(): PoolBOQTemplateCategory[] {
   const saved = getSavedPoolBOQOptionsTemplate();
   if (saved) return saved;
+  return getHardcodedOptionsTemplate();
+}
+
+/**
+ * Return the hardcoded options template (no localStorage check).
+ */
+export function getHardcodedOptionsTemplate(): PoolBOQTemplateCategory[] {
   return [
     // OPT1 Électrique
     {
@@ -549,7 +565,7 @@ export interface PoolBOQTemplateCategory {
 }
 
 /* ======================================================
-   Template persistence (localStorage)
+   Template persistence (localStorage – legacy fallback)
 ====================================================== */
 
 const STORAGE_KEY_BASE = 'pool_boq_template_base';
@@ -601,4 +617,88 @@ export function getSavedPoolBOQOptionsTemplate(): PoolBOQTemplateCategory[] | nu
 export function clearSavedPoolBOQTemplates(): void {
   localStorage.removeItem(STORAGE_KEY_BASE);
   localStorage.removeItem(STORAGE_KEY_OPTIONS);
+}
+
+/* ======================================================
+   Template persistence (Database via API)
+====================================================== */
+
+/**
+ * Database-backed template record as returned by the API.
+ */
+export interface PoolBOQTemplateRecord {
+  id: number;
+  name: string;
+  description: string;
+  is_default: boolean;
+  template_data: {
+    base: PoolBOQTemplateCategory[];
+    options: PoolBOQTemplateCategory[];
+  } | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Load the default template from the database.
+ * Falls back to hardcoded defaults if no DB template exists.
+ */
+export async function loadTemplateFromDB(): Promise<{
+  record: PoolBOQTemplateRecord | null;
+  base: PoolBOQTemplateCategory[];
+  options: PoolBOQTemplateCategory[];
+}> {
+  try {
+    const record = await api.getDefaultPoolBOQTemplateFromDB();
+    if (record && record.template_data) {
+      return {
+        record,
+        base: record.template_data.base || getHardcodedBaseTemplate(),
+        options: record.template_data.options || getHardcodedOptionsTemplate(),
+      };
+    }
+    // No DB record – return hardcoded defaults
+    return {
+      record: record || null,
+      base: getHardcodedBaseTemplate(),
+      options: getHardcodedOptionsTemplate(),
+    };
+  } catch {
+    // API unavailable – fall back to localStorage / hardcoded
+    return {
+      record: null,
+      base: getDefaultPoolBOQTemplate(),
+      options: getDefaultPoolBOQOptionsTemplate(),
+    };
+  }
+}
+
+/**
+ * Save the template to the database.
+ * Creates a new default record if none exists, otherwise updates the existing one.
+ */
+export async function saveTemplateToDB(
+  base: PoolBOQTemplateCategory[],
+  options: PoolBOQTemplateCategory[],
+  existingRecordId?: number,
+): Promise<void> {
+  const templateData = { base, options };
+
+  if (existingRecordId) {
+    await api.updatePoolBOQTemplate({
+      id: existingRecordId,
+      template_data: templateData,
+    });
+  } else {
+    await api.createPoolBOQTemplate({
+      name: 'Modèle par défaut',
+      description: 'Modèle BOQ piscine par défaut',
+      is_default: true,
+      template_data: templateData,
+    });
+  }
+
+  // Also keep localStorage in sync as fallback
+  savePoolBOQTemplate(base);
+  savePoolBOQOptionsTemplate(options);
 }

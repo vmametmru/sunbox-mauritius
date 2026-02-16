@@ -732,21 +732,31 @@ export const api = {
     name: string;
     description?: string;
     is_default?: boolean;
+    template_data?: any;
   }) {
     return this.query('create_pool_boq_template', template);
   },
 
   updatePoolBOQTemplate(template: {
     id: number;
-    name: string;
+    name?: string;
     description?: string;
     is_default?: boolean;
+    template_data?: any;
   }) {
     return this.query('update_pool_boq_template', template);
   },
 
   deletePoolBOQTemplate(id: number) {
     return this.query('delete_pool_boq_template', { id });
+  },
+
+  getPoolBOQTemplateById(id: number) {
+    return this.query('get_pool_boq_template_by_id', { id });
+  },
+
+  getDefaultPoolBOQTemplateFromDB() {
+    return this.query('get_default_pool_boq_template');
   },
 };
 

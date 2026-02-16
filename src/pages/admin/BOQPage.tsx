@@ -54,6 +54,7 @@ import {
   evaluateFormula,
   getDefaultPoolBOQTemplate,
   getDefaultPoolBOQOptionsTemplate,
+  loadTemplateFromDB,
   type PoolVariable,
   type PoolDimensions,
 } from '@/lib/pool-formulas';
@@ -489,8 +490,8 @@ export default function BOQPage() {
     if (!confirm(confirmMessage)) return;
     try {
       setSaving(true);
-      const baseTemplate = getDefaultPoolBOQTemplate();
-      const optionsTemplate = getDefaultPoolBOQOptionsTemplate();
+      // Load template from database (falls back to localStorage/hardcoded)
+      const { base: baseTemplate, options: optionsTemplate } = await loadTemplateFromDB();
       const allTemplates = [...baseTemplate, ...optionsTemplate];
 
       // Build a lookup map: price_list_name -> price_list_item

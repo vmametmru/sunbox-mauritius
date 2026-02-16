@@ -2004,20 +2004,30 @@ try {
         // ============================================
         case 'get_pool_boq_templates': {
             $stmt = $db->query("SELECT * FROM pool_boq_templates ORDER BY is_default DESC, name ASC");
-            ok($stmt->fetchAll());
+            $rows = $stmt->fetchAll();
+            // Decode template_data JSON for each row
+            foreach ($rows as &$row) {
+                if (isset($row['template_data']) && is_string($row['template_data'])) {
+                    $row['template_data'] = json_decode($row['template_data'], true);
+                }
+            }
+            unset($row);
+            ok($rows);
             break;
         }
 
         case 'create_pool_boq_template': {
             validateRequired($body, ['name']);
+            $templateData = isset($body['template_data']) ? json_encode($body['template_data']) : null;
             $stmt = $db->prepare("
-                INSERT INTO pool_boq_templates (name, description, is_default)
-                VALUES (?, ?, ?)
+                INSERT INTO pool_boq_templates (name, description, is_default, template_data)
+                VALUES (?, ?, ?, ?)
             ");
             $stmt->execute([
                 sanitize($body['name']),
                 sanitize($body['description'] ?? ''),
                 (bool)($body['is_default'] ?? false),
+                $templateData,
             ]);
             ok(['id' => $db->lastInsertId()]);
             break;
@@ -2025,15 +2035,17 @@ try {
 
         case 'update_pool_boq_template': {
             validateRequired($body, ['id']);
+            $templateData = isset($body['template_data']) ? json_encode($body['template_data']) : null;
             $stmt = $db->prepare("
                 UPDATE pool_boq_templates SET
-                    name = ?, description = ?, is_default = ?, updated_at = NOW()
+                    name = ?, description = ?, is_default = ?, template_data = ?, updated_at = NOW()
                 WHERE id = ?
             ");
             $stmt->execute([
-                sanitize($body['name']),
+                sanitize($body['name'] ?? ''),
                 sanitize($body['description'] ?? ''),
                 (bool)($body['is_default'] ?? false),
+                $templateData,
                 (int)$body['id'],
             ]);
             ok();
@@ -2045,6 +2057,29 @@ try {
             $stmt = $db->prepare("DELETE FROM pool_boq_templates WHERE id = ?");
             $stmt->execute([(int)$body['id']]);
             ok();
+            break;
+        }
+
+        case 'get_pool_boq_template_by_id': {
+            validateRequired($body, ['id']);
+            $stmt = $db->prepare("SELECT * FROM pool_boq_templates WHERE id = ?");
+            $stmt->execute([(int)$body['id']]);
+            $row = $stmt->fetch();
+            if ($row && isset($row['template_data']) && is_string($row['template_data'])) {
+                $row['template_data'] = json_decode($row['template_data'], true);
+            }
+            ok($row ?: null);
+            break;
+        }
+
+        case 'get_default_pool_boq_template': {
+            $stmt = $db->prepare("SELECT * FROM pool_boq_templates WHERE is_default = 1 LIMIT 1");
+            $stmt->execute();
+            $row = $stmt->fetch();
+            if ($row && isset($row['template_data']) && is_string($row['template_data'])) {
+                $row['template_data'] = json_decode($row['template_data'], true);
+            }
+            ok($row ?: null);
             break;
         }
 
