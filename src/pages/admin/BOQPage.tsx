@@ -49,9 +49,13 @@ import { useSiteSettings, calculateTTC } from '@/hooks/use-site-settings';
 import {
   evaluatePoolVariables,
   evaluateFormula,
+  getDefaultPoolBOQTemplate,
+  getDefaultPoolBOQOptionsTemplate,
   type PoolVariable,
   type PoolDimensions,
 } from '@/lib/pool-formulas';
+
+const DEFAULT_MARGIN_PERCENT = 30;
 
 /* ======================================================
    TYPES
@@ -102,6 +106,7 @@ interface BOQLine {
   quantity_formula: string | null;
   unit: string;
   unit_cost_ht: number;
+  unit_cost_formula: string | null;
   price_list_id: number | null;
   price_list_name: string | null;
   price_list_unit_price: number | null;
@@ -128,9 +133,10 @@ const emptyLine: Partial<BOQLine> = {
   quantity_formula: null,
   unit: 'unité',
   unit_cost_ht: 0,
+  unit_cost_formula: null,
   price_list_id: null,
   supplier_id: null,
-  margin_percent: 30,
+  margin_percent: DEFAULT_MARGIN_PERCENT,
   display_order: 0,
 };
 
@@ -163,6 +169,10 @@ export default function BOQPage() {
   // Clone modal
   const [cloneSourceModelId, setCloneSourceModelId] = useState<number | null>(null);
   const [isCloneDialogOpen, setIsCloneDialogOpen] = useState(false);
+
+  // Line dialog: pricing mode and search
+  const [pricingMode, setPricingMode] = useState<'manual' | 'pricelist'>('manual');
+  const [priceListSearch, setPriceListSearch] = useState('');
 
   // Pool-specific state
   const [poolDimensions, setPoolDimensions] = useState<PoolDimensions>({
@@ -329,12 +339,16 @@ export default function BOQPage() {
   const openNewLine = (categoryId: number) => {
     setEditingLine({ ...emptyLine, category_id: categoryId });
     setEditingCategoryId(categoryId);
+    setPricingMode('manual');
+    setPriceListSearch('');
     setIsLineDialogOpen(true);
   };
 
   const openEditLine = (line: BOQLine) => {
     setEditingLine({ ...line });
     setEditingCategoryId(line.category_id);
+    setPricingMode(line.price_list_id ? 'pricelist' : 'manual');
+    setPriceListSearch('');
     setIsLineDialogOpen(true);
   };
 
@@ -350,7 +364,8 @@ export default function BOQPage() {
           quantity_formula: editingLine.quantity_formula,
           unit: editingLine.unit,
           unit_cost_ht: editingLine.unit_cost_ht,
-          price_list_id: editingLine.price_list_id,
+          unit_cost_formula: editingLine.unit_cost_formula,
+          price_list_id: pricingMode === 'pricelist' ? editingLine.price_list_id : null,
           supplier_id: editingLine.supplier_id,
           margin_percent: editingLine.margin_percent,
           display_order: editingLine.display_order,
@@ -364,7 +379,8 @@ export default function BOQPage() {
           quantity_formula: editingLine.quantity_formula,
           unit: editingLine.unit,
           unit_cost_ht: editingLine.unit_cost_ht,
-          price_list_id: editingLine.price_list_id,
+          unit_cost_formula: editingLine.unit_cost_formula,
+          price_list_id: pricingMode === 'pricelist' ? editingLine.price_list_id : null,
           supplier_id: editingLine.supplier_id,
           margin_percent: editingLine.margin_percent,
           display_order: editingLine.display_order,
@@ -406,6 +422,82 @@ export default function BOQPage() {
         description: `${result.cloned_categories} catégories et ${result.cloned_lines} lignes clonées`,
       });
       setIsCloneDialogOpen(false);
+      loadCategories();
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  /* ======================================================
+     GENERATE POOL BOQ FROM TEMPLATE
+  ====================================================== */
+  const generatePoolBOQ = async () => {
+    if (!selectedModelId || !isPoolModel) return;
+    if (!confirm('Générer le BOQ piscine à partir du modèle par défaut ?\nCela va créer toutes les catégories, sous-catégories et lignes avec les formules et prix.')) return;
+    try {
+      setSaving(true);
+      const baseTemplate = getDefaultPoolBOQTemplate();
+      const optionsTemplate = getDefaultPoolBOQOptionsTemplate();
+      const allTemplates = [...baseTemplate, ...optionsTemplate];
+
+      // Build a lookup map: price_list_name -> price_list_item
+      const priceMap: Record<string, { id: number; unit_price: number; unit: string }> = {};
+      for (const p of priceListItems) {
+        priceMap[p.name] = { id: p.id, unit_price: p.unit_price, unit: p.unit };
+      }
+
+      let createdCategories = 0;
+      let createdLines = 0;
+
+      for (const cat of allTemplates) {
+        // Create the parent category
+        const catResult = await api.createBOQCategory({
+          model_id: selectedModelId,
+          name: cat.name,
+          is_option: cat.is_option,
+          display_order: cat.display_order,
+          parent_id: null,
+        });
+        const parentCatId = catResult.id;
+        createdCategories++;
+
+        // Create sub-categories and their lines
+        for (const subCat of cat.subcategories) {
+          const subCatResult = await api.createBOQCategory({
+            model_id: selectedModelId,
+            name: subCat.name,
+            is_option: cat.is_option,
+            display_order: subCat.display_order,
+            parent_id: parentCatId,
+          });
+          const subCatId = subCatResult.id;
+          createdCategories++;
+
+          // Create lines for this sub-category
+          for (const [i, line] of subCat.lines.entries()) {
+            const priceItem = priceMap[line.price_list_name];
+            await api.createBOQLine({
+              category_id: subCatId,
+              description: line.description,
+              quantity: line.quantity,
+              quantity_formula: line.quantity_formula,
+              unit: priceItem ? priceItem.unit : line.unit,
+              unit_cost_ht: priceItem ? priceItem.unit_price : 0,
+              price_list_id: priceItem ? priceItem.id : null,
+              margin_percent: DEFAULT_MARGIN_PERCENT,
+              display_order: i + 1,
+            });
+            createdLines++;
+          }
+        }
+      }
+
+      toast({
+        title: 'Succès',
+        description: `BOQ piscine généré : ${createdCategories} catégories et ${createdLines} lignes créées`,
+      });
       loadCategories();
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
@@ -498,9 +590,16 @@ export default function BOQPage() {
             const dynamicQty = isPoolModel && line.quantity_formula
               ? evaluateFormula(line.quantity_formula, poolVarContext)
               : line.quantity;
-            const effectiveUnitCost = line.price_list_id && line.price_list_unit_price
-              ? Number(line.price_list_unit_price)
-              : line.unit_cost_ht;
+            // For pool models with unit cost formula, calculate dynamic unit cost
+            const dynamicUnitCost = isPoolModel && line.unit_cost_formula
+              ? evaluateFormula(line.unit_cost_formula, poolVarContext)
+              : null;
+            const effectiveUnitCost = dynamicUnitCost !== null
+              ? dynamicUnitCost
+              : (line.price_list_id && line.price_list_unit_price
+                ? Number(line.price_list_unit_price)
+                : line.unit_cost_ht);
+            const hasDynamicCalc = isPoolModel && (line.quantity_formula || line.unit_cost_formula);
             const dynTotalCost = dynamicQty * effectiveUnitCost;
             const dynSalePrice = dynTotalCost * (1 + line.margin_percent / 100);
 
@@ -527,17 +626,25 @@ export default function BOQPage() {
                   )}
                 </TableCell>
                 <TableCell>{line.unit}</TableCell>
-                <TableCell className="text-right">{formatPrice(effectiveUnitCost)}</TableCell>
+                <TableCell className="text-right">
+                  {isPoolModel && line.unit_cost_formula ? (
+                    <span title={`Formule: ${line.unit_cost_formula}`}>
+                      {formatPrice(effectiveUnitCost)}
+                    </span>
+                  ) : (
+                    formatPrice(effectiveUnitCost)
+                  )}
+                </TableCell>
                 <TableCell>{line.supplier_name || '-'}</TableCell>
                 <TableCell className="text-right">{line.margin_percent}%</TableCell>
                 <TableCell className="text-right">
-                  {isPoolModel && line.quantity_formula
+                  {hasDynamicCalc
                     ? formatPrice(dynTotalCost)
                     : formatPrice(line.total_cost_ht)
                   }
                 </TableCell>
                 <TableCell className="text-right font-semibold text-orange-600">
-                  {isPoolModel && line.quantity_formula
+                  {hasDynamicCalc
                     ? formatPrice(dynSalePrice)
                     : formatPrice(line.sale_price_ht)
                   }
@@ -755,6 +862,16 @@ export default function BOQPage() {
           <Button variant="outline" onClick={() => setIsCloneDialogOpen(true)}>
             <Copy className="h-4 w-4 mr-2" /> Cloner
           </Button>
+
+          {isPoolModel && categories.length === 0 && (
+            <Button
+              onClick={generatePoolBOQ}
+              disabled={saving}
+              className="bg-blue-500 hover:bg-blue-600"
+            >
+              <Waves className="h-4 w-4 mr-2" /> Générer BOQ Piscine
+            </Button>
+          )}
         </div>
       </div>
 
@@ -987,9 +1104,20 @@ export default function BOQPage() {
         <Card>
           <CardContent className="p-8 text-center">
             <p className="text-gray-500">Aucune catégorie BOQ pour ce modèle.</p>
-            <Button onClick={openNewCategory} className="mt-4 bg-orange-500 hover:bg-orange-600">
-              <Plus className="h-4 w-4 mr-2" /> Créer la première catégorie
-            </Button>
+            <div className="flex justify-center gap-3 mt-4">
+              <Button onClick={openNewCategory} className="bg-orange-500 hover:bg-orange-600">
+                <Plus className="h-4 w-4 mr-2" /> Créer la première catégorie
+              </Button>
+              {isPoolModel && (
+                <Button
+                  onClick={generatePoolBOQ}
+                  disabled={saving}
+                  className="bg-blue-500 hover:bg-blue-600"
+                >
+                  <Waves className="h-4 w-4 mr-2" /> {saving ? 'Génération...' : 'Générer BOQ Piscine'}
+                </Button>
+              )}
+            </div>
           </CardContent>
         </Card>
       )}
@@ -1194,7 +1322,7 @@ export default function BOQPage() {
           </DialogHeader>
 
           {editingLine && (
-            <div className="space-y-4">
+            <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
               <div>
                 <Label>Description *</Label>
                 <Textarea
@@ -1207,35 +1335,91 @@ export default function BOQPage() {
                 />
               </div>
 
-              {/* Price list selection (pool models) */}
-              {isPoolModel && priceListItems.length > 0 && (
-                <div>
-                  <Label>Article de la Base de Prix</Label>
-                  <Select
-                    value={editingLine.price_list_id ? String(editingLine.price_list_id) : "_none"}
-                    onValueChange={(v) => {
-                      const id = v === "_none" ? null : Number(v);
-                      const item = id ? priceListItems.find(p => p.id === id) : null;
-                      setEditingLine({
-                        ...editingLine,
-                        price_list_id: id,
-                        unit_cost_ht: item ? item.unit_price : editingLine.unit_cost_ht,
-                        unit: item ? item.unit : editingLine.unit,
-                      });
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Sélectionner un article" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="_none">Aucun (prix manuel)</SelectItem>
-                      {priceListItems.map(p => (
-                        <SelectItem key={p.id} value={String(p.id)}>
-                          {p.name} — Rs {p.unit_price.toLocaleString()} / {p.unit}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+              {/* Pricing mode toggle */}
+              {priceListItems.length > 0 && (
+                <div className="space-y-3">
+                  <Label>Mode de tarification</Label>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={pricingMode === 'manual' ? 'default' : 'outline'}
+                      onClick={() => {
+                        setPricingMode('manual');
+                        setEditingLine({
+                          ...editingLine,
+                          price_list_id: null,
+                        });
+                      }}
+                      className={pricingMode === 'manual' ? 'bg-orange-500 hover:bg-orange-600' : ''}
+                    >
+                      ✏️ Prix Manuel
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={pricingMode === 'pricelist' ? 'default' : 'outline'}
+                      onClick={() => setPricingMode('pricelist')}
+                      className={pricingMode === 'pricelist' ? 'bg-blue-500 hover:bg-blue-600' : ''}
+                    >
+                      📋 Base de Prix Piscine
+                    </Button>
+                  </div>
+
+                  {/* Price list selection with search */}
+                  {pricingMode === 'pricelist' && (
+                    <div className="space-y-2">
+                      <Input
+                        placeholder="🔍 Rechercher un article..."
+                        value={priceListSearch}
+                        onChange={(e) => setPriceListSearch(e.target.value)}
+                        className="text-sm"
+                      />
+                      {(() => {
+                        const searchLower = priceListSearch.toLowerCase();
+                        const filteredItems = priceListSearch
+                          ? priceListItems.filter(p => p.name.toLowerCase().includes(searchLower))
+                          : priceListItems;
+                        const selectedItem = editingLine.price_list_id
+                          ? priceListItems.find(p => p.id === editingLine.price_list_id)
+                          : null;
+                        return (
+                          <>
+                            <Select
+                              value={editingLine.price_list_id ? String(editingLine.price_list_id) : "_none"}
+                              onValueChange={(v) => {
+                                const id = v === "_none" ? null : Number(v);
+                                const item = id ? priceListItems.find(p => p.id === id) : null;
+                                setEditingLine({
+                                  ...editingLine,
+                                  price_list_id: id,
+                                  unit_cost_ht: item ? item.unit_price : editingLine.unit_cost_ht,
+                                  unit: item ? item.unit : editingLine.unit,
+                                });
+                              }}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Sélectionner un article" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="_none">Aucun (prix manuel)</SelectItem>
+                                {filteredItems.map(p => (
+                                  <SelectItem key={p.id} value={String(p.id)}>
+                                    {p.name} — Rs {p.unit_price.toLocaleString()} / {p.unit}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            {selectedItem && (
+                              <p className="text-xs text-blue-600">
+                                Article sélectionné: {selectedItem.name} — Rs {selectedItem.unit_price.toLocaleString()} / {selectedItem.unit}
+                              </p>
+                            )}
+                          </>
+                        );
+                      })()}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1304,17 +1488,55 @@ export default function BOQPage() {
                 </div>
               </div>
 
+              {/* Unit cost formula (pool models) */}
+              {isPoolModel && (
+                <div>
+                  <Label>Formule de Coût Unitaire</Label>
+                  <Textarea
+                    value={editingLine.unit_cost_formula || ''}
+                    onChange={(e) =>
+                      setEditingLine({ ...editingLine, unit_cost_formula: e.target.value || null })
+                    }
+                    placeholder="Ex: volume_m3 * 5500, surface_m2 * 350"
+                    rows={2}
+                    className="font-mono text-sm"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">
+                    Utilisez les variables pour calculer le coût unitaire dynamiquement
+                  </p>
+                  {editingLine.unit_cost_formula && Object.keys(poolVarContext).length > 0 && (
+                    <p className="text-xs text-blue-600 mt-1">
+                      Résultat: Rs {evaluateFormula(editingLine.unit_cost_formula, poolVarContext).toFixed(2)}
+                    </p>
+                  )}
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label>Coût Unitaire HT (Rs)</Label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    value={editingLine.unit_cost_ht || 0}
-                    onChange={(e) =>
-                      setEditingLine({ ...editingLine, unit_cost_ht: Number(e.target.value) })
-                    }
-                  />
+                  {(() => {
+                    const isUnitCostDisabled = (isPoolModel && !!editingLine.unit_cost_formula) || (pricingMode === 'pricelist' && !!editingLine.price_list_id);
+                    return (
+                      <>
+                        <Label>
+                          Coût Unitaire HT (Rs)
+                          {isPoolModel && editingLine.unit_cost_formula ? ' (calculé)' : ''}
+                        </Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={isPoolModel && editingLine.unit_cost_formula
+                            ? evaluateFormula(editingLine.unit_cost_formula, poolVarContext).toFixed(2)
+                            : editingLine.unit_cost_ht || 0
+                          }
+                          onChange={(e) =>
+                            setEditingLine({ ...editingLine, unit_cost_ht: Number(e.target.value), unit_cost_formula: null })
+                          }
+                          disabled={isUnitCostDisabled}
+                        />
+                      </>
+                    );
+                  })()}
                 </div>
 
                 <div>
@@ -1352,20 +1574,28 @@ export default function BOQPage() {
 
               {/* Preview calculations */}
               <div className="bg-gray-50 p-4 rounded-lg space-y-1">
-                <p className="text-sm text-gray-600">
-                  Coût Total HT: <span className="font-semibold">
-                    {formatPrice((editingLine.quantity || 1) * (editingLine.unit_cost_ht || 0))}
-                  </span>
-                </p>
-                <p className="text-sm text-orange-600">
-                  Prix de Vente HT: <span className="font-semibold">
-                    {formatPrice(
-                      (editingLine.quantity || 1) *
-                      (editingLine.unit_cost_ht || 0) *
-                      (1 + (editingLine.margin_percent || 30) / 100)
-                    )}
-                  </span>
-                </p>
+                {(() => {
+                  const previewQty = isPoolModel && editingLine.quantity_formula
+                    ? evaluateFormula(editingLine.quantity_formula, poolVarContext)
+                    : (editingLine.quantity || 1);
+                  const previewUnitCost = isPoolModel && editingLine.unit_cost_formula
+                    ? evaluateFormula(editingLine.unit_cost_formula, poolVarContext)
+                    : (pricingMode === 'pricelist' && editingLine.price_list_id
+                      ? (priceListItems.find(p => p.id === editingLine.price_list_id)?.unit_price || editingLine.unit_cost_ht || 0)
+                      : (editingLine.unit_cost_ht || 0));
+                  const previewTotal = previewQty * previewUnitCost;
+                  const previewSale = previewTotal * (1 + (editingLine.margin_percent || 30) / 100);
+                  return (
+                    <>
+                      <p className="text-sm text-gray-600">
+                        Coût Total HT: <span className="font-semibold">{formatPrice(previewTotal)}</span>
+                      </p>
+                      <p className="text-sm text-orange-600">
+                        Prix de Vente HT: <span className="font-semibold">{formatPrice(previewSale)}</span>
+                      </p>
+                    </>
+                  );
+                })()}
               </div>
 
               <div className="flex justify-end gap-2 pt-4">

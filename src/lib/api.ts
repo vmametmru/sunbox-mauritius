@@ -207,6 +207,7 @@ export const api = {
     quantity_formula?: string | null;
     unit?: string;
     unit_cost_ht?: number;
+    unit_cost_formula?: string | null;
     price_list_id?: number | null;
     supplier_id?: number | null;
     margin_percent?: number;
@@ -222,6 +223,7 @@ export const api = {
     quantity_formula?: string | null;
     unit?: string;
     unit_cost_ht?: number;
+    unit_cost_formula?: string | null;
     price_list_id?: number | null;
     supplier_id?: number | null;
     margin_percent?: number;

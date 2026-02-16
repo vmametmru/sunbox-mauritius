@@ -555,8 +555,8 @@ try {
         case 'create_boq_line': {
             validateRequired($body, ['category_id', 'description']);
             $stmt = $db->prepare("
-                INSERT INTO boq_lines (category_id, description, quantity, quantity_formula, unit, unit_cost_ht, price_list_id, supplier_id, margin_percent, display_order)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO boq_lines (category_id, description, quantity, quantity_formula, unit, unit_cost_ht, unit_cost_formula, price_list_id, supplier_id, margin_percent, display_order)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ");
             $stmt->execute([
                 (int)$body['category_id'],
@@ -565,6 +565,7 @@ try {
                 !empty($body['quantity_formula']) ? sanitize($body['quantity_formula']) : null,
                 sanitize($body['unit'] ?? 'unité'),
                 (float)($body['unit_cost_ht'] ?? 0),
+                !empty($body['unit_cost_formula']) ? sanitize($body['unit_cost_formula']) : null,
                 !empty($body['price_list_id']) ? (int)$body['price_list_id'] : null,
                 !empty($body['supplier_id']) ? (int)$body['supplier_id'] : null,
                 (float)($body['margin_percent'] ?? 30),
@@ -579,7 +580,7 @@ try {
             $stmt = $db->prepare("
                 UPDATE boq_lines SET
                     description = ?, quantity = ?, quantity_formula = ?, unit = ?, unit_cost_ht = ?,
-                    price_list_id = ?, supplier_id = ?, margin_percent = ?, display_order = ?, updated_at = NOW()
+                    unit_cost_formula = ?, price_list_id = ?, supplier_id = ?, margin_percent = ?, display_order = ?, updated_at = NOW()
                 WHERE id = ?
             ");
             $stmt->execute([
@@ -588,6 +589,7 @@ try {
                 !empty($body['quantity_formula']) ? sanitize($body['quantity_formula']) : null,
                 sanitize($body['unit'] ?? 'unité'),
                 (float)($body['unit_cost_ht'] ?? 0),
+                !empty($body['unit_cost_formula']) ? sanitize($body['unit_cost_formula']) : null,
                 !empty($body['price_list_id']) ? (int)$body['price_list_id'] : null,
                 !empty($body['supplier_id']) ? (int)$body['supplier_id'] : null,
                 (float)($body['margin_percent'] ?? 30),
@@ -642,15 +644,18 @@ try {
                 
                 foreach ($lines as $line) {
                     $insertLine = $db->prepare("
-                        INSERT INTO boq_lines (category_id, description, quantity, unit, unit_cost_ht, supplier_id, margin_percent, display_order)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO boq_lines (category_id, description, quantity, quantity_formula, unit, unit_cost_ht, unit_cost_formula, price_list_id, supplier_id, margin_percent, display_order)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ");
                     $insertLine->execute([
                         $newCatId,
                         $line['description'],
                         $line['quantity'],
+                        $line['quantity_formula'] ?? null,
                         $line['unit'],
                         $line['unit_cost_ht'],
+                        $line['unit_cost_formula'] ?? null,
+                        $line['price_list_id'] ?? null,
                         $line['supplier_id'],
                         $line['margin_percent'],
                         $line['display_order'],
