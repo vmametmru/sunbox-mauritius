@@ -435,7 +435,10 @@ export default function BOQPage() {
   ====================================================== */
   const generatePoolBOQ = async () => {
     if (!selectedModelId || !isPoolModel) return;
-    if (!confirm('Générer le BOQ piscine à partir du modèle par défaut ?\nCela va créer toutes les catégories, sous-catégories et lignes avec les formules et prix.')) return;
+    const confirmMessage = categories.length > 0
+      ? 'ATTENTION: Des catégories existent déjà pour ce modèle.\n\nGénérer le BOQ piscine va AJOUTER toutes les catégories, sous-catégories et lignes du modèle par défaut.\n\nContinuer ?'
+      : 'Générer le BOQ piscine à partir du modèle par défaut ?\nCela va créer toutes les catégories, sous-catégories et lignes avec les formules et prix.';
+    if (!confirm(confirmMessage)) return;
     try {
       setSaving(true);
       const baseTemplate = getDefaultPoolBOQTemplate();
@@ -863,13 +866,13 @@ export default function BOQPage() {
             <Copy className="h-4 w-4 mr-2" /> Cloner
           </Button>
 
-          {isPoolModel && categories.length === 0 && (
+          {isPoolModel && (
             <Button
               onClick={generatePoolBOQ}
               disabled={saving}
               className="bg-blue-500 hover:bg-blue-600"
             >
-              <Waves className="h-4 w-4 mr-2" /> Générer BOQ Piscine
+              <Waves className="h-4 w-4 mr-2" /> {categories.length > 0 ? 'Régénérer BOQ Piscine' : 'Générer BOQ Piscine'}
             </Button>
           )}
         </div>
