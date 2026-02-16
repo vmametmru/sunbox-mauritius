@@ -1274,40 +1274,48 @@ export default function BOQPage() {
                         onChange={(e) => setPriceListSearch(e.target.value)}
                         className="text-sm"
                       />
-                      <Select
-                        value={editingLine.price_list_id ? String(editingLine.price_list_id) : "_none"}
-                        onValueChange={(v) => {
-                          const id = v === "_none" ? null : Number(v);
-                          const item = id ? priceListItems.find(p => p.id === id) : null;
-                          setEditingLine({
-                            ...editingLine,
-                            price_list_id: id,
-                            unit_cost_ht: item ? item.unit_price : editingLine.unit_cost_ht,
-                            unit: item ? item.unit : editingLine.unit,
-                          });
-                        }}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Sélectionner un article" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="_none">Aucun (prix manuel)</SelectItem>
-                          {priceListItems
-                            .filter(p => !priceListSearch || p.name.toLowerCase().includes(priceListSearch.toLowerCase()))
-                            .map(p => (
-                              <SelectItem key={p.id} value={String(p.id)}>
-                                {p.name} — Rs {p.unit_price.toLocaleString()} / {p.unit}
-                              </SelectItem>
-                            ))}
-                        </SelectContent>
-                      </Select>
-                      {editingLine.price_list_id && (() => {
-                        const item = priceListItems.find(p => p.id === editingLine.price_list_id);
-                        return item ? (
-                          <p className="text-xs text-blue-600">
-                            Article sélectionné: {item.name} — Rs {item.unit_price.toLocaleString()} / {item.unit}
-                          </p>
-                        ) : null;
+                      {(() => {
+                        const searchLower = priceListSearch.toLowerCase();
+                        const filteredItems = priceListSearch
+                          ? priceListItems.filter(p => p.name.toLowerCase().includes(searchLower))
+                          : priceListItems;
+                        const selectedItem = editingLine.price_list_id
+                          ? priceListItems.find(p => p.id === editingLine.price_list_id)
+                          : null;
+                        return (
+                          <>
+                            <Select
+                              value={editingLine.price_list_id ? String(editingLine.price_list_id) : "_none"}
+                              onValueChange={(v) => {
+                                const id = v === "_none" ? null : Number(v);
+                                const item = id ? priceListItems.find(p => p.id === id) : null;
+                                setEditingLine({
+                                  ...editingLine,
+                                  price_list_id: id,
+                                  unit_cost_ht: item ? item.unit_price : editingLine.unit_cost_ht,
+                                  unit: item ? item.unit : editingLine.unit,
+                                });
+                              }}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Sélectionner un article" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="_none">Aucun (prix manuel)</SelectItem>
+                                {filteredItems.map(p => (
+                                  <SelectItem key={p.id} value={String(p.id)}>
+                                    {p.name} — Rs {p.unit_price.toLocaleString()} / {p.unit}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            {selectedItem && (
+                              <p className="text-xs text-blue-600">
+                                Article sélectionné: {selectedItem.name} — Rs {selectedItem.unit_price.toLocaleString()} / {selectedItem.unit}
+                              </p>
+                            )}
+                          </>
+                        );
                       })()}
                     </div>
                   )}
@@ -1405,22 +1413,29 @@ export default function BOQPage() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label>
-                    Coût Unitaire HT (Rs)
-                    {isPoolModel && editingLine.unit_cost_formula ? ' (calculé)' : ''}
-                  </Label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    value={isPoolModel && editingLine.unit_cost_formula
-                      ? evaluateFormula(editingLine.unit_cost_formula, poolVarContext).toFixed(2)
-                      : editingLine.unit_cost_ht || 0
-                    }
-                    onChange={(e) =>
-                      setEditingLine({ ...editingLine, unit_cost_ht: Number(e.target.value) })
-                    }
-                    disabled={(isPoolModel && !!editingLine.unit_cost_formula) || (pricingMode === 'pricelist' && !!editingLine.price_list_id)}
-                  />
+                  {(() => {
+                    const isUnitCostDisabled = (isPoolModel && !!editingLine.unit_cost_formula) || (pricingMode === 'pricelist' && !!editingLine.price_list_id);
+                    return (
+                      <>
+                        <Label>
+                          Coût Unitaire HT (Rs)
+                          {isPoolModel && editingLine.unit_cost_formula ? ' (calculé)' : ''}
+                        </Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={isPoolModel && editingLine.unit_cost_formula
+                            ? evaluateFormula(editingLine.unit_cost_formula, poolVarContext).toFixed(2)
+                            : editingLine.unit_cost_ht || 0
+                          }
+                          onChange={(e) =>
+                            setEditingLine({ ...editingLine, unit_cost_ht: Number(e.target.value), unit_cost_formula: null })
+                          }
+                          disabled={isUnitCostDisabled}
+                        />
+                      </>
+                    );
+                  })()}
                 </div>
 
                 <div>
