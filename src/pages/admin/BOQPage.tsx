@@ -186,14 +186,8 @@ export default function BOQPage() {
   const [poolVariables, setPoolVariables] = useState<PoolVariable[]>([]);
   const [priceListItems, setPriceListItems] = useState<PriceListItem[]>([]);
 
-  const selectedModel = useMemo(() => 
-    models.find(m => m.id === selectedModelId),
-    [models, selectedModelId]
-  );
-  const isPoolModel = useMemo(() => 
-    selectedModel?.type === 'pool',
-    [selectedModel]
-  );
+  const selectedModel = models.find(m => m.id === selectedModelId);
+  const isPoolModel = selectedModel?.type === 'pool';
 
   // Calculate pool variable values
   const poolVarContext = useMemo(() => {
@@ -230,6 +224,32 @@ export default function BOQPage() {
       return () => { cancelled = true; };
     }
   }, [selectedModelId]);
+
+  // For pool models, auto-load all subcategory lines so dynamic totals can be computed
+  useEffect(() => {
+    if (!isPoolModel || categories.length === 0) return;
+    const subCats = categories.filter(c => c.parent_id);
+    const missingIds = subCats
+      .map(c => c.id)
+      .filter(id => !(id in categoryLines));
+    if (missingIds.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const newLines: Record<number, BOQLine[]> = {};
+      for (const id of missingIds) {
+        try {
+          const lines = await api.getBOQLines(id);
+          newLines[id] = Array.isArray(lines) ? lines : [];
+        } catch {
+          newLines[id] = [];
+        }
+      }
+      if (!cancelled) {
+        setCategoryLines(prev => ({ ...prev, ...newLines }));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isPoolModel, categories]);
 
   const loadInitialData = async () => {
     try {
@@ -584,6 +604,36 @@ export default function BOQPage() {
   const getSubCategories = (parentId: number) =>
     categories.filter(c => c.parent_id !== null && Number(c.parent_id) === Number(parentId));
 
+  // For pool models, compute dynamic totals from formula-evaluated lines
+  const getPoolCategoryTotals = (catId: number): { costHT: number; saleHT: number } => {
+    const lines = categoryLines[catId];
+    if (!lines || lines.length === 0) return { costHT: 0, saleHT: 0 };
+    let costHT = 0;
+    let saleHT = 0;
+    for (const line of lines) {
+      const qty = line.quantity_formula
+        ? evaluateFormula(line.quantity_formula, poolVarContext)
+        : line.quantity;
+      const unitCost = line.unit_cost_formula
+        ? evaluateFormula(line.unit_cost_formula, poolVarContext)
+        : (line.price_list_id && line.price_list_unit_price
+          ? Number(line.price_list_unit_price)
+          : line.unit_cost_ht);
+      const lineCost = qty * unitCost;
+      costHT += lineCost;
+      saleHT += lineCost * (1 + line.margin_percent / 100);
+    }
+    return { costHT, saleHT };
+  };
+
+  // Compute totals per category – for pool models use dynamic formula evaluation
+  const getCategoryTotals = (cat: BOQCategory): { costHT: number; saleHT: number } => {
+    if (isPoolModel) {
+      return getPoolCategoryTotals(cat.id);
+    }
+    return { costHT: Number(cat.total_cost_ht || 0), saleHT: Number(cat.total_sale_price_ht || 0) };
+  };
+
   // Base categories (non-options, top-level)
   const baseCategories = topLevelCategories.filter(c => !c.is_option);
   const optionCategories = topLevelCategories.filter(c => c.is_option);
@@ -591,22 +641,23 @@ export default function BOQPage() {
   // Sum includes sub-category totals (already aggregated since each sub-cat is its own row)
   const allBaseCategories = categories.filter(c => !c.is_option);
   
-  const totalBasePriceHT = allBaseCategories
-    .reduce((sum, c) => sum + Number(c.total_sale_price_ht || 0), 0);
-
   const totalBaseCostHT = allBaseCategories
-    .reduce((sum, c) => sum + Number(c.total_cost_ht || 0), 0);
+    .reduce((sum, c) => sum + getCategoryTotals(c).costHT, 0);
+
+  const totalBasePriceHT = allBaseCategories
+    .reduce((sum, c) => sum + getCategoryTotals(c).saleHT, 0);
 
   const totalBaseProfitHT = totalBasePriceHT - totalBaseCostHT;
   const totalBasePriceTTC = calculateTTC(totalBasePriceHT, vatRate);
 
   // Options
   const allOptionCategories = categories.filter(c => c.is_option);
-  const totalOptionsPriceHT = allOptionCategories
-    .reduce((sum, c) => sum + Number(c.total_sale_price_ht || 0), 0);
-
+  
   const totalOptionsCostHT = allOptionCategories
-    .reduce((sum, c) => sum + Number(c.total_cost_ht || 0), 0);
+    .reduce((sum, c) => sum + getCategoryTotals(c).costHT, 0);
+
+  const totalOptionsPriceHT = allOptionCategories
+    .reduce((sum, c) => sum + getCategoryTotals(c).saleHT, 0);
 
   const totalOptionsProfitHT = totalOptionsPriceHT - totalOptionsCostHT;
   const totalOptionsPriceTTC = calculateTTC(totalOptionsPriceHT, vatRate);
@@ -728,11 +779,12 @@ export default function BOQPage() {
     const subCategories = getSubCategories(category.id);
     const hasSubCategories = subCategories.length > 0;
 
-    // Sum totals including sub-categories
-    const subTotalCost = subCategories.reduce((s, sc) => s + Number(sc.total_cost_ht || 0), 0);
-    const subTotalSale = subCategories.reduce((s, sc) => s + Number(sc.total_sale_price_ht || 0), 0);
-    const combinedCostHT = Number(category.total_cost_ht || 0) + subTotalCost;
-    const combinedSaleHT = Number(category.total_sale_price_ht || 0) + subTotalSale;
+    // Sum totals including sub-categories – use dynamic formula evaluation for pool models
+    const catTotals = getCategoryTotals(category);
+    const subTotalCost = subCategories.reduce((s, sc) => s + getCategoryTotals(sc).costHT, 0);
+    const subTotalSale = subCategories.reduce((s, sc) => s + getCategoryTotals(sc).saleHT, 0);
+    const combinedCostHT = catTotals.costHT + subTotalCost;
+    const combinedSaleHT = catTotals.saleHT + subTotalSale;
     const combinedProfitHT = combinedSaleHT - combinedCostHT;
 
     return (
@@ -809,8 +861,8 @@ export default function BOQPage() {
                       </div>
                       <div className="flex items-center gap-4">
                         <div className="text-right text-sm">
-                          <span className="text-gray-500">Coût: {formatPrice(subCat.total_cost_ht)}</span>
-                          <span className="text-orange-600 ml-3 font-semibold">Vente: {formatPrice(subCat.total_sale_price_ht)}</span>
+                          <span className="text-gray-500">Coût: {formatPrice(getCategoryTotals(subCat).costHT)}</span>
+                          <span className="text-orange-600 ml-3 font-semibold">Vente: {formatPrice(getCategoryTotals(subCat).saleHT)}</span>
                         </div>
                         <div className="flex gap-1">
                           <Button size="sm" variant="ghost" onClick={() => openEditCategory(subCat)}>
