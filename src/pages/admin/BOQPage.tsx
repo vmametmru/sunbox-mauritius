@@ -848,7 +848,7 @@ export default function BOQPage() {
           <p className="text-gray-500 mt-1">Gestion des prix de base et options par modèle (TVA: {vatRate}%)</p>
         </div>
 
-        <div className="flex gap-2 items-center">
+        <div className="flex flex-wrap gap-2 items-center">
           <Select
             value={selectedModelId?.toString()}
             onValueChange={(v) => setSelectedModelId(Number(v))}
