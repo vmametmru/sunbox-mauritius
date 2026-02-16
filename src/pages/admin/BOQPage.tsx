@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Plus,
   Edit,
@@ -118,6 +119,7 @@ export default function BOQPage() {
   const { toast } = useToast();
   const { data: siteSettings } = useSiteSettings();
   const vatRate = Number(siteSettings?.vat_rate) || 15;
+  const [searchParams] = useSearchParams();
   
   const [models, setModels] = useState<Model[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -161,7 +163,17 @@ export default function BOQPage() {
       setModels(modelsData);
       setSuppliers(suppliersData);
       setCategoryImages(Array.isArray(categoryImagesData) ? categoryImagesData : []);
-      if (modelsData.length > 0) setSelectedModelId(modelsData[0].id);
+      
+      // Check for model param in URL, otherwise use first model
+      const modelParam = searchParams.get('model');
+      const modelIdFromUrl = modelParam ? parseInt(modelParam, 10) : null;
+      const validModelFromUrl = modelIdFromUrl && modelsData.some((m: Model) => m.id === modelIdFromUrl);
+      
+      if (validModelFromUrl) {
+        setSelectedModelId(modelIdFromUrl);
+      } else if (modelsData.length > 0) {
+        setSelectedModelId(modelsData[0].id);
+      }
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
     }

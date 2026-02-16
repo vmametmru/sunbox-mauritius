@@ -255,6 +255,14 @@ try {
             break;
         }
 
+        case 'delete_model': {
+            validateRequired($body, ['id']);
+            $stmt = $db->prepare("DELETE FROM models WHERE id = ?");
+            $stmt->execute([(int)$body['id']]);
+            ok();
+            break;
+        }
+
         // === OPTIONS (Nouveau)
         case 'get_model_options': {
             $modelId = (int)($body['model_id'] ?? 0);
