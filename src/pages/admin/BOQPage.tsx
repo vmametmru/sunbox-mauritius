@@ -504,9 +504,22 @@ export default function BOQPage() {
       const loadedCategories = await api.getBOQCategories(selectedModelId);
       setCategories(loadedCategories);
       
-      // Auto-expand all top-level categories to show subcategories
-      const topCats = loadedCategories.filter((c: any) => !c.parent_id);
-      setExpandedCategories(topCats.map((c: any) => c.id));
+      // Auto-expand ALL categories (top-level and subcategories) to show their lines
+      const allCategoryIds = loadedCategories.map((c: any) => c.id);
+      setExpandedCategories(allCategoryIds);
+      
+      // Load lines for all categories that have lines (subcategories)
+      const subCats = loadedCategories.filter((c: any) => c.parent_id);
+      const linesData: Record<number, any[]> = {};
+      for (const subCat of subCats) {
+        try {
+          const lines = await api.getBOQLines(subCat.id);
+          linesData[subCat.id] = lines;
+        } catch {
+          // Ignore if no lines
+        }
+      }
+      setCategoryLines(linesData);
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
     } finally {
@@ -949,6 +962,82 @@ export default function BOQPage() {
                 ))}
               </div>
             )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* OVERALL SUMMARY - Total for entire model (Base + Options) */}
+      {selectedModelId && categories.length > 0 && (
+        <Card className="border-2 border-blue-400 bg-gradient-to-br from-blue-50 to-white shadow-lg">
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl flex items-center justify-center shadow-md">
+                <Calculator className="h-6 w-6 text-white" />
+              </div>
+              <div>
+                <CardTitle className="text-2xl font-bold text-gray-900">Résumé Global du Modèle</CardTitle>
+                <p className="text-sm text-gray-500 mt-1">Prix de Base + Options (TVA: {vatRate}%)</p>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <Card className="border-2 border-gray-200">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center">
+                      <Package className="h-6 w-6 text-gray-600" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500 font-medium">Coût Total HT</p>
+                      <p className="text-2xl font-bold text-gray-700">{formatPrice(totalBaseCostHT + totalOptionsCostHT)}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border-2 border-green-200 bg-green-50">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
+                      <Tag className="h-6 w-6 text-green-600" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500 font-medium">Profit Total HT</p>
+                      <p className="text-2xl font-bold text-green-600">{formatPrice(totalBaseProfitHT + totalOptionsProfitHT)}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border-2 border-orange-200 bg-orange-50">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center">
+                      <Calculator className="h-6 w-6 text-orange-600" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500 font-medium">Prix Total HT</p>
+                      <p className="text-2xl font-bold text-orange-600">{formatPrice(totalBasePriceHT + totalOptionsPriceHT)}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border-2 border-blue-300 bg-gradient-to-br from-blue-100 to-blue-50">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center shadow">
+                      <Calculator className="h-6 w-6 text-white" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500 font-medium">Prix Total TTC</p>
+                      <p className="text-2xl font-bold text-blue-700">{formatPrice(totalBasePriceTTC + totalOptionsPriceTTC)}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           </CardContent>
         </Card>
       )}
