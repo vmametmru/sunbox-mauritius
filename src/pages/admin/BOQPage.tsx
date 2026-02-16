@@ -166,13 +166,11 @@ export default function BOQPage() {
       
       // Check for model param in URL, otherwise use first model
       const modelParam = searchParams.get('model');
-      if (modelParam) {
-        const modelId = parseInt(modelParam, 10);
-        if (modelsData.some((m: Model) => m.id === modelId)) {
-          setSelectedModelId(modelId);
-        } else if (modelsData.length > 0) {
-          setSelectedModelId(modelsData[0].id);
-        }
+      const modelIdFromUrl = modelParam ? parseInt(modelParam, 10) : null;
+      const validModelFromUrl = modelIdFromUrl && modelsData.some((m: Model) => m.id === modelIdFromUrl);
+      
+      if (validModelFromUrl) {
+        setSelectedModelId(modelIdFromUrl);
       } else if (modelsData.length > 0) {
         setSelectedModelId(modelsData[0].id);
       }
