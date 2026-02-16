@@ -169,6 +169,7 @@ export const api = {
 
   createBOQCategory(category: {
     model_id: number;
+    parent_id?: number | null;
     name: string;
     is_option?: boolean;
     display_order?: number;
@@ -179,6 +180,7 @@ export const api = {
 
   updateBOQCategory(category: {
     id: number;
+    parent_id?: number | null;
     name: string;
     is_option?: boolean;
     display_order?: number;
@@ -202,8 +204,10 @@ export const api = {
     category_id: number;
     description: string;
     quantity?: number;
+    quantity_formula?: string | null;
     unit?: string;
     unit_cost_ht?: number;
+    price_list_id?: number | null;
     supplier_id?: number | null;
     margin_percent?: number;
     display_order?: number;
@@ -215,8 +219,10 @@ export const api = {
     id: number;
     description: string;
     quantity?: number;
+    quantity_formula?: string | null;
     unit?: string;
     unit_cost_ht?: number;
+    price_list_id?: number | null;
     supplier_id?: number | null;
     margin_percent?: number;
     display_order?: number;
@@ -645,6 +651,100 @@ export const api = {
 
   reorderDevIdeas(orders: Array<{ id: number; priority_order: number }>) {
     return this.query('reorder_dev_ideas', { orders });
+  },
+
+  /* =====================================================
+     POOL BOQ VARIABLES
+  ===================================================== */
+  getPoolBOQVariables() {
+    return this.query('get_pool_boq_variables');
+  },
+
+  createPoolBOQVariable(variable: {
+    name: string;
+    label: string;
+    unit?: string;
+    formula: string;
+    display_order?: number;
+  }) {
+    return this.query('create_pool_boq_variable', variable);
+  },
+
+  updatePoolBOQVariable(variable: {
+    id: number;
+    name: string;
+    label: string;
+    unit?: string;
+    formula: string;
+    display_order?: number;
+  }) {
+    return this.query('update_pool_boq_variable', variable);
+  },
+
+  deletePoolBOQVariable(id: number) {
+    return this.query('delete_pool_boq_variable', { id });
+  },
+
+  /* =====================================================
+     POOL BOQ PRICE LIST
+  ===================================================== */
+  getPoolBOQPriceList() {
+    return this.query('get_pool_boq_price_list');
+  },
+
+  createPoolBOQPriceListItem(item: {
+    name: string;
+    unit?: string;
+    unit_price?: number;
+    has_vat?: boolean;
+    supplier_id?: number | null;
+    display_order?: number;
+  }) {
+    return this.query('create_pool_boq_price_list_item', item);
+  },
+
+  updatePoolBOQPriceListItem(item: {
+    id: number;
+    name: string;
+    unit?: string;
+    unit_price?: number;
+    has_vat?: boolean;
+    supplier_id?: number | null;
+    display_order?: number;
+  }) {
+    return this.query('update_pool_boq_price_list_item', item);
+  },
+
+  deletePoolBOQPriceListItem(id: number) {
+    return this.query('delete_pool_boq_price_list_item', { id });
+  },
+
+  /* =====================================================
+     POOL BOQ TEMPLATES
+  ===================================================== */
+  getPoolBOQTemplates() {
+    return this.query('get_pool_boq_templates');
+  },
+
+  createPoolBOQTemplate(template: {
+    name: string;
+    description?: string;
+    is_default?: boolean;
+  }) {
+    return this.query('create_pool_boq_template', template);
+  },
+
+  updatePoolBOQTemplate(template: {
+    id: number;
+    name: string;
+    description?: string;
+    is_default?: boolean;
+  }) {
+    return this.query('update_pool_boq_template', template);
+  },
+
+  deletePoolBOQTemplate(id: number) {
+    return this.query('delete_pool_boq_template', { id });
   },
 };
 

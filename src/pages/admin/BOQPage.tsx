@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Plus,
@@ -11,7 +11,8 @@ import {
   Package,
   Tag,
   Settings,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Waves
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -45,6 +46,12 @@ import {
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { useSiteSettings, calculateTTC } from '@/hooks/use-site-settings';
+import {
+  evaluatePoolVariables,
+  evaluateFormula,
+  type PoolVariable,
+  type PoolDimensions,
+} from '@/lib/pool-formulas';
 
 /* ======================================================
    TYPES
@@ -66,9 +73,17 @@ interface CategoryImage {
   url: string;
 }
 
+interface PriceListItem {
+  id: number;
+  name: string;
+  unit: string;
+  unit_price: number;
+}
+
 interface BOQCategory {
   id: number;
   model_id: number;
+  parent_id: number | null;
   name: string;
   is_option: boolean;
   display_order: number;
@@ -84,8 +99,12 @@ interface BOQLine {
   category_id: number;
   description: string;
   quantity: number;
+  quantity_formula: string | null;
   unit: string;
   unit_cost_ht: number;
+  price_list_id: number | null;
+  price_list_name: string | null;
+  price_list_unit_price: number | null;
   supplier_id: number | null;
   supplier_name: string | null;
   margin_percent: number;
@@ -96,6 +115,7 @@ interface BOQLine {
 
 const emptyCategory: Partial<BOQCategory> = {
   name: '',
+  parent_id: null,
   is_option: false,
   display_order: 0,
   image_id: null,
@@ -105,8 +125,10 @@ const emptyCategory: Partial<BOQCategory> = {
 const emptyLine: Partial<BOQLine> = {
   description: '',
   quantity: 1,
+  quantity_formula: null,
   unit: 'unité',
   unit_cost_ht: 0,
+  price_list_id: null,
   supplier_id: null,
   margin_percent: 30,
   display_order: 0,
@@ -142,6 +164,24 @@ export default function BOQPage() {
   const [cloneSourceModelId, setCloneSourceModelId] = useState<number | null>(null);
   const [isCloneDialogOpen, setIsCloneDialogOpen] = useState(false);
 
+  // Pool-specific state
+  const [poolDimensions, setPoolDimensions] = useState<PoolDimensions>({
+    longueur: 8,
+    largeur: 4,
+    profondeur: 1.5,
+  });
+  const [poolVariables, setPoolVariables] = useState<PoolVariable[]>([]);
+  const [priceListItems, setPriceListItems] = useState<PriceListItem[]>([]);
+
+  const selectedModel = models.find(m => m.id === selectedModelId);
+  const isPoolModel = selectedModel?.type === 'pool';
+
+  // Calculate pool variable values
+  const poolVarContext = useMemo(() => {
+    if (!isPoolModel || poolVariables.length === 0) return {};
+    return evaluatePoolVariables(poolDimensions, poolVariables);
+  }, [isPoolModel, poolDimensions, poolVariables]);
+
   /* ======================================================
      LOAD DATA
   ====================================================== */
@@ -163,6 +203,18 @@ export default function BOQPage() {
       setModels(modelsData);
       setSuppliers(suppliersData);
       setCategoryImages(Array.isArray(categoryImagesData) ? categoryImagesData : []);
+
+      // Load pool BOQ data
+      try {
+        const [poolVarsData, priceListData] = await Promise.all([
+          api.getPoolBOQVariables(),
+          api.getPoolBOQPriceList(),
+        ]);
+        setPoolVariables(Array.isArray(poolVarsData) ? poolVarsData : []);
+        setPriceListItems(Array.isArray(priceListData) ? priceListData : []);
+      } catch {
+        // Tables may not exist yet, ignore
+      }
       
       // Check for model param in URL, otherwise use first model
       const modelParam = searchParams.get('model');
@@ -223,6 +275,7 @@ export default function BOQPage() {
         await api.updateBOQCategory({
           id: editingCategory.id,
           name: editingCategory.name!,
+          parent_id: editingCategory.parent_id,
           is_option: editingCategory.is_option,
           display_order: editingCategory.display_order,
           image_id: editingCategory.image_id,
@@ -232,6 +285,7 @@ export default function BOQPage() {
         await api.createBOQCategory({
           model_id: selectedModelId,
           name: editingCategory.name!,
+          parent_id: editingCategory.parent_id,
           is_option: editingCategory.is_option,
           display_order: editingCategory.display_order,
           image_id: editingCategory.image_id,
@@ -289,15 +343,28 @@ export default function BOQPage() {
     try {
       setSaving(true);
       if (editingLine.id) {
-        await api.updateBOQLine(editingLine as { id: number; description: string });
+        await api.updateBOQLine({
+          id: editingLine.id,
+          description: editingLine.description!,
+          quantity: editingLine.quantity,
+          quantity_formula: editingLine.quantity_formula,
+          unit: editingLine.unit,
+          unit_cost_ht: editingLine.unit_cost_ht,
+          price_list_id: editingLine.price_list_id,
+          supplier_id: editingLine.supplier_id,
+          margin_percent: editingLine.margin_percent,
+          display_order: editingLine.display_order,
+        });
         toast({ title: 'Succès', description: 'Ligne mise à jour' });
       } else {
         await api.createBOQLine({
           category_id: editingCategoryId,
           description: editingLine.description!,
           quantity: editingLine.quantity,
+          quantity_formula: editingLine.quantity_formula,
           unit: editingLine.unit,
           unit_cost_ht: editingLine.unit_cost_ht,
+          price_list_id: editingLine.price_list_id,
           supplier_id: editingLine.supplier_id,
           margin_percent: editingLine.margin_percent,
           display_order: editingLine.display_order,
@@ -364,24 +431,35 @@ export default function BOQPage() {
   /* ======================================================
      CALCULATIONS
   ====================================================== */
-  // Base categories (non-options)
-  const baseCategories = categories.filter(c => !c.is_option);
-  const optionCategories = categories.filter(c => c.is_option);
+  // Top-level categories only (no parent)
+  const topLevelCategories = categories.filter(c => !c.parent_id);
   
-  const totalBasePriceHT = baseCategories
+  // Get sub-categories for a given parent
+  const getSubCategories = (parentId: number) =>
+    categories.filter(c => c.parent_id === parentId);
+
+  // Base categories (non-options, top-level)
+  const baseCategories = topLevelCategories.filter(c => !c.is_option);
+  const optionCategories = topLevelCategories.filter(c => c.is_option);
+
+  // Sum includes sub-category totals (already aggregated since each sub-cat is its own row)
+  const allBaseCategories = categories.filter(c => !c.is_option);
+  
+  const totalBasePriceHT = allBaseCategories
     .reduce((sum, c) => sum + Number(c.total_sale_price_ht || 0), 0);
 
-  const totalBaseCostHT = baseCategories
+  const totalBaseCostHT = allBaseCategories
     .reduce((sum, c) => sum + Number(c.total_cost_ht || 0), 0);
 
   const totalBaseProfitHT = totalBasePriceHT - totalBaseCostHT;
   const totalBasePriceTTC = calculateTTC(totalBasePriceHT, vatRate);
 
   // Options
-  const totalOptionsPriceHT = optionCategories
+  const allOptionCategories = categories.filter(c => c.is_option);
+  const totalOptionsPriceHT = allOptionCategories
     .reduce((sum, c) => sum + Number(c.total_sale_price_ht || 0), 0);
 
-  const totalOptionsCostHT = optionCategories
+  const totalOptionsCostHT = allOptionCategories
     .reduce((sum, c) => sum + Number(c.total_cost_ht || 0), 0);
 
   const totalOptionsProfitHT = totalOptionsPriceHT - totalOptionsCostHT;
@@ -390,104 +468,256 @@ export default function BOQPage() {
   const formatPrice = (price: number) => `Rs ${price.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 
   /* ======================================================
+     RENDER LINES TABLE
+  ====================================================== */
+  const renderLinesTable = (categoryId: number) => {
+    const lines = categoryLines[categoryId];
+    if (!lines || lines.length === 0) {
+      return <p className="text-gray-500 text-sm italic">Aucune ligne dans cette catégorie</p>;
+    }
+
+    return (
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Description</TableHead>
+            {isPoolModel && <TableHead>Formule</TableHead>}
+            <TableHead className="text-right">Qté</TableHead>
+            <TableHead>Unité</TableHead>
+            <TableHead className="text-right">Coût Unit. HT</TableHead>
+            <TableHead>Fournisseur</TableHead>
+            <TableHead className="text-right">Marge %</TableHead>
+            <TableHead className="text-right">Coût Total HT</TableHead>
+            <TableHead className="text-right">Prix Vente HT</TableHead>
+            <TableHead></TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {lines.map(line => {
+            // For pool models with formulas, calculate dynamic quantity
+            const dynamicQty = isPoolModel && line.quantity_formula
+              ? evaluateFormula(line.quantity_formula, poolVarContext)
+              : line.quantity;
+            const effectiveUnitCost = line.price_list_id && line.price_list_unit_price
+              ? Number(line.price_list_unit_price)
+              : line.unit_cost_ht;
+            const dynTotalCost = dynamicQty * effectiveUnitCost;
+            const dynSalePrice = dynTotalCost * (1 + line.margin_percent / 100);
+
+            return (
+              <TableRow key={line.id}>
+                <TableCell className="font-medium whitespace-pre-line">
+                  {line.description}
+                  {line.price_list_name && (
+                    <span className="block text-xs text-blue-500">📋 {line.price_list_name}</span>
+                  )}
+                </TableCell>
+                {isPoolModel && (
+                  <TableCell className="text-xs text-gray-500 font-mono max-w-[200px] truncate" title={line.quantity_formula || ''}>
+                    {line.quantity_formula || '-'}
+                  </TableCell>
+                )}
+                <TableCell className="text-right">
+                  {isPoolModel && line.quantity_formula ? (
+                    <span title={`Formule: ${line.quantity_formula}`}>
+                      {dynamicQty.toFixed(2)}
+                    </span>
+                  ) : (
+                    line.quantity
+                  )}
+                </TableCell>
+                <TableCell>{line.unit}</TableCell>
+                <TableCell className="text-right">{formatPrice(effectiveUnitCost)}</TableCell>
+                <TableCell>{line.supplier_name || '-'}</TableCell>
+                <TableCell className="text-right">{line.margin_percent}%</TableCell>
+                <TableCell className="text-right">
+                  {isPoolModel && line.quantity_formula
+                    ? formatPrice(dynTotalCost)
+                    : formatPrice(line.total_cost_ht)
+                  }
+                </TableCell>
+                <TableCell className="text-right font-semibold text-orange-600">
+                  {isPoolModel && line.quantity_formula
+                    ? formatPrice(dynSalePrice)
+                    : formatPrice(line.sale_price_ht)
+                  }
+                </TableCell>
+                <TableCell>
+                  <div className="flex gap-1">
+                    <Button size="sm" variant="ghost" onClick={() => openEditLine(line)}>
+                      <Edit className="h-3 w-3" />
+                    </Button>
+                    <Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteLine(line)}>
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    );
+  };
+
+  /* ======================================================
      RENDER CATEGORY CARD
   ====================================================== */
-  const renderCategoryCard = (category: BOQCategory) => (
-    <Card key={category.id}>
-      <CardHeader
-        className="cursor-pointer hover:bg-gray-50"
-        onClick={() => toggleCategory(category.id)}
-      >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            {expandedCategories.includes(category.id) ? (
-              <ChevronDown className="h-5 w-5 text-gray-500" />
-            ) : (
-              <ChevronRight className="h-5 w-5 text-gray-500" />
-            )}
-            <CardTitle className="text-lg">{category.name}</CardTitle>
-            {category.is_option && (
-              <Badge variant="secondary">Option</Badge>
-            )}
-          </div>
-          
-          <div className="flex items-center gap-4">
-            <div className="text-right">
-              <p className="text-sm text-gray-500">Coût HT: {formatPrice(category.total_cost_ht)}</p>
-              <p className="text-sm text-green-600">Profit HT: {formatPrice(category.total_profit_ht)}</p>
-              <p className="font-bold text-orange-600">Vente HT: {formatPrice(category.total_sale_price_ht)}</p>
-              <p className="text-sm font-semibold text-blue-600">Vente TTC: {formatPrice(calculateTTC(category.total_sale_price_ht, vatRate))}</p>
+  const renderCategoryCard = (category: BOQCategory) => {
+    const subCategories = getSubCategories(category.id);
+    const hasSubCategories = subCategories.length > 0;
+
+    // Sum totals including sub-categories
+    const subTotalCost = subCategories.reduce((s, sc) => s + Number(sc.total_cost_ht || 0), 0);
+    const subTotalSale = subCategories.reduce((s, sc) => s + Number(sc.total_sale_price_ht || 0), 0);
+    const combinedCostHT = Number(category.total_cost_ht || 0) + subTotalCost;
+    const combinedSaleHT = Number(category.total_sale_price_ht || 0) + subTotalSale;
+    const combinedProfitHT = combinedSaleHT - combinedCostHT;
+
+    return (
+      <Card key={category.id}>
+        <CardHeader
+          className="cursor-pointer hover:bg-gray-50"
+          onClick={() => toggleCategory(category.id)}
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              {expandedCategories.includes(category.id) ? (
+                <ChevronDown className="h-5 w-5 text-gray-500" />
+              ) : (
+                <ChevronRight className="h-5 w-5 text-gray-500" />
+              )}
+              <CardTitle className="text-lg">{category.name}</CardTitle>
+              {category.is_option && (
+                <Badge variant="secondary">Option</Badge>
+              )}
+              {hasSubCategories && (
+                <Badge variant="outline" className="text-xs">{subCategories.length} sous-cat.</Badge>
+              )}
             </div>
             
-            <div className="flex gap-1" onClick={e => e.stopPropagation()}>
-              <Button size="sm" variant="ghost" onClick={() => openEditCategory(category)}>
-                <Edit className="h-4 w-4" />
-              </Button>
-              <Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteCategory(category.id)}>
-                <Trash2 className="h-4 w-4" />
-              </Button>
+            <div className="flex items-center gap-4">
+              <div className="text-right">
+                <p className="text-sm text-gray-500">Coût HT: {formatPrice(combinedCostHT)}</p>
+                <p className="text-sm text-green-600">Profit HT: {formatPrice(combinedProfitHT)}</p>
+                <p className="font-bold text-orange-600">Vente HT: {formatPrice(combinedSaleHT)}</p>
+                <p className="text-sm font-semibold text-blue-600">Vente TTC: {formatPrice(calculateTTC(combinedSaleHT, vatRate))}</p>
+              </div>
+              
+              <div className="flex gap-1" onClick={e => e.stopPropagation()}>
+                <Button size="sm" variant="ghost" onClick={() => openEditCategory(category)}>
+                  <Edit className="h-4 w-4" />
+                </Button>
+                <Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteCategory(category.id)}>
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
           </div>
-        </div>
-      </CardHeader>
+        </CardHeader>
 
-      {expandedCategories.includes(category.id) && (
-        <CardContent className="pt-0">
-          <div className="mb-4">
-            <Button size="sm" onClick={() => openNewLine(category.id)}>
-              <Plus className="h-4 w-4 mr-1" /> Ajouter une ligne
-            </Button>
-          </div>
+        {expandedCategories.includes(category.id) && (
+          <CardContent className="pt-0">
+            {/* Parent category's own lines */}
+            {!hasSubCategories && (
+              <>
+                <div className="mb-4">
+                  <Button size="sm" onClick={() => openNewLine(category.id)}>
+                    <Plus className="h-4 w-4 mr-1" /> Ajouter une ligne
+                  </Button>
+                </div>
+                {renderLinesTable(category.id)}
+              </>
+            )}
 
-          {categoryLines[category.id] && categoryLines[category.id].length > 0 ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Description</TableHead>
-                  <TableHead className="text-right">Qté</TableHead>
-                  <TableHead>Unité</TableHead>
-                  <TableHead className="text-right">Coût Unit. HT</TableHead>
-                  <TableHead>Fournisseur</TableHead>
-                  <TableHead className="text-right">Marge %</TableHead>
-                  <TableHead className="text-right">Coût Total HT</TableHead>
-                  <TableHead className="text-right">Prix Vente HT</TableHead>
-                  <TableHead></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {categoryLines[category.id].map(line => (
-                  <TableRow key={line.id}>
-                    <TableCell className="font-medium whitespace-pre-line">{line.description}</TableCell>
-                    <TableCell className="text-right">{line.quantity}</TableCell>
-                    <TableCell>{line.unit}</TableCell>
-                    <TableCell className="text-right">{formatPrice(line.unit_cost_ht)}</TableCell>
-                    <TableCell>{line.supplier_name || '-'}</TableCell>
-                    <TableCell className="text-right">{line.margin_percent}%</TableCell>
-                    <TableCell className="text-right">{formatPrice(line.total_cost_ht)}</TableCell>
-                    <TableCell className="text-right font-semibold text-orange-600">
-                      {formatPrice(line.sale_price_ht)}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-1">
-                        <Button size="sm" variant="ghost" onClick={() => openEditLine(line)}>
-                          <Edit className="h-3 w-3" />
-                        </Button>
-                        <Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteLine(line)}>
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
+            {/* Sub-categories */}
+            {hasSubCategories && (
+              <div className="space-y-4">
+                {subCategories.map(subCat => (
+                  <div key={subCat.id} className="border rounded-lg p-4 bg-gray-50/50">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2 cursor-pointer" onClick={() => toggleCategory(subCat.id)}>
+                        {expandedCategories.includes(subCat.id) ? (
+                          <ChevronDown className="h-4 w-4 text-gray-400" />
+                        ) : (
+                          <ChevronRight className="h-4 w-4 text-gray-400" />
+                        )}
+                        <h4 className="font-semibold text-gray-700">{subCat.name}</h4>
                       </div>
-                    </TableCell>
-                  </TableRow>
+                      <div className="flex items-center gap-4">
+                        <div className="text-right text-sm">
+                          <span className="text-gray-500">Coût: {formatPrice(subCat.total_cost_ht)}</span>
+                          <span className="text-orange-600 ml-3 font-semibold">Vente: {formatPrice(subCat.total_sale_price_ht)}</span>
+                        </div>
+                        <div className="flex gap-1">
+                          <Button size="sm" variant="ghost" onClick={() => openEditCategory(subCat)}>
+                            <Edit className="h-3 w-3" />
+                          </Button>
+                          <Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteCategory(subCat.id)}>
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {expandedCategories.includes(subCat.id) && (
+                      <>
+                        <div className="mb-3">
+                          <Button size="sm" variant="outline" onClick={() => openNewLine(subCat.id)}>
+                            <Plus className="h-3 w-3 mr-1" /> Ajouter une ligne
+                          </Button>
+                        </div>
+                        {renderLinesTable(subCat.id)}
+                      </>
+                    )}
+                  </div>
                 ))}
-              </TableBody>
-            </Table>
-          ) : (
-            <p className="text-gray-500 text-sm italic">Aucune ligne dans cette catégorie</p>
-          )}
-        </CardContent>
-      )}
-    </Card>
-  );
+
+                {/* Button to add sub-category */}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setEditingCategory({
+                      ...emptyCategory,
+                      model_id: selectedModelId!,
+                      parent_id: category.id,
+                      is_option: category.is_option,
+                    });
+                    setIsCategoryDialogOpen(true);
+                  }}
+                >
+                  <Plus className="h-4 w-4 mr-1" /> Ajouter une sous-catégorie
+                </Button>
+              </div>
+            )}
+
+            {/* If no sub-categories and no lines yet, also show add sub-cat button */}
+            {!hasSubCategories && (
+              <div className="mt-4 pt-4 border-t">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-gray-500"
+                  onClick={() => {
+                    setEditingCategory({
+                      ...emptyCategory,
+                      model_id: selectedModelId!,
+                      parent_id: category.id,
+                      is_option: category.is_option,
+                    });
+                    setIsCategoryDialogOpen(true);
+                  }}
+                >
+                  <Plus className="h-4 w-4 mr-1" /> Ajouter une sous-catégorie
+                </Button>
+              </div>
+            )}
+          </CardContent>
+        )}
+      </Card>
+    );
+  };
 
   /* ======================================================
      RENDER
@@ -527,6 +757,67 @@ export default function BOQPage() {
           </Button>
         </div>
       </div>
+
+      {/* POOL DIMENSIONS PANEL */}
+      {isPoolModel && selectedModelId && (
+        <Card className="border-blue-200 bg-blue-50/50">
+          <CardHeader className="pb-3">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center">
+                <Waves className="h-4 w-4 text-white" />
+              </div>
+              <CardTitle className="text-lg">Dimensions de la Piscine (Simulation)</CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <div>
+                <Label>Longueur (m)</Label>
+                <Input
+                  type="number"
+                  step="0.1"
+                  min="1"
+                  value={poolDimensions.longueur}
+                  onChange={(e) => setPoolDimensions(prev => ({ ...prev, longueur: Number(e.target.value) || 1 }))}
+                />
+              </div>
+              <div>
+                <Label>Largeur (m)</Label>
+                <Input
+                  type="number"
+                  step="0.1"
+                  min="1"
+                  value={poolDimensions.largeur}
+                  onChange={(e) => setPoolDimensions(prev => ({ ...prev, largeur: Number(e.target.value) || 1 }))}
+                />
+              </div>
+              <div>
+                <Label>Profondeur (m)</Label>
+                <Input
+                  type="number"
+                  step="0.1"
+                  min="0.5"
+                  value={poolDimensions.profondeur}
+                  onChange={(e) => setPoolDimensions(prev => ({ ...prev, profondeur: Number(e.target.value) || 0.5 }))}
+                />
+              </div>
+            </div>
+
+            {poolVariables.length > 0 && (
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                {poolVariables.map(v => (
+                  <div key={v.id} className="bg-white rounded-lg p-3 border">
+                    <p className="text-xs text-gray-500">{v.label}</p>
+                    <p className="text-lg font-bold text-blue-700">
+                      {(poolVarContext[v.name] || 0).toFixed(2)} <span className="text-xs font-normal text-gray-400">{v.unit}</span>
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* BLOCK A: PRIX DE BASE (non-options) */}
       {selectedModelId && (
@@ -731,6 +1022,30 @@ export default function BOQPage() {
               </div>
 
               <div>
+                <Label>Catégorie parente (sous-catégorie)</Label>
+                <Select
+                  value={editingCategory.parent_id ? String(editingCategory.parent_id) : "_none"}
+                  onValueChange={(v) =>
+                    setEditingCategory({ ...editingCategory, parent_id: v === "_none" ? null : Number(v) })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Aucune (catégorie principale)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="_none">Aucune (catégorie principale)</SelectItem>
+                    {topLevelCategories
+                      .filter(c => c.id !== editingCategory.id)
+                      .map(c => (
+                        <SelectItem key={c.id} value={String(c.id)}>
+                          {c.name}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
                 <Label>Ordre d'affichage</Label>
                 <Input
                   type="number"
@@ -892,16 +1207,76 @@ export default function BOQPage() {
                 />
               </div>
 
+              {/* Price list selection (pool models) */}
+              {isPoolModel && priceListItems.length > 0 && (
+                <div>
+                  <Label>Article de la Base de Prix</Label>
+                  <Select
+                    value={editingLine.price_list_id ? String(editingLine.price_list_id) : "_none"}
+                    onValueChange={(v) => {
+                      const id = v === "_none" ? null : Number(v);
+                      const item = id ? priceListItems.find(p => p.id === id) : null;
+                      setEditingLine({
+                        ...editingLine,
+                        price_list_id: id,
+                        unit_cost_ht: item ? item.unit_price : editingLine.unit_cost_ht,
+                        unit: item ? item.unit : editingLine.unit,
+                      });
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Sélectionner un article" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="_none">Aucun (prix manuel)</SelectItem>
+                      {priceListItems.map(p => (
+                        <SelectItem key={p.id} value={String(p.id)}>
+                          {p.name} — Rs {p.unit_price.toLocaleString()} / {p.unit}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              {/* Quantity formula (pool models) */}
+              {isPoolModel && (
+                <div>
+                  <Label>Formule de Quantité</Label>
+                  <Textarea
+                    value={editingLine.quantity_formula || ''}
+                    onChange={(e) =>
+                      setEditingLine({ ...editingLine, quantity_formula: e.target.value || null })
+                    }
+                    placeholder="Ex: surface_m2 * 0.125, CEIL(perimetre_m / 2.4)"
+                    rows={2}
+                    className="font-mono text-sm"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">
+                    Variables: longueur, largeur, profondeur, {poolVariables.map(v => v.name).join(', ')}. Fonctions: CEIL(), FLOOR(), ROUND()
+                  </p>
+                  {editingLine.quantity_formula && Object.keys(poolVarContext).length > 0 && (
+                    <p className="text-xs text-blue-600 mt-1">
+                      Résultat: {evaluateFormula(editingLine.quantity_formula, poolVarContext).toFixed(4)}
+                    </p>
+                  )}
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label>Quantité</Label>
+                  <Label>Quantité {isPoolModel && editingLine.quantity_formula ? '(calculée)' : ''}</Label>
                   <Input
                     type="number"
                     step="0.01"
-                    value={editingLine.quantity || 1}
+                    value={isPoolModel && editingLine.quantity_formula
+                      ? evaluateFormula(editingLine.quantity_formula, poolVarContext).toFixed(2)
+                      : editingLine.quantity || 1
+                    }
                     onChange={(e) =>
                       setEditingLine({ ...editingLine, quantity: Number(e.target.value) })
                     }
+                    disabled={isPoolModel && !!editingLine.quantity_formula}
                   />
                 </div>
 

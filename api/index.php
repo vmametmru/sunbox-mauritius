@@ -476,6 +476,7 @@ try {
             
             foreach ($categories as &$cat) {
                 $cat['is_option'] = (bool)$cat['is_option'];
+                $cat['parent_id'] = $cat['parent_id'] ? (int)$cat['parent_id'] : null;
                 $cat['total_profit_ht'] = round((float)$cat['total_sale_price_ht'] - (float)$cat['total_cost_ht'], 2);
                 $cat['image_url'] = $cat['image_path'] ? '/' . ltrim($cat['image_path'], '/') : null;
                 unset($cat['image_path']);
@@ -488,11 +489,12 @@ try {
         case 'create_boq_category': {
             validateRequired($body, ['model_id', 'name']);
             $stmt = $db->prepare("
-                INSERT INTO boq_categories (model_id, name, is_option, display_order, image_id)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO boq_categories (model_id, parent_id, name, is_option, display_order, image_id)
+                VALUES (?, ?, ?, ?, ?, ?)
             ");
             $stmt->execute([
                 (int)$body['model_id'],
+                !empty($body['parent_id']) ? (int)$body['parent_id'] : null,
                 sanitize($body['name']),
                 (bool)($body['is_option'] ?? false),
                 (int)($body['display_order'] ?? 0),
@@ -506,11 +508,12 @@ try {
             validateRequired($body, ['id']);
             $stmt = $db->prepare("
                 UPDATE boq_categories SET
-                    name = ?, is_option = ?, display_order = ?, image_id = ?, updated_at = NOW()
+                    name = ?, parent_id = ?, is_option = ?, display_order = ?, image_id = ?, updated_at = NOW()
                 WHERE id = ?
             ");
             $stmt->execute([
                 sanitize($body['name']),
+                !empty($body['parent_id']) ? (int)$body['parent_id'] : null,
                 (bool)($body['is_option'] ?? false),
                 (int)($body['display_order'] ?? 0),
                 !empty($body['image_id']) ? (int)$body['image_id'] : null,
@@ -535,11 +538,12 @@ try {
             if ($categoryId <= 0) fail("category_id manquant");
             
             $stmt = $db->prepare("
-                SELECT bl.*, s.name AS supplier_name,
+                SELECT bl.*, s.name AS supplier_name, pl.name AS price_list_name, pl.unit_price AS price_list_unit_price,
                     ROUND(bl.quantity * bl.unit_cost_ht, 2) AS total_cost_ht,
                     ROUND(bl.quantity * bl.unit_cost_ht * (1 + bl.margin_percent / 100), 2) AS sale_price_ht
                 FROM boq_lines bl
                 LEFT JOIN suppliers s ON bl.supplier_id = s.id
+                LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
                 WHERE bl.category_id = ?
                 ORDER BY bl.display_order ASC, bl.id ASC
             ");
@@ -551,15 +555,17 @@ try {
         case 'create_boq_line': {
             validateRequired($body, ['category_id', 'description']);
             $stmt = $db->prepare("
-                INSERT INTO boq_lines (category_id, description, quantity, unit, unit_cost_ht, supplier_id, margin_percent, display_order)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO boq_lines (category_id, description, quantity, quantity_formula, unit, unit_cost_ht, price_list_id, supplier_id, margin_percent, display_order)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ");
             $stmt->execute([
                 (int)$body['category_id'],
                 sanitize($body['description']),
                 (float)($body['quantity'] ?? 1),
+                !empty($body['quantity_formula']) ? sanitize($body['quantity_formula']) : null,
                 sanitize($body['unit'] ?? 'unité'),
                 (float)($body['unit_cost_ht'] ?? 0),
+                !empty($body['price_list_id']) ? (int)$body['price_list_id'] : null,
                 !empty($body['supplier_id']) ? (int)$body['supplier_id'] : null,
                 (float)($body['margin_percent'] ?? 30),
                 (int)($body['display_order'] ?? 0),
@@ -572,15 +578,17 @@ try {
             validateRequired($body, ['id']);
             $stmt = $db->prepare("
                 UPDATE boq_lines SET
-                    description = ?, quantity = ?, unit = ?, unit_cost_ht = ?,
-                    supplier_id = ?, margin_percent = ?, display_order = ?, updated_at = NOW()
+                    description = ?, quantity = ?, quantity_formula = ?, unit = ?, unit_cost_ht = ?,
+                    price_list_id = ?, supplier_id = ?, margin_percent = ?, display_order = ?, updated_at = NOW()
                 WHERE id = ?
             ");
             $stmt->execute([
                 sanitize($body['description']),
                 (float)($body['quantity'] ?? 1),
+                !empty($body['quantity_formula']) ? sanitize($body['quantity_formula']) : null,
                 sanitize($body['unit'] ?? 'unité'),
                 (float)($body['unit_cost_ht'] ?? 0),
+                !empty($body['price_list_id']) ? (int)$body['price_list_id'] : null,
                 !empty($body['supplier_id']) ? (int)$body['supplier_id'] : null,
                 (float)($body['margin_percent'] ?? 30),
                 (int)($body['display_order'] ?? 0),
@@ -1866,6 +1874,168 @@ try {
             foreach ($body['orders'] as $order) {
                 $stmt->execute([(int)$order['priority_order'], (int)$order['id']]);
             }
+            ok();
+            break;
+        }
+
+        // ============================================
+        // POOL BOQ VARIABLES
+        // ============================================
+        case 'get_pool_boq_variables': {
+            $stmt = $db->query("SELECT * FROM pool_boq_variables ORDER BY display_order ASC");
+            ok($stmt->fetchAll());
+            break;
+        }
+
+        case 'create_pool_boq_variable': {
+            validateRequired($body, ['name', 'label', 'formula']);
+            $stmt = $db->prepare("
+                INSERT INTO pool_boq_variables (name, label, unit, formula, display_order)
+                VALUES (?, ?, ?, ?, ?)
+            ");
+            $stmt->execute([
+                sanitize($body['name']),
+                sanitize($body['label']),
+                sanitize($body['unit'] ?? ''),
+                sanitize($body['formula']),
+                (int)($body['display_order'] ?? 0),
+            ]);
+            ok(['id' => $db->lastInsertId()]);
+            break;
+        }
+
+        case 'update_pool_boq_variable': {
+            validateRequired($body, ['id']);
+            $stmt = $db->prepare("
+                UPDATE pool_boq_variables SET
+                    name = ?, label = ?, unit = ?, formula = ?, display_order = ?, updated_at = NOW()
+                WHERE id = ?
+            ");
+            $stmt->execute([
+                sanitize($body['name']),
+                sanitize($body['label']),
+                sanitize($body['unit'] ?? ''),
+                sanitize($body['formula']),
+                (int)($body['display_order'] ?? 0),
+                (int)$body['id'],
+            ]);
+            ok();
+            break;
+        }
+
+        case 'delete_pool_boq_variable': {
+            validateRequired($body, ['id']);
+            $stmt = $db->prepare("DELETE FROM pool_boq_variables WHERE id = ?");
+            $stmt->execute([(int)$body['id']]);
+            ok();
+            break;
+        }
+
+        // ============================================
+        // POOL BOQ PRICE LIST
+        // ============================================
+        case 'get_pool_boq_price_list': {
+            $stmt = $db->query("
+                SELECT pl.*, s.name AS supplier_name
+                FROM pool_boq_price_list pl
+                LEFT JOIN suppliers s ON pl.supplier_id = s.id
+                ORDER BY pl.display_order ASC
+            ");
+            ok($stmt->fetchAll());
+            break;
+        }
+
+        case 'create_pool_boq_price_list_item': {
+            validateRequired($body, ['name']);
+            $stmt = $db->prepare("
+                INSERT INTO pool_boq_price_list (name, unit, unit_price, has_vat, supplier_id, display_order)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ");
+            $stmt->execute([
+                sanitize($body['name']),
+                sanitize($body['unit'] ?? 'unité'),
+                (float)($body['unit_price'] ?? 0),
+                (bool)($body['has_vat'] ?? true),
+                !empty($body['supplier_id']) ? (int)$body['supplier_id'] : null,
+                (int)($body['display_order'] ?? 0),
+            ]);
+            ok(['id' => $db->lastInsertId()]);
+            break;
+        }
+
+        case 'update_pool_boq_price_list_item': {
+            validateRequired($body, ['id']);
+            $stmt = $db->prepare("
+                UPDATE pool_boq_price_list SET
+                    name = ?, unit = ?, unit_price = ?, has_vat = ?, supplier_id = ?, display_order = ?, updated_at = NOW()
+                WHERE id = ?
+            ");
+            $stmt->execute([
+                sanitize($body['name']),
+                sanitize($body['unit'] ?? 'unité'),
+                (float)($body['unit_price'] ?? 0),
+                (bool)($body['has_vat'] ?? true),
+                !empty($body['supplier_id']) ? (int)$body['supplier_id'] : null,
+                (int)($body['display_order'] ?? 0),
+                (int)$body['id'],
+            ]);
+            ok();
+            break;
+        }
+
+        case 'delete_pool_boq_price_list_item': {
+            validateRequired($body, ['id']);
+            $stmt = $db->prepare("DELETE FROM pool_boq_price_list WHERE id = ?");
+            $stmt->execute([(int)$body['id']]);
+            ok();
+            break;
+        }
+
+        // ============================================
+        // POOL BOQ TEMPLATES
+        // ============================================
+        case 'get_pool_boq_templates': {
+            $stmt = $db->query("SELECT * FROM pool_boq_templates ORDER BY is_default DESC, name ASC");
+            ok($stmt->fetchAll());
+            break;
+        }
+
+        case 'create_pool_boq_template': {
+            validateRequired($body, ['name']);
+            $stmt = $db->prepare("
+                INSERT INTO pool_boq_templates (name, description, is_default)
+                VALUES (?, ?, ?)
+            ");
+            $stmt->execute([
+                sanitize($body['name']),
+                sanitize($body['description'] ?? ''),
+                (bool)($body['is_default'] ?? false),
+            ]);
+            ok(['id' => $db->lastInsertId()]);
+            break;
+        }
+
+        case 'update_pool_boq_template': {
+            validateRequired($body, ['id']);
+            $stmt = $db->prepare("
+                UPDATE pool_boq_templates SET
+                    name = ?, description = ?, is_default = ?, updated_at = NOW()
+                WHERE id = ?
+            ");
+            $stmt->execute([
+                sanitize($body['name']),
+                sanitize($body['description'] ?? ''),
+                (bool)($body['is_default'] ?? false),
+                (int)$body['id'],
+            ]);
+            ok();
+            break;
+        }
+
+        case 'delete_pool_boq_template': {
+            validateRequired($body, ['id']);
+            $stmt = $db->prepare("DELETE FROM pool_boq_templates WHERE id = ?");
+            $stmt->execute([(int)$body['id']]);
             ok();
             break;
         }
