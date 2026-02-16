@@ -209,7 +209,26 @@ export default function BOQPage() {
   }, []);
 
   useEffect(() => {
-    if (selectedModelId) loadCategories();
+    if (selectedModelId) {
+      // Immediately clear state so stale data from previous model is not displayed
+      setCategories([]);
+      setExpandedCategories([]);
+      setCategoryLines({});
+      let cancelled = false;
+      (async () => {
+        try {
+          const data = await api.getBOQCategories(selectedModelId);
+          if (!cancelled) {
+            setCategories(data);
+          }
+        } catch (err: any) {
+          if (!cancelled) {
+            toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+          }
+        }
+      })();
+      return () => { cancelled = true; };
+    }
   }, [selectedModelId]);
 
   const loadInitialData = async () => {
@@ -250,12 +269,12 @@ export default function BOQPage() {
     }
   };
 
-  const loadCategories = async () => {
-    if (!selectedModelId) return;
+  const loadCategories = async (modelId?: number) => {
+    const id = modelId ?? selectedModelId;
+    if (!id) return;
     try {
-      const data = await api.getBOQCategories(selectedModelId);
+      const data = await api.getBOQCategories(id);
       setCategories(data);
-      // Reset expanded categories when switching model
       setExpandedCategories([]);
       setCategoryLines({});
     } catch (err: any) {
@@ -514,21 +533,18 @@ export default function BOQPage() {
       // Load categories first
       const loadedCategories = await api.getBOQCategories(selectedModelId);
       
-      // Load lines for all subcategories BEFORE setting any state
+      // Load lines for all subcategories sequentially to avoid race conditions
       const subCats = loadedCategories.filter((c: any) => c.parent_id);
       const linesData: Record<number, any[]> = {};
-      const loadPromises = subCats.map(async (subCat) => {
+      for (const subCat of subCats) {
         try {
           const lines = await api.getBOQLines(subCat.id);
-          linesData[subCat.id] = lines;
+          linesData[subCat.id] = Array.isArray(lines) ? lines : [];
         } catch (err) {
-          // Category may not have lines yet - this is expected for newly created subcategories
           console.debug(`No lines found for subcategory ${subCat.id}`);
+          linesData[subCat.id] = [];
         }
-      });
-      
-      // Wait for all lines to load
-      await Promise.all(loadPromises);
+      }
       
       // Now update state all at once
       setCategories(loadedCategories);
@@ -566,7 +582,7 @@ export default function BOQPage() {
   
   // Get sub-categories for a given parent
   const getSubCategories = (parentId: number) =>
-    categories.filter(c => c.parent_id === parentId);
+    categories.filter(c => c.parent_id !== null && Number(c.parent_id) === Number(parentId));
 
   // Base categories (non-options, top-level)
   const baseCategories = topLevelCategories.filter(c => !c.is_option);
