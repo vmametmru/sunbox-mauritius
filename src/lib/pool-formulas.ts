@@ -676,29 +676,35 @@ export async function loadTemplateFromDB(): Promise<{
 /**
  * Save the template to the database.
  * Creates a new default record if none exists, otherwise updates the existing one.
+ * Returns the database record ID.
  */
 export async function saveTemplateToDB(
   base: PoolBOQTemplateCategory[],
   options: PoolBOQTemplateCategory[],
   existingRecordId?: number,
-): Promise<void> {
+): Promise<number> {
   const templateData = { base, options };
 
+  let recordId: number;
   if (existingRecordId) {
     await api.updatePoolBOQTemplate({
       id: existingRecordId,
       template_data: templateData,
     });
+    recordId = existingRecordId;
   } else {
-    await api.createPoolBOQTemplate({
+    const result = await api.createPoolBOQTemplate({
       name: 'Modèle par défaut',
       description: 'Modèle BOQ piscine par défaut',
       is_default: true,
       template_data: templateData,
     });
+    recordId = result.id;
   }
 
   // Also keep localStorage in sync as fallback
   savePoolBOQTemplate(base);
   savePoolBOQOptionsTemplate(options);
+
+  return recordId;
 }

@@ -2035,19 +2035,35 @@ try {
 
         case 'update_pool_boq_template': {
             validateRequired($body, ['id']);
-            $templateData = isset($body['template_data']) ? json_encode($body['template_data']) : null;
-            $stmt = $db->prepare("
-                UPDATE pool_boq_templates SET
-                    name = ?, description = ?, is_default = ?, template_data = ?, updated_at = NOW()
-                WHERE id = ?
-            ");
-            $stmt->execute([
-                sanitize($body['name'] ?? ''),
-                sanitize($body['description'] ?? ''),
-                (bool)($body['is_default'] ?? false),
-                $templateData,
-                (int)$body['id'],
-            ]);
+            $id = (int)$body['id'];
+            // Build SET clauses dynamically – only update fields that are provided
+            $sets = [];
+            $params = [];
+            if (array_key_exists('name', $body)) {
+                $sets[] = 'name = ?';
+                $params[] = sanitize($body['name']);
+            }
+            if (array_key_exists('description', $body)) {
+                $sets[] = 'description = ?';
+                $params[] = sanitize($body['description']);
+            }
+            if (array_key_exists('is_default', $body)) {
+                $sets[] = 'is_default = ?';
+                $params[] = (bool)$body['is_default'];
+            }
+            if (array_key_exists('template_data', $body)) {
+                $sets[] = 'template_data = ?';
+                $params[] = json_encode($body['template_data']);
+            }
+            if (empty($sets)) {
+                ok();
+                break;
+            }
+            $sets[] = 'updated_at = NOW()';
+            $params[] = $id;
+            $sql = "UPDATE pool_boq_templates SET " . implode(', ', $sets) . " WHERE id = ?";
+            $stmt = $db->prepare($sql);
+            $stmt->execute($params);
             ok();
             break;
         }

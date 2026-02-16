@@ -122,11 +122,9 @@ const PoolBOQTemplatePage: React.FC = () => {
   const saveTemplates = useCallback(async () => {
     setIsSaving(true);
     try {
-      await saveTemplateToDB(baseTemplate, optionsTemplate, dbRecordId);
-      // If we just created a new record, reload to get the ID
+      const recordId = await saveTemplateToDB(baseTemplate, optionsTemplate, dbRecordId);
       if (!dbRecordId) {
-        const { record } = await loadTemplateFromDB();
-        if (record) setDbRecordId(record.id);
+        setDbRecordId(recordId);
       }
       setHasChanges(false);
       toast({
