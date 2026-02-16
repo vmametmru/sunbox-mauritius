@@ -55,6 +55,8 @@ import {
   type PoolDimensions,
 } from '@/lib/pool-formulas';
 
+const DEFAULT_MARGIN_PERCENT = 30;
+
 /* ======================================================
    TYPES
 ====================================================== */
@@ -134,7 +136,7 @@ const emptyLine: Partial<BOQLine> = {
   unit_cost_formula: null,
   price_list_id: null,
   supplier_id: null,
-  margin_percent: 30,
+  margin_percent: DEFAULT_MARGIN_PERCENT,
   display_order: 0,
 };
 
@@ -474,8 +476,7 @@ export default function BOQPage() {
           createdCategories++;
 
           // Create lines for this sub-category
-          for (let i = 0; i < subCat.lines.length; i++) {
-            const line = subCat.lines[i];
+          for (const [i, line] of subCat.lines.entries()) {
             const priceItem = priceMap[line.price_list_name];
             await api.createBOQLine({
               category_id: subCatId,
@@ -485,7 +486,7 @@ export default function BOQPage() {
               unit: priceItem ? priceItem.unit : line.unit,
               unit_cost_ht: priceItem ? priceItem.unit_price : 0,
               price_list_id: priceItem ? priceItem.id : null,
-              margin_percent: 30,
+              margin_percent: DEFAULT_MARGIN_PERCENT,
               display_order: i + 1,
             });
             createdLines++;
