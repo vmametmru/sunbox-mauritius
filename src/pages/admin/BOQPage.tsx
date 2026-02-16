@@ -582,7 +582,7 @@ export default function BOQPage() {
   
   // Get sub-categories for a given parent
   const getSubCategories = (parentId: number) =>
-    categories.filter(c => c.parent_id != null && Number(c.parent_id) === Number(parentId));
+    categories.filter(c => c.parent_id !== null && Number(c.parent_id) === Number(parentId));
 
   // Base categories (non-options, top-level)
   const baseCategories = topLevelCategories.filter(c => !c.is_option);
