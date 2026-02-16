@@ -159,11 +159,13 @@ const PoolBOQTemplatePage: React.FC = () => {
               ...sub,
               lines: sub.lines.map((line, li) => {
                 if (li !== lineIndex) return line;
+                const newFormula = editForm.quantity_formula ?? line.quantity_formula;
+                const parsedQty = Number(newFormula);
                 return {
                   ...line,
                   description: editForm.description ?? line.description,
-                  quantity: Number(editForm.quantity ?? line.quantity),
-                  quantity_formula: editForm.quantity_formula ?? line.quantity_formula,
+                  quantity: isNaN(parsedQty) ? line.quantity : parsedQty,
+                  quantity_formula: newFormula,
                   unit: editForm.unit ?? line.unit,
                   price_list_name: editForm.price_list_name ?? line.price_list_name,
                 };
