@@ -55,6 +55,7 @@ export function evaluatePoolVariables(
 
 /**
  * Evaluate a single formula string using the provided variable context.
+ * Uses a safe recursive descent parser — no eval() or Function().
  * Supports: +, -, *, /, parentheses, numeric literals, variable references.
  * Also supports CEIL(), FLOOR(), ROUND(), ROUNDUP() functions.
  */
@@ -64,37 +65,137 @@ export function evaluateFormula(
 ): number {
   if (!formula || !formula.trim()) return 0;
 
-  // Sanitize: only allow safe characters
-  let expr = formula.trim();
-
-  // Replace function names with JS equivalents
-  expr = expr.replace(/\bCEIL\b/gi, 'Math.ceil');
-  expr = expr.replace(/\bROUNDUP\b/gi, 'Math.ceil');
-  expr = expr.replace(/\bFLOOR\b/gi, 'Math.floor');
-  expr = expr.replace(/\bROUND\b/gi, 'Math.round');
-
-  // Replace variable names with their values (longest names first to avoid partial matches)
-  const varNames = Object.keys(context).sort((a, b) => b.length - a.length);
-  for (const name of varNames) {
-    const regex = new RegExp(`\\b${escapeRegex(name)}\\b`, 'g');
-    expr = expr.replace(regex, String(context[name]));
-  }
-
-  // Validate: only allow numbers, operators, parentheses, Math functions, dots, spaces
-  if (!/^[\d\s+\-*/().Math,ceilfloorround]*$/i.test(expr)) {
-    throw new Error(`Invalid formula: ${formula}`);
-  }
-
-  // Evaluate using Function constructor (safe because we've validated the expression)
   try {
-    const fn = new Function(`"use strict"; return (${expr});`);
-    const result = fn();
+    const result = parseExpression(formula.trim(), context);
     if (typeof result !== 'number' || !isFinite(result)) return 0;
     return result;
   } catch {
     return 0;
   }
 }
+
+/* ---- Safe recursive descent parser ---- */
+
+interface ParserState {
+  input: string;
+  pos: number;
+  context: Record<string, number>;
+}
+
+function skipSpaces(s: ParserState) {
+  while (s.pos < s.input.length && s.input[s.pos] === ' ') s.pos++;
+}
+
+function parseExpression(input: string, context: Record<string, number>): number {
+  const s: ParserState = { input, pos: 0, context };
+  const val = parseAddSub(s);
+  skipSpaces(s);
+  if (s.pos < s.input.length) throw new Error('Unexpected token');
+  return val;
+}
+
+function parseAddSub(s: ParserState): number {
+  let left = parseMulDiv(s);
+  skipSpaces(s);
+  while (s.pos < s.input.length && (s.input[s.pos] === '+' || s.input[s.pos] === '-')) {
+    const op = s.input[s.pos];
+    s.pos++;
+    const right = parseMulDiv(s);
+    left = op === '+' ? left + right : left - right;
+    skipSpaces(s);
+  }
+  return left;
+}
+
+function parseMulDiv(s: ParserState): number {
+  let left = parseUnary(s);
+  skipSpaces(s);
+  while (s.pos < s.input.length && (s.input[s.pos] === '*' || s.input[s.pos] === '/')) {
+    const op = s.input[s.pos];
+    s.pos++;
+    const right = parseUnary(s);
+    left = op === '*' ? left * right : (right !== 0 ? left / right : 0);
+    skipSpaces(s);
+  }
+  return left;
+}
+
+function parseUnary(s: ParserState): number {
+  skipSpaces(s);
+  if (s.pos < s.input.length && s.input[s.pos] === '-') {
+    s.pos++;
+    return -parseAtom(s);
+  }
+  if (s.pos < s.input.length && s.input[s.pos] === '+') {
+    s.pos++;
+  }
+  return parseAtom(s);
+}
+
+function parseAtom(s: ParserState): number {
+  skipSpaces(s);
+
+  // Parenthesized expression
+  if (s.pos < s.input.length && s.input[s.pos] === '(') {
+    s.pos++; // skip '('
+    const val = parseAddSub(s);
+    skipSpaces(s);
+    if (s.pos < s.input.length && s.input[s.pos] === ')') {
+      s.pos++; // skip ')'
+    }
+    return val;
+  }
+
+  // Number literal
+  if (s.pos < s.input.length && (isDigit(s.input[s.pos]) || s.input[s.pos] === '.')) {
+    let numStr = '';
+    while (s.pos < s.input.length && (isDigit(s.input[s.pos]) || s.input[s.pos] === '.')) {
+      numStr += s.input[s.pos];
+      s.pos++;
+    }
+    return parseFloat(numStr) || 0;
+  }
+
+  // Identifier: function call or variable name
+  if (s.pos < s.input.length && isAlpha(s.input[s.pos])) {
+    let name = '';
+    while (s.pos < s.input.length && isAlphaNumOrUnderscore(s.input[s.pos])) {
+      name += s.input[s.pos];
+      s.pos++;
+    }
+    skipSpaces(s);
+
+    // Function call: CEIL(...), FLOOR(...), ROUND(...), ROUNDUP(...)
+    if (s.pos < s.input.length && s.input[s.pos] === '(') {
+      s.pos++; // skip '('
+      const arg = parseAddSub(s);
+      skipSpaces(s);
+      if (s.pos < s.input.length && s.input[s.pos] === ')') {
+        s.pos++; // skip ')'
+      }
+      const fn = name.toUpperCase();
+      if (fn === 'CEIL' || fn === 'ROUNDUP') return Math.ceil(arg);
+      if (fn === 'FLOOR') return Math.floor(arg);
+      if (fn === 'ROUND') return Math.round(arg);
+      throw new Error(`Unknown function: ${name}`);
+    }
+
+    // Variable lookup
+    if (name in s.context) return s.context[name];
+    // Case-insensitive lookup
+    const lower = name.toLowerCase();
+    for (const key of Object.keys(s.context)) {
+      if (key.toLowerCase() === lower) return s.context[key];
+    }
+    throw new Error(`Unknown variable: ${name}`);
+  }
+
+  throw new Error(`Unexpected character at position ${s.pos}`);
+}
+
+function isDigit(c: string): boolean { return c >= '0' && c <= '9'; }
+function isAlpha(c: string): boolean { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c === '_'; }
+function isAlphaNumOrUnderscore(c: string): boolean { return isAlpha(c) || isDigit(c) || c === '_'; }
 
 /**
  * Evaluate a BOQ line quantity formula.
@@ -105,10 +206,6 @@ export function evaluateLineFormula(
   variableContext: Record<string, number>
 ): number {
   return evaluateFormula(formula, variableContext);
-}
-
-function escapeRegex(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**
