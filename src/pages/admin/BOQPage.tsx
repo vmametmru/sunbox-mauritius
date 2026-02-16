@@ -501,7 +501,12 @@ export default function BOQPage() {
         title: 'Succès',
         description: `BOQ piscine généré : ${createdCategories} catégories et ${createdLines} lignes créées`,
       });
-      loadCategories();
+      const loadedCategories = await api.getBOQCategories(selectedModelId);
+      setCategories(loadedCategories);
+      
+      // Auto-expand all top-level categories to show subcategories
+      const topCats = loadedCategories.filter((c: any) => !c.parent_id);
+      setExpandedCategories(topCats.map((c: any) => c.id));
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
     } finally {
@@ -702,7 +707,9 @@ export default function BOQPage() {
                 <Badge variant="secondary">Option</Badge>
               )}
               {hasSubCategories && (
-                <Badge variant="outline" className="text-xs">{subCategories.length} sous-cat.</Badge>
+                <Badge variant="default" className="bg-blue-600 text-xs">
+                  {subCategories.length} sous-catégorie{subCategories.length > 1 ? 's' : ''}
+                </Badge>
               )}
             </div>
             
@@ -1009,6 +1016,17 @@ export default function BOQPage() {
           </div>
 
           {/* Base categories list */}
+          {isPoolModel && baseCategories.length > 0 && (
+            <Card className="mb-4 border-blue-200 bg-blue-50">
+              <CardContent className="p-4 flex items-start gap-3">
+                <div className="text-blue-600 mt-0.5">ℹ️</div>
+                <div className="text-sm text-blue-900">
+                  <strong>Astuce :</strong> Cliquez sur une catégorie pour voir ses sous-catégories et lignes détaillées.
+                  Les catégories avec sous-catégories affichent un badge bleu avec le nombre.
+                </div>
+              </CardContent>
+            </Card>
+          )}
           {baseCategories.map(category => renderCategoryCard(category))}
 
           {baseCategories.length === 0 && (
