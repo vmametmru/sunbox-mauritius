@@ -376,7 +376,14 @@ export default function QuotesPage() {
                 {filteredQuotes.map((quote) => (
                   <tr key={quote.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4">
-                      <span className="font-mono text-sm text-blue-600">{quote.reference_number}</span>
+                      <button
+                        type="button"
+                        onClick={() => loadQuoteDetails(quote)}
+                        className="font-mono text-sm text-blue-600 hover:text-blue-800 hover:underline"
+                        aria-label={`Voir les détails du devis ${quote.reference_number}`}
+                      >
+                        {quote.reference_number}
+                      </button>
                     </td>
                     <td className="px-6 py-4">
                       <div>
