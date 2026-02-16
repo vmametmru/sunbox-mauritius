@@ -12,7 +12,10 @@ import {
   Tag,
   Settings,
   Image as ImageIcon,
-  Waves
+  Waves,
+  DollarSign,
+  TrendingUp,
+  Receipt
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -183,8 +186,14 @@ export default function BOQPage() {
   const [poolVariables, setPoolVariables] = useState<PoolVariable[]>([]);
   const [priceListItems, setPriceListItems] = useState<PriceListItem[]>([]);
 
-  const selectedModel = models.find(m => m.id === selectedModelId);
-  const isPoolModel = selectedModel?.type === 'pool';
+  const selectedModel = useMemo(() => 
+    models.find(m => m.id === selectedModelId),
+    [models, selectedModelId]
+  );
+  const isPoolModel = useMemo(() => 
+    selectedModel?.type === 'pool',
+    [selectedModel]
+  );
 
   // Calculate pool variable values
   const poolVarContext = useMemo(() => {
@@ -501,12 +510,33 @@ export default function BOQPage() {
         title: 'Succès',
         description: `BOQ piscine généré : ${createdCategories} catégories et ${createdLines} lignes créées`,
       });
-      const loadedCategories = await api.getBOQCategories(selectedModelId);
-      setCategories(loadedCategories);
       
-      // Auto-expand all top-level categories to show subcategories
-      const topCats = loadedCategories.filter((c: any) => !c.parent_id);
-      setExpandedCategories(topCats.map((c: any) => c.id));
+      // Load categories first
+      const loadedCategories = await api.getBOQCategories(selectedModelId);
+      
+      // Load lines for all subcategories BEFORE setting any state
+      const subCats = loadedCategories.filter((c: any) => c.parent_id);
+      const linesData: Record<number, any[]> = {};
+      const loadPromises = subCats.map(async (subCat) => {
+        try {
+          const lines = await api.getBOQLines(subCat.id);
+          linesData[subCat.id] = lines;
+        } catch (err) {
+          // Category may not have lines yet - this is expected for newly created subcategories
+          console.debug(`No lines found for subcategory ${subCat.id}`);
+        }
+      });
+      
+      // Wait for all lines to load
+      await Promise.all(loadPromises);
+      
+      // Now update state all at once
+      setCategories(loadedCategories);
+      setCategoryLines(linesData);
+      
+      // Auto-expand ALL categories (top-level and subcategories) to show their lines
+      const allCategoryIds = loadedCategories.map((c: any) => c.id);
+      setExpandedCategories(allCategoryIds);
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
     } finally {
@@ -848,7 +878,7 @@ export default function BOQPage() {
           <p className="text-gray-500 mt-1">Gestion des prix de base et options par modèle (TVA: {vatRate}%)</p>
         </div>
 
-        <div className="flex gap-2 items-center">
+        <div className="flex flex-wrap gap-2 items-center">
           <Select
             value={selectedModelId?.toString()}
             onValueChange={(v) => setSelectedModelId(Number(v))}
@@ -949,6 +979,82 @@ export default function BOQPage() {
                 ))}
               </div>
             )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* OVERALL SUMMARY - Total for entire model (Base + Options) */}
+      {selectedModelId && categories.length > 0 && (
+        <Card className="border-2 border-blue-400 bg-gradient-to-br from-blue-50 to-white shadow-lg">
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl flex items-center justify-center shadow-md">
+                <Calculator className="h-6 w-6 text-white" />
+              </div>
+              <div>
+                <CardTitle className="text-2xl font-bold text-gray-900">Résumé Global du Modèle</CardTitle>
+                <p className="text-sm text-gray-500 mt-1">Prix de Base + Options (TVA: {vatRate}%)</p>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <Card className="border-2 border-gray-200">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center">
+                      <Package className="h-6 w-6 text-gray-600" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500 font-medium">Coût Total HT</p>
+                      <p className="text-2xl font-bold text-gray-700">{formatPrice(totalBaseCostHT + totalOptionsCostHT)}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border-2 border-green-200 bg-green-50">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
+                      <TrendingUp className="h-6 w-6 text-green-600" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500 font-medium">Profit Total HT</p>
+                      <p className="text-2xl font-bold text-green-600">{formatPrice(totalBaseProfitHT + totalOptionsProfitHT)}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border-2 border-orange-200 bg-orange-50">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center">
+                      <DollarSign className="h-6 w-6 text-orange-600" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500 font-medium">Prix Total HT</p>
+                      <p className="text-2xl font-bold text-orange-600">{formatPrice(totalBasePriceHT + totalOptionsPriceHT)}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border-2 border-blue-300 bg-gradient-to-br from-blue-100 to-blue-50">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center shadow">
+                      <Receipt className="h-6 w-6 text-white" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500 font-medium">Prix Total TTC</p>
+                      <p className="text-2xl font-bold text-blue-700">{formatPrice(totalBasePriceTTC + totalOptionsPriceTTC)}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           </CardContent>
         </Card>
       )}
