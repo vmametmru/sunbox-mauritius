@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ChevronUp, ChevronDown, ZoomIn, Check, User, Mail, Phone, MapPin, MessageSquare, Loader2, ArrowLeft, ArrowRight, CheckCircle, Users, Search } from 'lucide-react';
+import { ChevronUp, ChevronDown, ZoomIn, Check, User, Mail, Phone, MapPin, MessageSquare, Loader2, ArrowLeft, ArrowRight, CheckCircle, Users, Search, AlertTriangle, RefreshCw } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
 import { Switch } from '@/components/ui/switch';
@@ -87,6 +87,19 @@ interface ExistingQuote {
   options?: Array<{ option_id: number; option_name: string; option_price: number }>;
 }
 
+// Interface for pending options during import (stores both ID and name for BOQ option matching)
+interface PendingOption {
+  option_id: number | null;
+  option_name: string;
+  option_price: number;
+}
+
+// Interface for imported option prices (to show variance when current price differs)
+interface ImportedOptionPrice {
+  option_id: number;
+  imported_price: number;
+}
+
 // Constants for BOQ options handling
 const BOQ_OPTIONS_CATEGORY_ID = -1;
 
@@ -115,8 +128,11 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   
-  // Pending option IDs to be selected after options load (using ref instead of sessionStorage)
-  const pendingOptionIdsRef = React.useRef<number[]>([]);
+  // Pending options to be selected after options load (stores name and price for BOQ option matching)
+  const pendingOptionsRef = React.useRef<PendingOption[]>([]);
+  
+  // Imported option prices to show variance when current model price differs
+  const [importedOptionPrices, setImportedOptionPrices] = useState<ImportedOptionPrice[]>([]);
   
   // Contact selection
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -166,9 +182,10 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
 
   const loadQuoteData = async (id: number) => {
     setLoading(true);
-    // Reset selected options when loading a new quote
+    // Reset selected options and imported prices when loading a new quote
     setSelectedOptions([]);
-    pendingOptionIdsRef.current = [];
+    setImportedOptionPrices([]);
+    pendingOptionsRef.current = [];
     
     try {
       const quote = await api.getQuoteWithDetails(id);
@@ -195,10 +212,14 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
       setCustomerMessage(quote.customer_message || '');
       setContactId(quote.contact_id || null);
       
-      // Store option IDs to be selected after options are loaded
+      // Store options with name and price to be selected after options are loaded
+      // This stores the saved quote prices for variance display against current BOQ prices
       if (quote.options && quote.options.length > 0) {
-        const optionIds = quote.options.map((o: any) => o.option_id);
-        pendingOptionIdsRef.current = optionIds;
+        pendingOptionsRef.current = quote.options.map((o: any) => ({
+          option_id: o.option_id ? Number(o.option_id) : null,
+          option_name: o.option_name || '',
+          option_price: Number(o.option_price) || 0,
+        }));
       }
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
@@ -225,14 +246,32 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
       }));
       setOptions(mapped);
       
-      // Apply pre-selected options from pending IDs ref
-      if (pendingOptionIdsRef.current.length > 0) {
-        const preselected = mapped.filter(o => pendingOptionIdsRef.current.includes(o.id));
-        if (preselected.length > 0) {
+      // Apply pre-selected options from pending options ref
+      if (pendingOptionsRef.current.length > 0) {
+        const matchedOptions: ModelOption[] = [];
+        const newImportedPrices: ImportedOptionPrice[] = [];
+        
+        for (const pending of pendingOptionsRef.current) {
+          // Match by option_id for standard options
+          if (pending.option_id !== null) {
+            const standardOpt = mapped.find(o => o.id === pending.option_id);
+            if (standardOpt) {
+              matchedOptions.push(standardOpt);
+              // Always store imported price (even if same) so it displays as saved price
+              newImportedPrices.push({
+                option_id: standardOpt.id,
+                imported_price: pending.option_price,
+              });
+            }
+          }
+        }
+        
+        if (matchedOptions.length > 0) {
           setSelectedOptions(prev => {
-            const newOptions = preselected.filter(p => !prev.some(s => s.id === p.id));
+            const newOptions = matchedOptions.filter(p => !prev.some(s => s.id === p.id));
             return [...prev, ...newOptions];
           });
+          setImportedOptionPrices(prev => [...prev, ...newImportedPrices]);
         }
       }
     } catch (err) {
@@ -270,17 +309,43 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
       );
       setBOQOptions(mapped);
       
-      // Apply pre-selected BOQ options from pending IDs ref
-      if (pendingOptionIdsRef.current.length > 0) {
-        const preselected = mapped.filter(o => pendingOptionIdsRef.current.includes(o.id));
-        if (preselected.length > 0) {
+      // Apply pre-selected BOQ options from pending options ref
+      if (pendingOptionsRef.current.length > 0) {
+        const matchedOptions: ModelOption[] = [];
+        const newImportedPrices: ImportedOptionPrice[] = [];
+        
+        for (const pending of pendingOptionsRef.current) {
+          // For BOQ options (option_id is NULL), match by name
+          if (pending.option_id === null || pending.option_id >= BOQ_OPTION_ID_OFFSET) {
+            const boqOpt = mapped.find(o => o.name === pending.option_name);
+            if (boqOpt) {
+              matchedOptions.push(boqOpt);
+              // Always store imported price so it displays as saved price
+              newImportedPrices.push({
+                option_id: boqOpt.id,
+                imported_price: pending.option_price,
+              });
+            }
+          }
+        }
+        
+        if (matchedOptions.length > 0) {
           setSelectedOptions(prev => {
-            const newOptions = preselected.filter(p => !prev.some(s => s.id === p.id));
+            const newOptions = matchedOptions.filter(p => !prev.some(s => s.id === p.id));
             return [...prev, ...newOptions];
           });
+          setImportedOptionPrices(prev => [...prev, ...newImportedPrices]);
+          
+          // Expand categories for matched BOQ options
+          const categoriesToExpand = matchedOptions.map(o => o.category_name!).filter(Boolean);
+          setExpandedCategories(prev => {
+            const newCats = categoriesToExpand.filter(c => !prev.includes(c));
+            return [...prev, ...newCats];
+          });
         }
+        
         // Clear the ref after BOQ options are processed (both regular and BOQ are now loaded)
-        pendingOptionIdsRef.current = [];
+        pendingOptionsRef.current = [];
       }
     } catch (err) {
       console.error(err);
@@ -295,6 +360,61 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
     } catch (err) {
       console.error(err);
     }
+  };
+
+  // Get imported price for an option (returns null if no imported price)
+  const getImportedPrice = (optionId: number): number | null => {
+    const imported = importedOptionPrices.find(p => p.option_id === optionId);
+    return imported ? imported.imported_price : null;
+  };
+
+  // Get price info for an option - returns imported price as main if available, otherwise current BOQ price
+  const getOptionPriceInfo = (optionId: number, currentBOQPrice: number): { 
+    displayPrice: number; 
+    boqPrice: number; 
+    hasVariance: boolean; 
+    variance: number;
+    isImported: boolean;
+  } => {
+    const importedPrice = getImportedPrice(optionId);
+    if (importedPrice !== null) {
+      const variance = currentBOQPrice - importedPrice;
+      return {
+        displayPrice: importedPrice,
+        boqPrice: currentBOQPrice,
+        hasVariance: Math.abs(variance) > 0.01,
+        variance,
+        isImported: true,
+      };
+    }
+    return {
+      displayPrice: currentBOQPrice,
+      boqPrice: currentBOQPrice,
+      hasVariance: false,
+      variance: 0,
+      isImported: false,
+    };
+  };
+
+  // Update option to use current BOQ price (clears imported price)
+  const updateOptionToCurrentPrice = (optionId: number) => {
+    setImportedOptionPrices(prev => prev.filter(p => p.option_id !== optionId));
+    toast({ title: 'Prix mis à jour', description: 'Le prix a été mis à jour avec le prix BOQ actuel' });
+  };
+
+  // Update all options to use current BOQ prices
+  const updateAllOptionsToCurrentPrices = () => {
+    setImportedOptionPrices([]);
+    toast({ title: 'Prix mis à jour', description: 'Tous les prix ont été mis à jour avec les prix BOQ actuels' });
+  };
+
+  // Check if any selected options have price variance
+  const hasAnyPriceVariance = (): boolean => {
+    return selectedOptions.some(opt => {
+      const imported = importedOptionPrices.find(p => p.option_id === opt.id);
+      if (!imported) return false;
+      return Math.abs(opt.price - imported.imported_price) > 0.01;
+    });
   };
 
   // Combine regular options and BOQ options
@@ -327,14 +447,35 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
 
   const isSelected = (id: number) => selectedOptions.some(o => o.id === id);
 
-  // Calculations
+  // Calculations - use imported prices when available
+  // Note: opt.price is stored in HT, model.base_price is stored in TTC (calculated at load time)
+  
+  const calculateOptionsTotalHT = () => {
+    return selectedOptions.reduce((sum, opt) => {
+      const importedPrice = getImportedPrice(opt.id);
+      const priceToUse = importedPrice !== null ? importedPrice : Number(opt.price || 0);
+      return sum + priceToUse;
+    }, 0);
+  };
+  
   const calculateOptionsTotalTTC = () => {
-    return selectedOptions.reduce((sum, opt) => sum + calculateTTC(Number(opt.price || 0), vatRate), 0);
+    return selectedOptions.reduce((sum, opt) => {
+      const importedPrice = getImportedPrice(opt.id);
+      const priceToUse = importedPrice !== null ? importedPrice : Number(opt.price || 0);
+      return sum + calculateTTC(priceToUse, vatRate);
+    }, 0);
+  };
+  
+  // Get base price HT (reverse TTC to HT)
+  const basePriceHT = Number(model?.base_price ?? 0) / (1 + vatRate / 100);
+  const basePriceTTC = Number(model?.base_price ?? 0);
+  
+  const calculateTotalHT = () => {
+    return basePriceHT + calculateOptionsTotalHT();
   };
 
   const calculateTotalTTC = () => {
-    const base = Number(model?.base_price ?? 0);
-    return base + calculateOptionsTotalTTC();
+    return basePriceTTC + calculateOptionsTotalTTC();
   };
 
   // Contact selection
@@ -398,11 +539,16 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
         customer_address: customerAddress || '',
         customer_message: customerMessage || '',
         contact_id: contactId || undefined,
-        selected_options: selectedOptions.map(opt => ({
-          option_id: opt.id,
-          option_name: opt.name,
-          option_price: calculateTTC(opt.price, vatRate),
-        })),
+        selected_options: selectedOptions.map(opt => {
+          // Use imported price if available, otherwise current BOQ price
+          const importedPrice = getImportedPrice(opt.id);
+          const priceToUse = importedPrice !== null ? importedPrice : opt.price;
+          return {
+            option_id: opt.id,
+            option_name: opt.name,
+            option_price: calculateTTC(priceToUse, vatRate),
+          };
+        }),
       };
       
       let result;
@@ -454,20 +600,9 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
     onClose();
   };
 
-  if (!model && !loading) {
-    return (
-      <Dialog open={open} onOpenChange={handleClose}>
-        <DialogContent className="max-w-md">
-          <VisuallyHidden>
-            <DialogTitle>Chargement</DialogTitle>
-            <DialogDescription>Chargement du devis en cours</DialogDescription>
-          </VisuallyHidden>
-          <div className="text-center py-8 text-gray-500">
-            Chargement du devis...
-          </div>
-        </DialogContent>
-      </Dialog>
-    );
+  // Don't render anything if dialog should be closed or model is not loaded yet
+  if (!open || (!model && !loading)) {
+    return null;
   }
 
   return (
@@ -596,9 +731,21 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
                 {/* Total */}
                 <div className="bg-gray-50 rounded-lg p-4 space-y-2">
                   <div className="flex justify-between items-center">
+                    <p className="text-sm text-gray-500">Prix de base HT</p>
+                    <p className="text-sm font-medium text-gray-700">
+                      Rs {Math.round(basePriceHT).toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="flex justify-between items-center">
                     <p className="text-sm text-gray-500">Prix de base TTC</p>
                     <p className="text-sm font-medium text-gray-700">
-                      Rs {Number(model.base_price ?? 0).toLocaleString()}
+                      Rs {basePriceTTC.toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <p className="text-sm text-gray-500">Total options HT</p>
+                    <p className="text-sm font-medium text-gray-700">
+                      Rs {Math.round(calculateOptionsTotalHT()).toLocaleString()}
                     </p>
                   </div>
                   <div className="flex justify-between items-center">
@@ -608,8 +755,14 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
                     </p>
                   </div>
                   <div className="flex justify-between items-center pt-2 border-t border-gray-200">
+                    <p className="text-sm text-gray-500">Total général HT</p>
+                    <p className="text-lg font-bold text-gray-700">
+                      Rs {Math.round(calculateTotalHT()).toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="flex justify-between items-center">
                     <p className="text-sm text-gray-500">Total général TTC</p>
-                    <p className="text-xl font-bold text-gray-800">
+                    <p className="text-xl font-bold text-orange-600">
                       Rs {calculateTotalTTC().toLocaleString()}
                     </p>
                   </div>
@@ -651,28 +804,64 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
                               </div>
                             )}
                             <div className="flex-1 divide-y">
-                              {opts.map(opt => (
-                                <label
-                                  key={opt.id}
-                                  className="flex justify-between items-center px-4 py-3 hover:bg-gray-50 cursor-pointer"
-                                >
-                                  <div className="flex-1 mr-4">
-                                    <p className="font-medium">{opt.name}</p>
-                                    {opt.description && (
-                                      <p className="text-sm text-gray-500 whitespace-pre-line mt-1">
-                                        {opt.description}
-                                      </p>
+                              {opts.map(opt => {
+                                const priceInfo = getOptionPriceInfo(opt.id, opt.price);
+                                return (
+                                  <div
+                                    key={opt.id}
+                                    className="px-4 py-3 hover:bg-gray-50"
+                                  >
+                                    <label className="flex justify-between items-start cursor-pointer">
+                                      <div className="flex-1 mr-4">
+                                        <p className="font-medium">{opt.name}</p>
+                                        {opt.description && (
+                                          <p className="text-sm text-gray-500 whitespace-pre-line mt-1">
+                                            {opt.description}
+                                          </p>
+                                        )}
+                                        <p className={`text-sm text-gray-500 ${opt.description ? 'mt-2' : 'mt-1'}`}>
+                                          HT: Rs {Math.round(priceInfo.displayPrice).toLocaleString()}
+                                        </p>
+                                        <p className="text-sm text-orange-600 font-medium">
+                                          TTC: Rs {calculateTTC(priceInfo.displayPrice, vatRate).toLocaleString()}
+                                        </p>
+                                      </div>
+                                      <Switch
+                                        checked={isSelected(opt.id)}
+                                        onCheckedChange={() => toggleOption(opt)}
+                                      />
+                                    </label>
+                                    {/* Price variance display */}
+                                    {priceInfo.hasVariance && isSelected(opt.id) && (
+                                      <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded flex items-center justify-between text-sm">
+                                        <div className="flex items-center gap-2 text-amber-600">
+                                          <AlertTriangle className="h-4 w-4" />
+                                          <span>
+                                            Prix BOQ actuel: Rs {calculateTTC(priceInfo.boqPrice, vatRate).toLocaleString()}
+                                            {priceInfo.variance > 0 ? (
+                                              <span className="text-red-600 ml-1">(+Rs {calculateTTC(priceInfo.variance, vatRate).toLocaleString()})</span>
+                                            ) : (
+                                              <span className="text-green-600 ml-1">(-Rs {calculateTTC(Math.abs(priceInfo.variance), vatRate).toLocaleString()})</span>
+                                            )}
+                                          </span>
+                                        </div>
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          className="h-7 text-xs text-amber-600 hover:text-amber-700"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            updateOptionToCurrentPrice(opt.id);
+                                          }}
+                                        >
+                                          <RefreshCw className="h-3 w-3 mr-1" />
+                                          Mettre à jour
+                                        </Button>
+                                      </div>
                                     )}
-                                    <p className={`text-sm text-orange-600 font-medium ${opt.description ? 'mt-2' : 'mt-1'}`}>
-                                      Rs {calculateTTC(opt.price, vatRate).toLocaleString()}
-                                    </p>
                                   </div>
-                                  <Switch
-                                    checked={isSelected(opt.id)}
-                                    onCheckedChange={() => toggleOption(opt)}
-                                  />
-                                </label>
-                              ))}
+                                );
+                              })}
                             </div>
                           </div>
                         </div>
@@ -680,6 +869,20 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
                     </div>
                   );
                 })}
+
+                {/* Update all prices button */}
+                {hasAnyPriceVariance() && (
+                  <div className="flex justify-end">
+                    <Button
+                      variant="outline"
+                      className="text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+                      onClick={updateAllOptionsToCurrentPrices}
+                    >
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                      Mettre tous les prix à jour
+                    </Button>
+                  </div>
+                )}
 
                 {/* Next Button */}
                 <div className="flex justify-end pt-4 border-t">
@@ -828,16 +1031,30 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
                     <span className="font-medium">{model.name}</span>
                   </div>
                   <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-600">Prix de base HT</span>
+                    <span className="font-medium">Rs {Math.round(basePriceHT).toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm">
                     <span className="text-gray-600">Prix de base TTC</span>
-                    <span className="font-medium">Rs {Number(model.base_price ?? 0).toLocaleString()}</span>
+                    <span className="font-medium">Rs {basePriceTTC.toLocaleString()}</span>
                   </div>
                   {selectedOptions.length > 0 && (
-                    <div className="flex justify-between items-center text-sm">
-                      <span className="text-gray-600">Options ({selectedOptions.length})</span>
-                      <span className="font-medium">Rs {calculateOptionsTotalTTC().toLocaleString()}</span>
-                    </div>
+                    <>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-gray-600">Options HT ({selectedOptions.length})</span>
+                        <span className="font-medium">Rs {Math.round(calculateOptionsTotalHT()).toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-gray-600">Options TTC ({selectedOptions.length})</span>
+                        <span className="font-medium">Rs {calculateOptionsTotalTTC().toLocaleString()}</span>
+                      </div>
+                    </>
                   )}
                   <div className="flex justify-between items-center pt-2 border-t border-gray-200">
+                    <span className="font-semibold">Total HT</span>
+                    <span className="text-lg font-bold text-gray-700">Rs {Math.round(calculateTotalHT()).toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
                     <span className="font-semibold">Total TTC</span>
                     <span className="text-xl font-bold text-orange-600">Rs {calculateTotalTTC().toLocaleString()}</span>
                   </div>
@@ -898,6 +1115,10 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
                     <div className="flex justify-between">
                       <span className="text-gray-600">Modèle</span>
                       <span className="font-medium">{model.name}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Total HT</span>
+                      <span className="font-bold text-gray-700">Rs {Math.round(calculateTotalHT()).toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">Total TTC</span>

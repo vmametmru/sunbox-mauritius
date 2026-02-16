@@ -15,19 +15,20 @@ import {
   Plus,
   Copy,
   Edit,
-  Calculator,
   Settings
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import AdminConfigureModal from '@/components/AdminConfigureModal';
+import { useSiteSettings, calculateTTC } from '@/hooks/use-site-settings';
+import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
 
 export default function QuotesPage() {
   const [quotes, setQuotes] = useState<any[]>([]);
@@ -46,6 +47,10 @@ export default function QuotesPage() {
   const { toast } = useToast();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  
+  // Get VAT rate from site settings
+  const { data: siteSettings } = useSiteSettings();
+  const vatRate = Number(siteSettings?.vat_rate) || 15;
 
   useEffect(() => {
     loadQuotes();
@@ -371,15 +376,7 @@ export default function QuotesPage() {
                 {filteredQuotes.map((quote) => (
                   <tr key={quote.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-sm text-blue-600">{quote.reference_number}</span>
-                        {isFreeQuote(quote) && (
-                          <Badge variant="outline" className="text-xs">
-                            <Calculator className="h-3 w-3 mr-1" />
-                            Libre
-                          </Badge>
-                        )}
-                      </div>
+                      <span className="font-mono text-sm text-blue-600">{quote.reference_number}</span>
                     </td>
                     <td className="px-6 py-4">
                       <div>
@@ -459,6 +456,9 @@ export default function QuotesPage() {
               Détails du Devis
             </DialogTitle>
           </DialogHeader>
+          <VisuallyHidden>
+            <DialogDescription>Détails complets du devis sélectionné</DialogDescription>
+          </VisuallyHidden>
           
           {detailsLoading ? (
             <div className="flex items-center justify-center py-12">
@@ -539,9 +539,17 @@ export default function QuotesPage() {
                     <span className="text-gray-600">Options</span>
                     <span className="font-medium">{formatPrice(selectedQuote.options_total)}</span>
                   </div>
+                  <div className="flex justify-between p-3">
+                    <span className="font-bold">Total HT</span>
+                    <span className="font-bold text-lg">{formatPrice(selectedQuote.total_price)}</span>
+                  </div>
+                  <div className="flex justify-between p-3">
+                    <span className="text-gray-600">TVA ({vatRate}%)</span>
+                    <span className="font-medium">{formatPrice(calculateTTC(selectedQuote.total_price, vatRate) - selectedQuote.total_price)}</span>
+                  </div>
                   <div className="flex justify-between p-3 bg-orange-50">
-                    <span className="font-bold">Total</span>
-                    <span className="font-bold text-orange-600 text-lg">{formatPrice(selectedQuote.total_price)}</span>
+                    <span className="font-bold">Total TTC</span>
+                    <span className="font-bold text-orange-600 text-lg">{formatPrice(calculateTTC(selectedQuote.total_price, vatRate))}</span>
                   </div>
                 </div>
               </div>

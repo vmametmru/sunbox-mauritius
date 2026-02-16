@@ -18,6 +18,11 @@ import {
   Download,
   CheckCircle,
   Loader2,
+  Upload,
+  X,
+  AlertTriangle,
+  RefreshCw,
+  Eraser,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -129,6 +134,19 @@ interface BOQBaseCategory {
   lines: BOQLine[];
 }
 
+// Interface for pending options during import (stores both ID and name for BOQ option matching)
+interface PendingOption {
+  option_id: number | null;
+  option_name: string;
+  option_price: number;
+}
+
+// Interface for imported option prices (to show variance when current price differs)
+interface ImportedOptionPrice {
+  option_id: number;
+  imported_price: number;
+}
+
 interface ContactQuote {
   id: number;
   reference_number: string;
@@ -173,8 +191,10 @@ const emptyCategory: QuoteCategory = {
 };
 
 // Helper function to safely check if a quote is a free quote
-// Handles both boolean and string values from API (string "false" is truthy in JS)
-const isFreeQuote = (value: unknown): boolean => value === true || value === 'true';
+// Handles both boolean and string values from API
+// MySQL BOOLEAN returns 0/1 integers or '0'/'1' strings depending on PDO settings
+const isFreeQuote = (value: unknown): boolean => 
+  value === true || value === 'true' || value === 1 || value === '1';
 
 /* ======================================================
    COMPONENT
@@ -186,10 +206,14 @@ export default function CreateQuotePage() {
   const { data: siteSettings } = useSiteSettings();
   const vatRate = Number(siteSettings?.vat_rate) || 15;
 
-  // Mode: 'free' for free-form quote, 'model' for model-based quote
-  const [quoteMode, setQuoteMode] = useState<'free' | 'model'>('free');
+  // Mode: 'free' for free-form quote, 'model' for model-based quote, 'pool' for pool quote (placeholder)
+  const [quoteMode, setQuoteMode] = useState<'free' | 'model' | 'pool'>('free');
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
+  
+  // Upload state for free quote photos
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [uploadingPlan, setUploadingPlan] = useState(false);
 
   // Edit mode
   const editQuoteId = searchParams.get('edit');
@@ -227,8 +251,12 @@ export default function CreateQuotePage() {
   // Counter to force model options reload (incremented when importing same model)
   const [modelOptionsRefreshKey, setModelOptionsRefreshKey] = useState(0);
 
-  // Pending option IDs to be selected after model options load (for import/edit/clone)
-  const pendingOptionIdsRef = React.useRef<number[]>([]);
+  // Pending options to be selected after model options load (for import/edit/clone)
+  // Stores name and price for matching BOQ options which have NULL option_id in database
+  const pendingOptionsRef = React.useRef<PendingOption[]>([]);
+  
+  // Imported option prices to show variance when current model price differs
+  const [importedOptionPrices, setImportedOptionPrices] = useState<ImportedOptionPrice[]>([]);
 
   // Free quote
   const [categories, setCategories] = useState<QuoteCategory[]>([]);
@@ -316,28 +344,55 @@ export default function CreateQuotePage() {
       
       // Apply pending options after model options are loaded
       // This handles import/edit/clone scenarios where options are set before model options load
-      if (pendingOptionIdsRef.current.length > 0) {
-        const allOptionIds = [
-          ...(options || []).map((o: Option) => o.id),
-          ...boqOptsWithLines.map(o => o.id),
-        ];
-        // Filter pending options to only include those that exist in the loaded options
-        const validPendingOptions = pendingOptionIdsRef.current.filter(id => allOptionIds.includes(id));
-        if (validPendingOptions.length > 0) {
+      if (pendingOptionsRef.current.length > 0) {
+        const matchedOptionIds: number[] = [];
+        const newImportedPrices: ImportedOptionPrice[] = [];
+        
+        for (const pending of pendingOptionsRef.current) {
+          // First try to match by ID for standard options
+          if (pending.option_id !== null) {
+            const standardOpt = (options || []).find((o: Option) => o.id === pending.option_id);
+            if (standardOpt) {
+              matchedOptionIds.push(standardOpt.id);
+              // Always store imported price to show it as the main price
+              newImportedPrices.push({
+                option_id: standardOpt.id,
+                imported_price: pending.option_price,
+              });
+              continue;
+            }
+          }
+          
+          // For BOQ options (option_id is NULL), match by name
+          const boqOpt = boqOptsWithLines.find(o => o.name === pending.option_name);
+          if (boqOpt) {
+            matchedOptionIds.push(boqOpt.id);
+            // Always store imported price to show it as the main price
+            newImportedPrices.push({
+              option_id: boqOpt.id,
+              imported_price: pending.option_price,
+            });
+          }
+        }
+        
+        if (matchedOptionIds.length > 0) {
           setSelectedOptions(prev => {
-            const newOptions = validPendingOptions.filter(id => !prev.includes(id));
+            const newOptions = matchedOptionIds.filter(id => !prev.includes(id));
             return [...prev, ...newOptions];
           });
+          
+          // Set imported prices - these will be displayed as main price with BOQ price as reference
+          setImportedOptionPrices(newImportedPrices);
           
           // Expand selected BOQ options (they have IDs >= BOQ_OPTION_ID_OFFSET)
           // and close unselected ones for better user experience after import/edit/clone
           const selectedBOQOptionNames = boqOptsWithLines
-            .filter(opt => validPendingOptions.includes(opt.id))
+            .filter(opt => matchedOptionIds.includes(opt.id))
             .map(opt => opt.name);
           setExpandedOptionCategories(selectedBOQOptionNames);
         }
         // Clear pending options after applying
-        pendingOptionIdsRef.current = [];
+        pendingOptionsRef.current = [];
       }
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
@@ -379,12 +434,25 @@ export default function CreateQuotePage() {
         // Ensure model_id is converted to number for consistent comparison
         // Model IDs are positive integers, so 0 or negative values are invalid
         const modelId = Number(quote.model_id);
-        setSelectedModelId(modelId > 0 ? modelId : null);
-        // Store option IDs to be selected after model options load
-        // This ensures BOQ options (WCQ) are properly matched after their offset IDs are created
+        
+        // Clear current selected options and imported prices before loading
+        setSelectedOptions([]);
+        setImportedOptionPrices([]);
+        
+        // Store options to be selected after model options load
+        // This stores name and price for BOQ option matching (they have NULL option_id in database)
         if (quote.options) {
-          pendingOptionIdsRef.current = quote.options.map((o: any) => o.option_id).filter(Boolean);
+          pendingOptionsRef.current = quote.options.map((o: any) => ({
+            option_id: o.option_id ? Number(o.option_id) : null,
+            option_name: o.option_name || '',
+            option_price: Number(o.option_price) || 0,
+          }));
         }
+        
+        setSelectedModelId(modelId > 0 ? modelId : null);
+        
+        // Navigate to options step for model-based quotes in edit mode
+        setModelStep('options');
       }
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
@@ -433,12 +501,25 @@ export default function CreateQuotePage() {
         // Ensure model_id is converted to number for consistent comparison
         // Model IDs are positive integers, so 0 or negative values are invalid
         const modelId = Number(quote.model_id);
-        setSelectedModelId(modelId > 0 ? modelId : null);
-        // Store option IDs to be selected after model options load
-        // This ensures BOQ options (WCQ) are properly matched after their offset IDs are created
+        
+        // Clear current selected options and imported prices before loading
+        setSelectedOptions([]);
+        setImportedOptionPrices([]);
+        
+        // Store options to be selected after model options load
+        // This stores name and price for BOQ option matching (they have NULL option_id in database)
         if (quote.options) {
-          pendingOptionIdsRef.current = quote.options.map((o: any) => o.option_id).filter(Boolean);
+          pendingOptionsRef.current = quote.options.map((o: any) => ({
+            option_id: o.option_id ? Number(o.option_id) : null,
+            option_name: o.option_name || '',
+            option_price: Number(o.option_price) || 0,
+          }));
         }
+        
+        setSelectedModelId(modelId > 0 ? modelId : null);
+        
+        // Navigate to options step for model-based quotes in clone mode
+        setModelStep('options');
       }
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
@@ -487,9 +568,10 @@ export default function CreateQuotePage() {
       setPhotoUrl(quote.photo_url || '');
       setPlanUrl(quote.plan_url || '');
       
-      if (isFreeQuote(quote.is_free_quote)) {
-        setQuoteMode('free');
-        // Load categories
+      // Import based on current mode, not quote type
+      // Quotes are already filtered by type in the UI, so we just import accordingly
+      if (quoteMode === 'free') {
+        // Importing into free quote mode - load categories
         if (quote.categories) {
           setCategories(quote.categories.map((c: any) => ({
             name: c.name,
@@ -504,7 +586,7 @@ export default function CreateQuotePage() {
           })));
         }
       } else {
-        // For model-based quotes (WCQ), switch to model mode and load the model
+        // For model-based quotes (WCQ), stay in model mode and load the model
         
         // Validate model_id exists for model-based quotes
         // Model IDs are positive integers, so 0, negative, or NaN values are invalid
@@ -518,15 +600,18 @@ export default function CreateQuotePage() {
           return;
         }
         
-        setQuoteMode('model');
-        
-        // Clear current selected options before import
+        // Clear current selected options and imported prices before import
         setSelectedOptions([]);
+        setImportedOptionPrices([]);
         
-        // Store option IDs to be selected after model options load
-        // This ensures BOQ options (WCQ) are properly matched after their offset IDs are created
+        // Store options to be selected after model options load
+        // This stores name and price for BOQ option matching (they have NULL option_id in database)
         if (quote.options) {
-          pendingOptionIdsRef.current = quote.options.map((o: any) => o.option_id).filter(Boolean);
+          pendingOptionsRef.current = quote.options.map((o: any) => ({
+            option_id: o.option_id ? Number(o.option_id) : null,
+            option_name: o.option_name || '',
+            option_price: Number(o.option_price) || 0,
+          }));
         }
         
         // Set the model ID (ensure it's a number) and force reload if it's the same model
@@ -546,6 +631,35 @@ export default function CreateQuotePage() {
     }
   };
 
+  // Upload handler for free quote photos
+  const handleFreeQuotePhotoUpload = async (file: File, type: 'photo' | 'plan') => {
+    try {
+      if (type === 'photo') {
+        setUploadingPhoto(true);
+      } else {
+        setUploadingPlan(true);
+      }
+      
+      const url = await api.uploadFreeQuotePhoto(file, type);
+      
+      if (type === 'photo') {
+        setPhotoUrl(url);
+      } else {
+        setPlanUrl(url);
+      }
+      
+      toast({ title: 'Photo téléchargée', description: 'La photo a été téléchargée avec succès' });
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      if (type === 'photo') {
+        setUploadingPhoto(false);
+      } else {
+        setUploadingPlan(false);
+      }
+    }
+  };
+
   const filteredContacts = contacts.filter(c =>
     c.name.toLowerCase().includes(contactSearchTerm.toLowerCase()) ||
     c.email.toLowerCase().includes(contactSearchTerm.toLowerCase())
@@ -555,7 +669,7 @@ export default function CreateQuotePage() {
      CATEGORIES & LINES (FREE QUOTE)
   ====================================================== */
   const addCategory = () => {
-    setCategories([...categories, { ...emptyCategory, name: `Catégorie ${categories.length + 1}` }]);
+    setCategories([...categories, { name: `Catégorie ${categories.length + 1}`, lines: [], expanded: true }]);
   };
 
   const updateCategory = (index: number, updates: Partial<QuoteCategory>) => {
@@ -596,6 +710,23 @@ export default function CreateQuotePage() {
     setCategories(newCategories);
   };
 
+  // Clear all data in free quote mode
+  const clearFreeQuote = () => {
+    if (!confirm('Effacer toutes les données du devis libre ?')) return;
+    setCategories([]);
+    setQuoteTitle('');
+    setMarginPercent(30);
+    setPhotoUrl('');
+    setPlanUrl('');
+    setCustomerName('');
+    setCustomerEmail('');
+    setCustomerPhone('');
+    setCustomerAddress('');
+    setCustomerMessage('');
+    setSelectedContactId(null);
+    toast({ title: 'Données effacées', description: 'Le devis libre a été réinitialisé' });
+  };
+
   /* ======================================================
      MODEL OPTIONS
   ====================================================== */
@@ -611,6 +742,66 @@ export default function CreateQuotePage() {
     setExpandedOptionCategories(prev =>
       prev.includes(category) ? prev.filter(c => c !== category) : [...prev, category]
     );
+  };
+
+  // Get imported price for an option (returns null if no imported price)
+  const getImportedPrice = (optionId: number): number | null => {
+    const imported = importedOptionPrices.find(p => p.option_id === optionId);
+    return imported ? imported.imported_price : null;
+  };
+
+  // Get price info for an option - returns imported price as main if available, otherwise current BOQ price
+  // Also returns variance if imported price differs from current BOQ price
+  const getOptionPriceInfo = (optionId: number, currentBOQPrice: number): { 
+    displayPrice: number; 
+    boqPrice: number; 
+    hasVariance: boolean; 
+    variance: number;
+    isImported: boolean;
+  } => {
+    const importedPrice = getImportedPrice(optionId);
+    if (importedPrice !== null) {
+      const variance = currentBOQPrice - importedPrice;
+      return {
+        displayPrice: importedPrice,
+        boqPrice: currentBOQPrice,
+        hasVariance: Math.abs(variance) > 0.01,
+        variance,
+        isImported: true,
+      };
+    }
+    return {
+      displayPrice: currentBOQPrice,
+      boqPrice: currentBOQPrice,
+      hasVariance: false,
+      variance: 0,
+      isImported: false,
+    };
+  };
+
+  // Update option to use current BOQ price (clears imported price)
+  const updateOptionToCurrentPrice = (optionId: number) => {
+    setImportedOptionPrices(prev => prev.filter(p => p.option_id !== optionId));
+    toast({ title: 'Prix mis à jour', description: 'Le prix a été mis à jour avec le prix BOQ actuel' });
+  };
+
+  // Update all options to use current BOQ prices
+  const updateAllOptionsToCurrentPrices = () => {
+    setImportedOptionPrices([]);
+    toast({ title: 'Prix mis à jour', description: 'Tous les prix ont été mis à jour avec les prix BOQ actuels' });
+  };
+
+  // Check if any selected options have price variance
+  const hasAnyPriceVariance = (): boolean => {
+    return selectedOptions.some(optId => {
+      const imported = importedOptionPrices.find(p => p.option_id === optId);
+      if (!imported) return false;
+      // Get current BOQ price
+      const boqOpt = boqOptions.find(o => o.id === optId);
+      const standardOpt = modelOptions.find(o => o.id === optId);
+      const currentPrice = boqOpt?.total_sale_price_ht ?? standardOpt?.price ?? 0;
+      return Math.abs(currentPrice - imported.imported_price) > 0.01;
+    });
   };
 
   /* ======================================================
@@ -639,22 +830,28 @@ export default function CreateQuotePage() {
   const totalPriceTTC = calculateTTC(totalSalePriceHT, vatRate);
 
   // Model quote totals
-  const selectedModel = models.find(m => m.id === selectedModelId);
+  // Note: model.id from API may be string or number, so we convert both to numbers for comparison
+  const selectedModel = models.find(m => Number(m.id) === selectedModelId);
   // Use BOQ calculated price if available, otherwise fallback to model's calculated_base_price or base_price
   const modelBasePrice = modelBOQPrice !== null ? modelBOQPrice : (selectedModel?.calculated_base_price ?? selectedModel?.base_price ?? 0);
   
+  // Calculate options totals using imported prices when available
   const selectedModelOptionsTotal = selectedOptions
     .filter(id => id < BOQ_OPTION_ID_OFFSET)
     .reduce((sum, id) => {
       const opt = modelOptions.find(o => o.id === id);
-      return sum + (opt?.price || 0);
+      const importedPrice = getImportedPrice(id);
+      // Use imported price if available, otherwise current BOQ price
+      return sum + (importedPrice !== null ? importedPrice : (opt?.price || 0));
     }, 0);
   
   const selectedBOQOptionsTotal = selectedOptions
     .filter(id => id >= BOQ_OPTION_ID_OFFSET)
     .reduce((sum, id) => {
       const opt = boqOptions.find(o => o.id === id);
-      return sum + (opt?.total_sale_price_ht || 0);
+      const importedPrice = getImportedPrice(id);
+      // Use imported price if available, otherwise current BOQ price
+      return sum + (importedPrice !== null ? importedPrice : (opt?.total_sale_price_ht || 0));
     }, 0);
   
   const modelOptionsTotal = selectedModelOptionsTotal + selectedBOQOptionsTotal;
@@ -731,19 +928,21 @@ export default function CreateQuotePage() {
           updateData.options_total = modelOptionsTotal;
           updateData.total_price = modelTotalPrice;
           updateData.selected_options = selectedOptions.map(id => {
+            // Use imported price if available, otherwise current BOQ price
+            const importedPrice = getImportedPrice(id);
             if (id >= BOQ_OPTION_ID_OFFSET) {
               const opt = boqOptions.find(o => o.id === id);
               return {
                 option_id: id,
                 option_name: opt?.name || '',
-                option_price: opt?.total_sale_price_ht || 0,
+                option_price: importedPrice !== null ? importedPrice : (opt?.total_sale_price_ht || 0),
               };
             } else {
               const opt = modelOptions.find(o => o.id === id);
               return {
                 option_id: id,
                 option_name: opt?.name || '',
-                option_price: opt?.price || 0,
+                option_price: importedPrice !== null ? importedPrice : (opt?.price || 0),
               };
             }
           });
@@ -790,19 +989,21 @@ export default function CreateQuotePage() {
           quoteData.options_total = modelOptionsTotal;
           quoteData.total_price = modelTotalPrice;
           quoteData.selected_options = selectedOptions.map(id => {
+            // Use imported price if available, otherwise current BOQ price
+            const importedPrice = getImportedPrice(id);
             if (id >= BOQ_OPTION_ID_OFFSET) {
               const opt = boqOptions.find(o => o.id === id);
               return {
                 option_id: id,
                 option_name: opt?.name || '',
-                option_price: opt?.total_sale_price_ht || 0,
+                option_price: importedPrice !== null ? importedPrice : (opt?.total_sale_price_ht || 0),
               };
             } else {
               const opt = modelOptions.find(o => o.id === id);
               return {
                 option_id: id,
                 option_name: opt?.name || '',
-                option_price: opt?.price || 0,
+                option_price: importedPrice !== null ? importedPrice : (opt?.price || 0),
               };
             }
           });
@@ -867,16 +1068,19 @@ export default function CreateQuotePage() {
             </p>
           </div>
         </div>
-        <Button onClick={saveQuote} disabled={saving} className="bg-orange-500 hover:bg-orange-600">
-          <Save className="h-4 w-4 mr-2" />
-          {saving ? 'Enregistrement...' : (isEditMode ? 'Mettre à jour' : 'Créer le devis')}
-        </Button>
+        {/* Show save button only for free quotes or when in edit mode, not during model-based quote wizard */}
+        {(quoteMode === 'free' || isEditMode) && (
+          <Button onClick={saveQuote} disabled={saving} className="bg-orange-500 hover:bg-orange-600">
+            <Save className="h-4 w-4 mr-2" />
+            {saving ? 'Enregistrement...' : (isEditMode ? 'Mettre à jour' : 'Créer le devis')}
+          </Button>
+        )}
       </div>
 
       {/* Quote Mode Selection (only for new quotes) */}
       {!isEditMode && !cloneQuoteId && (
-        <Tabs value={quoteMode} onValueChange={(v) => setQuoteMode(v as 'free' | 'model')}>
-          <TabsList className="grid w-full grid-cols-2 max-w-md">
+        <Tabs value={quoteMode} onValueChange={(v) => setQuoteMode(v as 'free' | 'model' | 'pool')}>
+          <TabsList className="grid w-full grid-cols-3 max-w-lg">
             <TabsTrigger value="free">
               <Calculator className="h-4 w-4 mr-2" />
               Devis Libre
@@ -885,8 +1089,26 @@ export default function CreateQuotePage() {
               <FileText className="h-4 w-4 mr-2" />
               Depuis Modèle
             </TabsTrigger>
+            <TabsTrigger value="pool">
+              <ImageIcon className="h-4 w-4 mr-2" />
+              Devis Piscine
+            </TabsTrigger>
           </TabsList>
         </Tabs>
+      )}
+      
+      {/* POOL QUOTE MODE - Placeholder */}
+      {quoteMode === 'pool' && (
+        <div className="flex items-center justify-center py-24">
+          <Card className="max-w-md text-center p-8">
+            <CardContent className="pt-6">
+              <ImageIcon className="h-16 w-16 mx-auto mb-4 text-gray-300" />
+              <h3 className="text-xl font-semibold text-gray-700 mb-2">Devis Piscine</h3>
+              <p className="text-gray-500">Cette fonctionnalité est en cours de développement.</p>
+              <Badge variant="secondary" className="mt-4">En dev</Badge>
+            </CardContent>
+          </Card>
+        </div>
       )}
 
       {/* FREE QUOTE MODE - Original layout */}
@@ -986,22 +1208,96 @@ export default function CreateQuotePage() {
                     />
                   </div>
                   <div>
-                    <Label htmlFor="photoUrl">URL Photo (optionnel)</Label>
-                    <Input
-                      id="photoUrl"
-                      value={photoUrl}
-                      onChange={(e) => setPhotoUrl(e.target.value)}
-                      placeholder="https://..."
-                    />
+                    <Label>Photo (optionnel)</Label>
+                    {photoUrl ? (
+                      <div className="relative mt-2">
+                        <img src={photoUrl} alt="Photo" className="w-full h-48 object-cover rounded-lg" />
+                        <Button
+                          variant="destructive"
+                          size="icon"
+                          className="absolute -top-2 -right-2 h-6 w-6 rounded-full"
+                          onClick={() => setPhotoUrl('')}
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="mt-2">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          id="freeQuotePhotoUpload"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) handleFreeQuotePhotoUpload(file, 'photo');
+                            e.target.value = '';
+                          }}
+                        />
+                        <label htmlFor="freeQuotePhotoUpload">
+                          <Button
+                            variant="outline"
+                            className="w-full cursor-pointer"
+                            disabled={uploadingPhoto}
+                            asChild
+                          >
+                            <span>
+                              {uploadingPhoto ? (
+                                <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Chargement...</>
+                              ) : (
+                                <><Upload className="h-4 w-4 mr-2" /> Charger une photo</>
+                              )}
+                            </span>
+                          </Button>
+                        </label>
+                      </div>
+                    )}
                   </div>
                   <div>
-                    <Label htmlFor="planUrl">URL Plan (optionnel)</Label>
-                    <Input
-                      id="planUrl"
-                      value={planUrl}
-                      onChange={(e) => setPlanUrl(e.target.value)}
-                      placeholder="https://..."
-                    />
+                    <Label>Plan (optionnel)</Label>
+                    {planUrl ? (
+                      <div className="relative mt-2">
+                        <img src={planUrl} alt="Plan" className="w-full h-48 object-cover rounded-lg" />
+                        <Button
+                          variant="destructive"
+                          size="icon"
+                          className="absolute -top-2 -right-2 h-6 w-6 rounded-full"
+                          onClick={() => setPlanUrl('')}
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="mt-2">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          id="freeQuotePlanUpload"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) handleFreeQuotePhotoUpload(file, 'plan');
+                            e.target.value = '';
+                          }}
+                        />
+                        <label htmlFor="freeQuotePlanUpload">
+                          <Button
+                            variant="outline"
+                            className="w-full cursor-pointer"
+                            disabled={uploadingPlan}
+                            asChild
+                          >
+                            <span>
+                              {uploadingPlan ? (
+                                <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Chargement...</>
+                              ) : (
+                                <><Upload className="h-4 w-4 mr-2" /> Charger un plan</>
+                              )}
+                            </span>
+                          </Button>
+                        </label>
+                      </div>
+                    )}
                   </div>
                 </div>
               </CardContent>
@@ -1208,24 +1504,72 @@ export default function CreateQuotePage() {
                   </div>
                 </div>
 
-                {/* Custom Media URLs - Only for free quotes */}
-                {(photoUrl || planUrl) && (
+
+                {/* Import Existing Quote for Free Quotes - only show WFQ quotes */}
+                {selectedContactId && contactQuotes.filter(q => isFreeQuote(q.is_free_quote)).length > 0 && (
                   <div className="border-t pt-4 space-y-3">
-                    <h4 className="font-medium text-sm">Médias</h4>
-                    {photoUrl && (
-                      <div>
-                        <p className="text-xs text-gray-500 mb-1">Photo</p>
-                        <img src={photoUrl} alt="Photo" className="w-full h-24 object-cover rounded-lg" />
+                    <h4 className="font-medium text-sm flex items-center gap-2">
+                      <Download className="h-4 w-4" />
+                      Importer un devis existant
+                    </h4>
+                    <p className="text-xs text-gray-500">
+                      Importer les données d'un devis libre existant de ce client
+                    </p>
+                    {loadingContactQuotes ? (
+                      <div className="text-center py-2">
+                        <Loader2 className="h-4 w-4 animate-spin text-orange-500 mx-auto" />
                       </div>
-                    )}
-                    {planUrl && (
-                      <div>
-                        <p className="text-xs text-gray-500 mb-1">Plan</p>
-                        <img src={planUrl} alt="Plan" className="w-full h-24 object-cover rounded-lg" />
+                    ) : (
+                      <div className="space-y-2 max-h-48 overflow-y-auto">
+                        {contactQuotes.filter(q => isFreeQuote(q.is_free_quote)).map(quote => (
+                          <div
+                            key={quote.id}
+                            className="flex items-center justify-between p-2 border rounded-lg hover:bg-gray-50 transition-colors text-sm"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium truncate">{quote.reference_number}</p>
+                              <p className="text-xs text-gray-500 truncate">
+                                {quote.quote_title || 'Devis libre'} - {formatPrice(quote.total_price)}
+                              </p>
+                            </div>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => importExistingQuote(quote.id)}
+                              className="ml-2 text-orange-600 hover:text-orange-700 hover:bg-orange-50 h-7 text-xs"
+                            >
+                              <Download className="h-3 w-3 mr-1" />
+                              Importer
+                            </Button>
+                          </div>
+                        ))}
                       </div>
                     )}
                   </div>
                 )}
+
+                {/* Action Buttons for Free Quote */}
+                <div className="border-t pt-4 space-y-2">
+                  <Button 
+                    onClick={saveQuote} 
+                    disabled={saving} 
+                    className="w-full bg-orange-500 hover:bg-orange-600"
+                  >
+                    {saving ? (
+                      <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Enregistrement...</>
+                    ) : (
+                      <><Save className="h-4 w-4 mr-2" /> {isEditMode ? 'Mettre à jour' : 'Créer le devis'}</>
+                    )}
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    className="w-full text-red-600 hover:text-red-700 hover:bg-red-50"
+                    onClick={clearFreeQuote}
+                  >
+                    <Eraser className="h-4 w-4 mr-2" />
+                    Effacer tout
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           </div>
@@ -1279,7 +1623,11 @@ export default function CreateQuotePage() {
                   <CardContent className="space-y-4">
                     <Select
                       value={selectedModelId?.toString() || ''}
-                      onValueChange={(v) => setSelectedModelId(Number(v))}
+                      onValueChange={(v) => {
+                        setSelectedModelId(Number(v));
+                        // Auto-advance to options step when model is selected
+                        setModelStep('options');
+                      }}
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="Choisir un modèle..." />
@@ -1474,69 +1822,25 @@ export default function CreateQuotePage() {
                   </CardContent>
                 </Card>
 
-                {/* Model Images */}
-                {(selectedModel.image_url || selectedModel.plan_url) && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {selectedModel.image_url && (
-                      <div className="relative">
-                        <p className="text-xs text-gray-500 mb-1">Photo</p>
-                        <img
-                          src={selectedModel.image_url}
-                          alt="Photo principale"
-                          className="h-[150px] w-full object-contain rounded shadow cursor-pointer"
-                          onClick={() => setLightbox(selectedModel.image_url!)}
-                        />
-                        <ZoomIn className="absolute top-6 right-2 w-5 h-5 text-white bg-black/60 p-1 rounded-full" />
-                      </div>
-                    )}
-                    {selectedModel.plan_url && (
-                      <div className="relative">
-                        <p className="text-xs text-gray-500 mb-1">Plan</p>
-                        <img
-                          src={selectedModel.plan_url}
-                          alt="Plan"
-                          className="h-[150px] w-full object-contain rounded shadow cursor-pointer"
-                          onClick={() => setLightbox(selectedModel.plan_url!)}
-                        />
-                        <ZoomIn className="absolute top-6 right-2 w-5 h-5 text-white bg-black/60 p-1 rounded-full" />
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Base Categories - Inclusions */}
-                {baseCategories.length > 0 && (
-                  <Card className="bg-green-50 border-green-200">
-                    <CardContent className="py-4">
-                      <h3 className="text-base font-semibold text-green-800 mb-3 flex items-center gap-2">
-                        <Check className="w-4 h-4" />
-                        Inclus dans le prix de base
-                      </h3>
-                      <div className="space-y-3">
-                        {baseCategories.map(cat => (
-                          <div key={cat.id} className="border-l-2 border-green-300 pl-3">
-                            <p className="font-medium text-green-700 text-sm mb-1">{cat.name}</p>
-                            {cat.lines && cat.lines.length > 0 && (
-                              <ul className="space-y-0.5">
-                                {cat.lines.map((line) => (
-                                  <li key={line.id} className="text-xs text-gray-600 pl-2">
-                                    • {line.description}
-                                  </li>
-                                ))}
-                              </ul>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
-
                 {/* Options Selection */}
                 {(modelOptions.length > 0 || boqOptions.length > 0) && (
                   <Card>
                     <CardHeader>
-                      <CardTitle>Options Disponibles</CardTitle>
+                      <div className="flex items-center justify-between">
+                        <CardTitle>Options Disponibles</CardTitle>
+                        {/* Update all prices button - only shown if there are price variances */}
+                        {hasAnyPriceVariance() && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+                            onClick={updateAllOptionsToCurrentPrices}
+                          >
+                            <RefreshCw className="h-4 w-4 mr-2" />
+                            Mettre tous les prix à jour
+                          </Button>
+                        )}
+                      </div>
                     </CardHeader>
                     <CardContent className="space-y-4">
                       {/* Standard Options */}
@@ -1544,28 +1848,63 @@ export default function CreateQuotePage() {
                         <div>
                           <h4 className="font-medium mb-2">Options Standard</h4>
                           <div className="space-y-2">
-                            {modelOptions.map(option => (
-                              <div
-                                key={option.id}
-                                className={`flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-colors ${
-                                  selectedOptions.includes(option.id)
-                                    ? 'border-orange-500 bg-orange-50'
-                                    : 'border-gray-200 hover:border-gray-300'
-                                }`}
-                                onClick={() => toggleOption(option.id)}
-                              >
-                                <div className="flex items-center gap-3">
-                                  <Switch checked={selectedOptions.includes(option.id)} />
-                                  <div>
-                                    <p className="font-medium">{option.name}</p>
-                                    {option.description && (
-                                      <p className="text-sm text-gray-500">{option.description}</p>
-                                    )}
+                            {modelOptions.map(option => {
+                              const priceInfo = getOptionPriceInfo(option.id, option.price);
+                              return (
+                                <div
+                                  key={option.id}
+                                  className={`p-3 rounded-lg border transition-colors ${
+                                    selectedOptions.includes(option.id)
+                                      ? 'border-orange-500 bg-orange-50'
+                                      : 'border-gray-200 hover:border-gray-300'
+                                  }`}
+                                >
+                                  <div
+                                    className="flex items-center justify-between cursor-pointer"
+                                    onClick={() => toggleOption(option.id)}
+                                  >
+                                    <div className="flex items-center gap-3">
+                                      <Switch checked={selectedOptions.includes(option.id)} />
+                                      <div>
+                                        <p className="font-medium">{option.name}</p>
+                                        {option.description && (
+                                          <p className="text-sm text-gray-500">{option.description}</p>
+                                        )}
+                                      </div>
+                                    </div>
+                                    <span className="font-semibold">{formatPrice(priceInfo.displayPrice)}</span>
                                   </div>
+                                  {/* Price variance display - shows BOQ price as reference when imported price differs */}
+                                  {priceInfo.hasVariance && selectedOptions.includes(option.id) && (
+                                    <div className="mt-2 pt-2 border-t border-orange-200 flex items-center justify-between text-sm">
+                                      <div className="flex items-center gap-2 text-amber-600">
+                                        <AlertTriangle className="h-4 w-4" />
+                                        <span>
+                                          Prix BOQ actuel: {formatPrice(priceInfo.boqPrice)}
+                                          {priceInfo.variance > 0 ? (
+                                            <span className="text-red-600 ml-1">(+{formatPrice(priceInfo.variance)})</span>
+                                          ) : (
+                                            <span className="text-green-600 ml-1">({formatPrice(priceInfo.variance)})</span>
+                                          )}
+                                        </span>
+                                      </div>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-7 text-xs text-amber-600 hover:text-amber-700"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          updateOptionToCurrentPrice(option.id);
+                                        }}
+                                      >
+                                        <RefreshCw className="h-3 w-3 mr-1" />
+                                        Mettre à jour
+                                      </Button>
+                                    </div>
+                                  )}
                                 </div>
-                                <span className="font-semibold">{formatPrice(option.price)}</span>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         </div>
                       )}
@@ -1577,6 +1916,7 @@ export default function CreateQuotePage() {
                             {boqOptions.map(option => {
                               const isExpanded = expandedOptionCategories.includes(option.name);
                               const isOptionSelected = selectedOptions.includes(option.id);
+                              const priceInfo = getOptionPriceInfo(option.id, option.total_sale_price_ht);
                               return (
                                 <div
                                   key={option.id}
@@ -1604,8 +1944,37 @@ export default function CreateQuotePage() {
                                         </Badge>
                                       )}
                                     </div>
-                                    <span className="font-semibold text-orange-600">{formatPrice(option.total_sale_price_ht)}</span>
+                                    <span className="font-semibold text-orange-600">{formatPrice(priceInfo.displayPrice)}</span>
                                   </div>
+                                  
+                                  {/* Price variance display for BOQ options - shows BOQ price as reference */}
+                                  {priceInfo.hasVariance && isOptionSelected && (
+                                    <div className="mx-3 mb-3 p-2 bg-amber-50 border border-amber-200 rounded flex items-center justify-between text-sm">
+                                      <div className="flex items-center gap-2 text-amber-600">
+                                        <AlertTriangle className="h-4 w-4" />
+                                        <span>
+                                          Prix BOQ actuel: {formatPrice(priceInfo.boqPrice)}
+                                          {priceInfo.variance > 0 ? (
+                                            <span className="text-red-600 ml-1">(+{formatPrice(priceInfo.variance)})</span>
+                                          ) : (
+                                            <span className="text-green-600 ml-1">({formatPrice(priceInfo.variance)})</span>
+                                          )}
+                                        </span>
+                                      </div>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-7 text-xs text-amber-600 hover:text-amber-700"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          updateOptionToCurrentPrice(option.id);
+                                        }}
+                                      >
+                                        <RefreshCw className="h-3 w-3 mr-1" />
+                                        Mettre à jour
+                                      </Button>
+                                    </div>
+                                  )}
                                   
                                   {/* Option Details (expanded) */}
                                   {isExpanded && (
