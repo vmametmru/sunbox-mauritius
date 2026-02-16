@@ -6,7 +6,7 @@ import {
   Search,
   Home,
   Droplets,
-  Settings
+  Calculator
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -285,8 +285,8 @@ export default function ModelsPage() {
                   </p>
                 )}
                 <div className="flex gap-2 mt-3">
-                  <Button size="sm" variant="outline" onClick={() => navigate(`/configure?id=${model.id}`)}>
-                    <Settings className="h-4 w-4" />
+                  <Button size="sm" variant="outline" onClick={() => navigate(`/admin/boq?model=${model.id}`)}>
+                    <Calculator className="h-4 w-4" />
                   </Button>
                   <Button size="sm" variant="outline" onClick={() => openEditModel(model)}>
                     <Edit className="h-4 w-4" />
