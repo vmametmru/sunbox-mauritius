@@ -261,8 +261,13 @@ export default function DashboardPage() {
                 <tbody className="divide-y">
                   {stats.recent_quotes.map((quote: any) => (
                     <tr key={quote.id} className="hover:bg-gray-50">
-                      <td className="py-4 font-mono text-sm text-blue-600">
-                        {quote.reference_number}
+                      <td className="py-4 font-mono text-sm">
+                        <Link
+                          to={`/admin/quotes/${quote.id}`}
+                          className="text-blue-600 hover:text-blue-800 hover:underline"
+                        >
+                          {quote.reference_number}
+                        </Link>
                       </td>
                       <td className="py-4">
                         <div>

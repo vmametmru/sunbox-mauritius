@@ -56,16 +56,13 @@ export default function QuotesPage() {
     loadQuotes();
   }, []);
 
-  // Handle ?quote= parameter to auto-open a specific quote
+  // Handle ?quote= parameter to redirect to the detail page
   useEffect(() => {
     const quoteIdParam = searchParams.get('quote');
-    if (quoteIdParam && quotes.length > 0) {
-      const quote = quotes.find(q => q.id === parseInt(quoteIdParam));
-      if (quote) {
-        loadQuoteDetails(quote);
-      }
+    if (quoteIdParam) {
+      navigate(`/admin/quotes/${quoteIdParam}`, { replace: true });
     }
-  }, [searchParams, quotes]);
+  }, [searchParams, navigate]);
 
   useEffect(() => {
     filterQuotes();
@@ -376,7 +373,14 @@ export default function QuotesPage() {
                 {filteredQuotes.map((quote) => (
                   <tr key={quote.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4">
-                      <span className="font-mono text-sm text-blue-600">{quote.reference_number}</span>
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/admin/quotes/${quote.id}`)}
+                        className="font-mono text-sm text-blue-600 hover:text-blue-800 hover:underline"
+                        aria-label={`Voir les détails du devis ${quote.reference_number}`}
+                      >
+                        {quote.reference_number}
+                      </button>
                     </td>
                     <td className="px-6 py-4">
                       <div>
@@ -407,7 +411,7 @@ export default function QuotesPage() {
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center justify-end gap-2">
-                        <Button size="sm" variant="outline" onClick={() => loadQuoteDetails(quote)} aria-label="Voir les détails">
+                        <Button size="sm" variant="outline" onClick={() => navigate(`/admin/quotes/${quote.id}`)} aria-label="Voir les détails">
                           <Eye className="h-4 w-4" />
                         </Button>
                         <Button 
