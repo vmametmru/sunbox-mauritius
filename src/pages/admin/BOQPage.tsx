@@ -436,7 +436,7 @@ export default function BOQPage() {
   const generatePoolBOQ = async () => {
     if (!selectedModelId || !isPoolModel) return;
     const confirmMessage = categories.length > 0
-      ? 'ATTENTION: Des catégories existent déjà pour ce modèle.\n\nGénérer le BOQ piscine va AJOUTER toutes les catégories, sous-catégories et lignes du modèle par défaut.\n\nContinuer ?'
+      ? 'ATTENTION: Des catégories existent déjà pour ce modèle.\n\nGénérer le BOQ piscine va AJOUTER de nouvelles catégories, sous-catégories et lignes (cela créera des DOUBLONS si vous avez déjà généré le modèle).\n\nPour éviter les doublons, supprimez d\'abord toutes les catégories existantes.\n\nContinuer ?'
       : 'Générer le BOQ piscine à partir du modèle par défaut ?\nCela va créer toutes les catégories, sous-catégories et lignes avec les formules et prix.';
     if (!confirm(confirmMessage)) return;
     try {
