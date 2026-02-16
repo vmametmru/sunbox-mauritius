@@ -707,7 +707,7 @@ export default function BOQPage() {
                 <Badge variant="secondary">Option</Badge>
               )}
               {hasSubCategories && (
-                <Badge variant="default" className="bg-blue-600 text-xs">
+                <Badge className="bg-blue-700 hover:bg-blue-800 text-white text-xs font-semibold">
                   {subCategories.length} sous-catégorie{subCategories.length > 1 ? 's' : ''}
                 </Badge>
               )}
@@ -848,7 +848,7 @@ export default function BOQPage() {
           <p className="text-gray-500 mt-1">Gestion des prix de base et options par modèle (TVA: {vatRate}%)</p>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
           <Select
             value={selectedModelId?.toString()}
             onValueChange={(v) => setSelectedModelId(Number(v))}
@@ -859,11 +859,18 @@ export default function BOQPage() {
             <SelectContent>
               {models.map(m => (
                 <SelectItem key={m.id} value={String(m.id)}>
-                  {m.name} ({m.type})
+                  {m.type === 'pool' ? '🏊 ' : '📦 '}{m.name}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
+
+          {isPoolModel && (
+            <Badge className="bg-blue-100 text-blue-800 border-blue-300">
+              <Waves className="h-3 w-3 mr-1" />
+              Modèle Piscine
+            </Badge>
+          )}
 
           <Button onClick={openNewCategory} className="bg-orange-500 hover:bg-orange-600">
             <Plus className="h-4 w-4 mr-2" /> Catégorie
