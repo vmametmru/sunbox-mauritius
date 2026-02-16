@@ -12,7 +12,10 @@ import {
   Tag,
   Settings,
   Image as ImageIcon,
-  Waves
+  Waves,
+  DollarSign,
+  TrendingUp,
+  Receipt
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -515,8 +518,9 @@ export default function BOQPage() {
         try {
           const lines = await api.getBOQLines(subCat.id);
           linesData[subCat.id] = lines;
-        } catch {
-          // Ignore if no lines
+        } catch (err) {
+          // Category may not have lines yet - this is expected for newly created subcategories
+          console.debug(`No lines found for subcategory ${subCat.id}`);
         }
       }
       setCategoryLines(linesData);
@@ -1000,7 +1004,7 @@ export default function BOQPage() {
                 <CardContent className="p-4">
                   <div className="flex items-center gap-3">
                     <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
-                      <Tag className="h-6 w-6 text-green-600" />
+                      <TrendingUp className="h-6 w-6 text-green-600" />
                     </div>
                     <div>
                       <p className="text-xs text-gray-500 font-medium">Profit Total HT</p>
@@ -1014,7 +1018,7 @@ export default function BOQPage() {
                 <CardContent className="p-4">
                   <div className="flex items-center gap-3">
                     <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center">
-                      <Calculator className="h-6 w-6 text-orange-600" />
+                      <DollarSign className="h-6 w-6 text-orange-600" />
                     </div>
                     <div>
                       <p className="text-xs text-gray-500 font-medium">Prix Total HT</p>
@@ -1028,7 +1032,7 @@ export default function BOQPage() {
                 <CardContent className="p-4">
                   <div className="flex items-center gap-3">
                     <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center shadow">
-                      <Calculator className="h-6 w-6 text-white" />
+                      <Receipt className="h-6 w-6 text-white" />
                     </div>
                     <div>
                       <p className="text-xs text-gray-500 font-medium">Prix Total TTC</p>
