@@ -82,15 +82,6 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
   const [poolVariables, setPoolVariables] = useState<PoolVariable[]>([]);
   const [boqFullCategories, setBOQFullCategories] = useState<BOQFullCategory[]>([]);
   const [isLoadingPoolData, setIsLoadingPoolData] = useState(false);
-
-  // All 3 dimensions must be filled before we show prices / options
-  const poolDimensionsReady = isPoolModel
-    && poolDimensions.longueur > 0
-    && poolDimensions.largeur > 0
-    && poolDimensions.profondeur > 0;
-
-  // True while we have dimensions but BOQ data hasn't loaded yet
-  const isCalculatingPrice = isPoolModel && poolDimensionsReady && isLoadingPoolData;
   
   // Multi-step state
   const [step, setStep] = useState<'options' | 'details' | 'confirmation'>('options');
@@ -113,6 +104,15 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
 
   const model = quoteData.model;
   const isPoolModel = model?.type === 'pool';
+
+  // All 3 dimensions must be filled before we show prices / options
+  const poolDimensionsReady = isPoolModel
+    && poolDimensions.longueur > 0
+    && poolDimensions.largeur > 0
+    && poolDimensions.profondeur > 0;
+
+  // True while we have dimensions but BOQ data hasn't loaded yet
+  const isCalculatingPrice = isPoolModel && poolDimensionsReady && isLoadingPoolData;
 
   // Compute pool variable context (surface_m2, volume_m3, etc.) from dimensions
   const poolVarContext = useMemo(() => {
