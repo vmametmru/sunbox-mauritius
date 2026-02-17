@@ -156,10 +156,11 @@ try {
                 if ($includeBOQPrice) {
                     $boqStmt = $db->prepare("
                         SELECT 
-                            COALESCE(SUM(ROUND(bl.quantity * bl.unit_cost_ht * (1 + bl.margin_percent / 100), 2)), 0) AS boq_base_price_ht,
-                            COALESCE(SUM(ROUND(bl.quantity * bl.unit_cost_ht, 2)), 0) AS boq_cost_ht
+                            COALESCE(SUM(ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS boq_base_price_ht,
+                            COALESCE(SUM(ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht), 2)), 0) AS boq_cost_ht
                         FROM boq_categories bc
                         LEFT JOIN boq_lines bl ON bc.id = bl.category_id
+                        LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
                         WHERE bc.model_id = ? AND bc.is_option = FALSE
                     ");
                     $boqStmt->execute([$m['id']]);
@@ -462,10 +463,11 @@ try {
             $stmt = $db->prepare("
                 SELECT bc.*, 
                     mi.file_path AS image_path,
-                    COALESCE(SUM(ROUND(bl.quantity * bl.unit_cost_ht, 2)), 0) AS total_cost_ht,
-                    COALESCE(SUM(ROUND(bl.quantity * bl.unit_cost_ht * (1 + bl.margin_percent / 100), 2)), 0) AS total_sale_price_ht
+                    COALESCE(SUM(ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht), 2)), 0) AS total_cost_ht,
+                    COALESCE(SUM(ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS total_sale_price_ht
                 FROM boq_categories bc
                 LEFT JOIN boq_lines bl ON bc.id = bl.category_id
+                LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
                 LEFT JOIN model_images mi ON bc.image_id = mi.id
                 WHERE bc.model_id = ?
                 GROUP BY bc.id
@@ -542,8 +544,8 @@ try {
             
             $stmt = $db->prepare("
                 SELECT bl.*, s.name AS supplier_name, pl.name AS price_list_name, pl.unit_price AS price_list_unit_price,
-                    ROUND(bl.quantity * bl.unit_cost_ht, 2) AS total_cost_ht,
-                    ROUND(bl.quantity * bl.unit_cost_ht * (1 + bl.margin_percent / 100), 2) AS sale_price_ht
+                    ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht), 2) AS total_cost_ht,
+                    ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2) AS sale_price_ht
                 FROM boq_lines bl
                 LEFT JOIN suppliers s ON bl.supplier_id = s.id
                 LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
@@ -729,10 +731,11 @@ try {
             // Get base price from non-option BOQ categories
             $stmt = $db->prepare("
                 SELECT 
-                    COALESCE(SUM(ROUND(bl.quantity * bl.unit_cost_ht * (1 + bl.margin_percent / 100), 2)), 0) AS base_price_ht,
-                    COALESCE(SUM(ROUND(bl.quantity * bl.unit_cost_ht, 2)), 0) AS total_cost_ht
+                    COALESCE(SUM(ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS base_price_ht,
+                    COALESCE(SUM(ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht), 2)), 0) AS total_cost_ht
                 FROM boq_categories bc
                 LEFT JOIN boq_lines bl ON bc.id = bl.category_id
+                LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
                 WHERE bc.model_id = ? AND bc.is_option = FALSE
             ");
             $stmt->execute([$modelId]);
@@ -754,9 +757,10 @@ try {
             
             $stmt = $db->prepare("
                 SELECT bc.id, bc.name, bc.display_order, mi.file_path as image_path,
-                    COALESCE(SUM(ROUND(bl.quantity * bl.unit_cost_ht * (1 + bl.margin_percent / 100), 2)), 0) AS price_ht
+                    COALESCE(SUM(ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS price_ht
                 FROM boq_categories bc
                 LEFT JOIN boq_lines bl ON bc.id = bl.category_id
+                LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
                 LEFT JOIN model_images mi ON bc.image_id = mi.id
                 WHERE bc.model_id = ? AND bc.is_option = TRUE
                 GROUP BY bc.id

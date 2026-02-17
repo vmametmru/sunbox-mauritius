@@ -106,7 +106,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
 
   // Compute pool variable context (surface_m2, volume_m3, etc.) from dimensions
   const poolVarContext = useMemo(() => {
-    if (!isPoolModel || poolVariables.length === 0) return {};
+    if (!isPoolModel) return {};
     return evaluatePoolVariables(poolDimensions, poolVariables);
   }, [isPoolModel, poolDimensions, poolVariables]);
 
