@@ -2764,34 +2764,84 @@ try {
             $baseCategoriesText = '';
             $optionCategoriesText = '';
             if ($modelId > 0) {
-                $boqCatStmt = $db->prepare("SELECT bc.id, bc.name, bc.is_option, bc.parent_id, bc.display_order FROM boq_categories bc WHERE bc.model_id = ? ORDER BY bc.is_option ASC, bc.display_order ASC");
+                $boqCatStmt = $db->prepare("
+                    SELECT bc.id, bc.name, bc.is_option, bc.parent_id, bc.display_order
+                    FROM boq_categories bc WHERE bc.model_id = ?
+                    ORDER BY bc.is_option ASC, bc.display_order ASC
+                ");
                 $boqCatStmt->execute([$modelId]);
                 $allCats = $boqCatStmt->fetchAll();
-                $baseCats = []; $optionCats = []; $catMap = [];
-                foreach ($allCats as $cat) { $catMap[$cat['id']] = $cat; $catMap[$cat['id']]['children'] = []; $catMap[$cat['id']]['lines'] = []; }
+                $baseCats = [];
+                $optionCats = [];
+                $catMap = [];
                 foreach ($allCats as $cat) {
-                    if ($cat['parent_id'] && isset($catMap[$cat['parent_id']])) { $catMap[$cat['parent_id']]['children'][] = &$catMap[$cat['id']]; }
-                    else { if ($cat['is_option']) { $optionCats[] = &$catMap[$cat['id']]; } else { $baseCats[] = &$catMap[$cat['id']]; } }
+                    $catMap[$cat['id']] = $cat;
+                    $catMap[$cat['id']]['children'] = [];
+                    $catMap[$cat['id']]['lines'] = [];
                 }
-                $boqLineStmt = $db->prepare("SELECT bl.*, pl.unit_price as price_list_price FROM boq_lines bl LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id WHERE bl.category_id = ? ORDER BY bl.display_order ASC");
-                foreach ($catMap as $catId => &$cat) { $boqLineStmt->execute([$catId]); $cat['lines'] = $boqLineStmt->fetchAll(); }
+                foreach ($allCats as $cat) {
+                    if ($cat['parent_id'] && isset($catMap[$cat['parent_id']])) {
+                        $catMap[$cat['parent_id']]['children'][] = &$catMap[$cat['id']];
+                    } else {
+                        if ($cat['is_option']) {
+                            $optionCats[] = &$catMap[$cat['id']];
+                        } else {
+                            $baseCats[] = &$catMap[$cat['id']];
+                        }
+                    }
+                }
+                $boqLineStmt = $db->prepare("
+                    SELECT bl.*, pl.unit_price as price_list_price
+                    FROM boq_lines bl
+                    LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
+                    WHERE bl.category_id = ?
+                    ORDER BY bl.display_order ASC
+                ");
+                foreach ($catMap as $catId => &$cat) {
+                    $boqLineStmt->execute([$catId]);
+                    $cat['lines'] = $boqLineStmt->fetchAll();
+                }
                 unset($cat);
-                // Build HTML similar to render_pdf_html
+
+                // Helper to render a BOQ line as HTML table row
+                $renderLineRow = function($line, $indent) {
+                    $unitPrice = $line['price_list_price'] ? (float)$line['price_list_price'] : (float)$line['unit_cost_ht'];
+                    $salePrice = round($unitPrice * (float)$line['quantity'] * (1 + (float)$line['margin_percent'] / 100), 2);
+                    return '<tr>'
+                        . '<td style="padding:2px ' . $indent . 'px;">' . htmlspecialchars($line['description']) . '</td>'
+                        . '<td style="text-align:center;">' . (float)$line['quantity'] . '</td>'
+                        . '<td style="text-align:right;">' . number_format($unitPrice, 0, ',', ' ') . ' Rs</td>'
+                        . '<td style="text-align:right;">' . number_format($salePrice, 0, ',', ' ') . ' Rs</td>'
+                        . '</tr>';
+                };
+
                 $baseCategoriesHtml = '<table style="width:100%;border-collapse:collapse;font-family:Arial,sans-serif;font-size:9pt;">';
                 foreach ($baseCats as $bcat) {
                     $baseCategoriesHtml .= '<tr style="background-color:#f0f0f0;"><td colspan="4" style="padding:4px 6px;font-weight:bold;border-bottom:1px solid #ccc;">' . htmlspecialchars($bcat['name']) . '</td></tr>';
                     foreach ($bcat['children'] as $subcat) {
                         $baseCategoriesHtml .= '<tr style="background-color:#f8f8f8;"><td colspan="4" style="padding:3px 12px;font-weight:bold;font-size:8pt;">' . htmlspecialchars($subcat['name']) . '</td></tr>';
-                        foreach ($subcat['lines'] as $line) { $up = $line['price_list_price'] ? (float)$line['price_list_price'] : (float)$line['unit_cost_ht']; $sp = round($up * (float)$line['quantity'] * (1 + (float)$line['margin_percent'] / 100), 2); $baseCategoriesHtml .= '<tr><td style="padding:2px 18px;">' . htmlspecialchars($line['description']) . '</td><td style="text-align:center;">' . (float)$line['quantity'] . '</td><td style="text-align:right;">' . number_format($up, 0, ',', ' ') . ' Rs</td><td style="text-align:right;">' . number_format($sp, 0, ',', ' ') . ' Rs</td></tr>'; }
+                        foreach ($subcat['lines'] as $line) {
+                            $baseCategoriesHtml .= $renderLineRow($line, 18);
+                        }
                     }
-                    foreach ($bcat['lines'] as $line) { $up = $line['price_list_price'] ? (float)$line['price_list_price'] : (float)$line['unit_cost_ht']; $sp = round($up * (float)$line['quantity'] * (1 + (float)$line['margin_percent'] / 100), 2); $baseCategoriesHtml .= '<tr><td style="padding:2px 12px;">' . htmlspecialchars($line['description']) . '</td><td style="text-align:center;">' . (float)$line['quantity'] . '</td><td style="text-align:right;">' . number_format($up, 0, ',', ' ') . ' Rs</td><td style="text-align:right;">' . number_format($sp, 0, ',', ' ') . ' Rs</td></tr>'; }
+                    foreach ($bcat['lines'] as $line) {
+                        $baseCategoriesHtml .= $renderLineRow($line, 12);
+                    }
                 }
                 $baseCategoriesHtml .= '</table>';
+
                 $optionCategoriesHtml = '<table style="width:100%;border-collapse:collapse;font-family:Arial,sans-serif;font-size:9pt;">';
                 foreach ($optionCats as $ocat) {
                     $optionCategoriesHtml .= '<tr style="background-color:#fff3e0;"><td colspan="4" style="padding:4px 6px;font-weight:bold;">' . htmlspecialchars($ocat['name']) . '</td></tr>';
-                    foreach ($ocat['children'] as $subcat) { $optionCategoriesHtml .= '<tr style="background-color:#fff8e1;"><td colspan="4" style="padding:3px 12px;font-weight:bold;font-size:8pt;">' . htmlspecialchars($subcat['name']) . '</td></tr>'; foreach ($subcat['lines'] as $line) { $up = $line['price_list_price'] ? (float)$line['price_list_price'] : (float)$line['unit_cost_ht']; $sp = round($up * (float)$line['quantity'] * (1 + (float)$line['margin_percent'] / 100), 2); $optionCategoriesHtml .= '<tr><td style="padding:2px 18px;">' . htmlspecialchars($line['description']) . '</td><td style="text-align:center;">' . (float)$line['quantity'] . '</td><td style="text-align:right;">' . number_format($up, 0, ',', ' ') . ' Rs</td><td style="text-align:right;">' . number_format($sp, 0, ',', ' ') . ' Rs</td></tr>'; } }
-                    foreach ($ocat['lines'] as $line) { $up = $line['price_list_price'] ? (float)$line['price_list_price'] : (float)$line['unit_cost_ht']; $sp = round($up * (float)$line['quantity'] * (1 + (float)$line['margin_percent'] / 100), 2); $optionCategoriesHtml .= '<tr><td style="padding:2px 12px;">' . htmlspecialchars($line['description']) . '</td><td style="text-align:center;">' . (float)$line['quantity'] . '</td><td style="text-align:right;">' . number_format($up, 0, ',', ' ') . ' Rs</td><td style="text-align:right;">' . number_format($sp, 0, ',', ' ') . ' Rs</td></tr>'; }
+                    foreach ($ocat['children'] as $subcat) {
+                        $optionCategoriesHtml .= '<tr style="background-color:#fff8e1;"><td colspan="4" style="padding:3px 12px;font-weight:bold;font-size:8pt;">' . htmlspecialchars($subcat['name']) . '</td></tr>';
+                        foreach ($subcat['lines'] as $line) {
+                            $optionCategoriesHtml .= $renderLineRow($line, 18);
+                        }
+                    }
+                    foreach ($ocat['lines'] as $line) {
+                        $optionCategoriesHtml .= $renderLineRow($line, 12);
+                    }
                 }
                 $optionCategoriesHtml .= '</table>';
             }
