@@ -2522,11 +2522,13 @@ try {
                 $baseCategoriesHtml = '<table style="width:100%;border-collapse:collapse;font-family:Arial,sans-serif;font-size:9pt;">';
                 foreach ($baseCats as $bcat) {
                     $baseCategoriesHtml .= '<tr style="background-color:#f0f0f0;"><td colspan="4" style="padding:4px 6px;font-weight:bold;border-bottom:1px solid #ccc;">' . htmlspecialchars($bcat['name']) . '</td></tr>';
-                    $baseCategoriesText .= strtoupper($bcat['name']) . "\n";
-                    // Sub-categories
+                    // Text format: Category (bold)
+                    $baseCategoriesText .= '<b>' . htmlspecialchars($bcat['name']) . '</b>' . "\n";
+                    // Sub-categories with lines inline
                     foreach ($bcat['children'] as $subcat) {
                         $baseCategoriesHtml .= '<tr style="background-color:#f8f8f8;"><td colspan="4" style="padding:3px 12px;font-weight:bold;font-size:8pt;border-bottom:1px solid #eee;">' . htmlspecialchars($subcat['name']) . '</td></tr>';
-                        $baseCategoriesText .= '  ' . $subcat['name'] . "\n";
+                        // Text format: SubCategory (Line1, Line2, ...)
+                        $lineNames = [];
                         foreach ($subcat['lines'] as $line) {
                             $unitPrice = $line['price_list_price'] ? (float)$line['price_list_price'] : (float)$line['unit_cost_ht'];
                             $salePrice = round($unitPrice * (float)$line['quantity'] * (1 + (float)$line['margin_percent'] / 100), 2);
@@ -2534,10 +2536,14 @@ try {
                             $baseCategoriesHtml .= '<td style="padding:2px 4px;text-align:center;border-bottom:1px solid #f0f0f0;">' . (float)$line['quantity'] . ' ' . htmlspecialchars($line['unit'] ?? '') . '</td>';
                             $baseCategoriesHtml .= '<td style="padding:2px 4px;text-align:right;border-bottom:1px solid #f0f0f0;">' . number_format($unitPrice, 0, ',', ' ') . ' Rs</td>';
                             $baseCategoriesHtml .= '<td style="padding:2px 4px;text-align:right;border-bottom:1px solid #f0f0f0;">' . number_format($salePrice, 0, ',', ' ') . ' Rs</td></tr>';
-                            $baseCategoriesText .= '    - ' . $line['description'] . ': ' . number_format($salePrice, 0, ',', ' ') . " Rs\n";
+                            $lineNames[] = htmlspecialchars($line['description']);
+                        }
+                        if (!empty($lineNames)) {
+                            $baseCategoriesText .= htmlspecialchars($subcat['name']) . ' (' . implode(', ', $lineNames) . ')' . "\n";
                         }
                     }
                     // Direct lines (no sub-category)
+                    $directLineNames = [];
                     foreach ($bcat['lines'] as $line) {
                         $unitPrice = $line['price_list_price'] ? (float)$line['price_list_price'] : (float)$line['unit_cost_ht'];
                         $salePrice = round($unitPrice * (float)$line['quantity'] * (1 + (float)$line['margin_percent'] / 100), 2);
@@ -2545,19 +2551,31 @@ try {
                         $baseCategoriesHtml .= '<td style="padding:2px 4px;text-align:center;border-bottom:1px solid #f0f0f0;">' . (float)$line['quantity'] . ' ' . htmlspecialchars($line['unit'] ?? '') . '</td>';
                         $baseCategoriesHtml .= '<td style="padding:2px 4px;text-align:right;border-bottom:1px solid #f0f0f0;">' . number_format($unitPrice, 0, ',', ' ') . ' Rs</td>';
                         $baseCategoriesHtml .= '<td style="padding:2px 4px;text-align:right;border-bottom:1px solid #f0f0f0;">' . number_format($salePrice, 0, ',', ' ') . ' Rs</td></tr>';
-                        $baseCategoriesText .= '  - ' . $line['description'] . ': ' . number_format($salePrice, 0, ',', ' ') . " Rs\n";
+                        $directLineNames[] = htmlspecialchars($line['description']);
                     }
+                    if (!empty($directLineNames)) {
+                        $baseCategoriesText .= implode(', ', $directLineNames) . "\n";
+                    }
+                    $baseCategoriesText .= "\n";
                 }
                 $baseCategoriesHtml .= '</table>';
 
-                // Build HTML for option categories
+                // Build selected option names set from quote_options
+                $selectedOptionNames = [];
+                foreach ($qOpts as $o) {
+                    $selectedOptionNames[] = strtolower(trim($o['option_name']));
+                }
+
+                // Build HTML for option categories (show all in HTML, but text only shows selected)
                 $optionCategoriesHtml = '<table style="width:100%;border-collapse:collapse;font-family:Arial,sans-serif;font-size:9pt;">';
                 foreach ($optionCats as $ocat) {
                     $optionCategoriesHtml .= '<tr style="background-color:#fff3e0;"><td colspan="4" style="padding:4px 6px;font-weight:bold;border-bottom:1px solid #ffcc80;">' . htmlspecialchars($ocat['name']) . '</td></tr>';
-                    $optionCategoriesText .= strtoupper($ocat['name']) . "\n";
+                    // For text: collect only selected lines across subcategories
+                    $catHasSelected = false;
+                    $catTextLines = [];
                     foreach ($ocat['children'] as $subcat) {
                         $optionCategoriesHtml .= '<tr style="background-color:#fff8e1;"><td colspan="4" style="padding:3px 12px;font-weight:bold;font-size:8pt;border-bottom:1px solid #ffe0b2;">' . htmlspecialchars($subcat['name']) . '</td></tr>';
-                        $optionCategoriesText .= '  ' . $subcat['name'] . "\n";
+                        $selectedLineNames = [];
                         foreach ($subcat['lines'] as $line) {
                             $unitPrice = $line['price_list_price'] ? (float)$line['price_list_price'] : (float)$line['unit_cost_ht'];
                             $salePrice = round($unitPrice * (float)$line['quantity'] * (1 + (float)$line['margin_percent'] / 100), 2);
@@ -2565,9 +2583,18 @@ try {
                             $optionCategoriesHtml .= '<td style="padding:2px 4px;text-align:center;border-bottom:1px solid #f0f0f0;">' . (float)$line['quantity'] . ' ' . htmlspecialchars($line['unit'] ?? '') . '</td>';
                             $optionCategoriesHtml .= '<td style="padding:2px 4px;text-align:right;border-bottom:1px solid #f0f0f0;">' . number_format($unitPrice, 0, ',', ' ') . ' Rs</td>';
                             $optionCategoriesHtml .= '<td style="padding:2px 4px;text-align:right;border-bottom:1px solid #f0f0f0;">' . number_format($salePrice, 0, ',', ' ') . ' Rs</td></tr>';
-                            $optionCategoriesText .= '    - ' . $line['description'] . ': ' . number_format($salePrice, 0, ',', ' ') . " Rs\n";
+                            // Only include in text if this option was selected
+                            if (in_array(strtolower(trim($line['description'])), $selectedOptionNames)) {
+                                $selectedLineNames[] = htmlspecialchars($line['description']);
+                            }
+                        }
+                        if (!empty($selectedLineNames)) {
+                            $catHasSelected = true;
+                            $catTextLines[] = htmlspecialchars($subcat['name']) . ' (' . implode(', ', $selectedLineNames) . ')';
                         }
                     }
+                    // Direct lines
+                    $selectedDirectLines = [];
                     foreach ($ocat['lines'] as $line) {
                         $unitPrice = $line['price_list_price'] ? (float)$line['price_list_price'] : (float)$line['unit_cost_ht'];
                         $salePrice = round($unitPrice * (float)$line['quantity'] * (1 + (float)$line['margin_percent'] / 100), 2);
@@ -2575,7 +2602,21 @@ try {
                         $optionCategoriesHtml .= '<td style="padding:2px 4px;text-align:center;border-bottom:1px solid #f0f0f0;">' . (float)$line['quantity'] . ' ' . htmlspecialchars($line['unit'] ?? '') . '</td>';
                         $optionCategoriesHtml .= '<td style="padding:2px 4px;text-align:right;border-bottom:1px solid #f0f0f0;">' . number_format($unitPrice, 0, ',', ' ') . ' Rs</td>';
                         $optionCategoriesHtml .= '<td style="padding:2px 4px;text-align:right;border-bottom:1px solid #f0f0f0;">' . number_format($salePrice, 0, ',', ' ') . ' Rs</td></tr>';
-                        $optionCategoriesText .= '  - ' . $line['description'] . ': ' . number_format($salePrice, 0, ',', ' ') . " Rs\n";
+                        if (in_array(strtolower(trim($line['description'])), $selectedOptionNames)) {
+                            $selectedDirectLines[] = htmlspecialchars($line['description']);
+                            $catHasSelected = true;
+                        }
+                    }
+                    // Only add category to text if it has selected options
+                    if ($catHasSelected) {
+                        $optionCategoriesText .= '<b>' . htmlspecialchars($ocat['name']) . '</b>' . "\n";
+                        foreach ($catTextLines as $tl) {
+                            $optionCategoriesText .= $tl . "\n";
+                        }
+                        if (!empty($selectedDirectLines)) {
+                            $optionCategoriesText .= implode(', ', $selectedDirectLines) . "\n";
+                        }
+                        $optionCategoriesText .= "\n";
                     }
                 }
                 $optionCategoriesHtml .= '</table>';
@@ -2678,7 +2719,7 @@ try {
                     // Replace variables
                     $rendered = $content;
                     // HTML variables should not be escaped
-                    $htmlVars = ['{{base_categories_html}}', '{{option_categories_html}}'];
+                    $htmlVars = ['{{base_categories_html}}', '{{option_categories_html}}', '{{base_categories}}', '{{option_categories}}'];
                     foreach ($vars as $vk => $vv) {
                         if (in_array($vk, $htmlVars)) {
                             $rendered = str_replace($vk, $vv, $rendered);
@@ -2818,29 +2859,72 @@ try {
                 $baseCategoriesHtml = '<table style="width:100%;border-collapse:collapse;font-family:Arial,sans-serif;font-size:9pt;">';
                 foreach ($baseCats as $bcat) {
                     $baseCategoriesHtml .= '<tr style="background-color:#f0f0f0;"><td colspan="4" style="padding:4px 6px;font-weight:bold;border-bottom:1px solid #ccc;">' . htmlspecialchars($bcat['name']) . '</td></tr>';
+                    $baseCategoriesText .= '<b>' . htmlspecialchars($bcat['name']) . '</b>' . "\n";
                     foreach ($bcat['children'] as $subcat) {
                         $baseCategoriesHtml .= '<tr style="background-color:#f8f8f8;"><td colspan="4" style="padding:3px 12px;font-weight:bold;font-size:8pt;">' . htmlspecialchars($subcat['name']) . '</td></tr>';
+                        $lineNames = [];
                         foreach ($subcat['lines'] as $line) {
                             $baseCategoriesHtml .= $renderLineRow($line, 18);
+                            $lineNames[] = htmlspecialchars($line['description']);
+                        }
+                        if (!empty($lineNames)) {
+                            $baseCategoriesText .= htmlspecialchars($subcat['name']) . ' (' . implode(', ', $lineNames) . ')' . "\n";
                         }
                     }
+                    $directLineNames = [];
                     foreach ($bcat['lines'] as $line) {
                         $baseCategoriesHtml .= $renderLineRow($line, 12);
+                        $directLineNames[] = htmlspecialchars($line['description']);
                     }
+                    if (!empty($directLineNames)) {
+                        $baseCategoriesText .= implode(', ', $directLineNames) . "\n";
+                    }
+                    $baseCategoriesText .= "\n";
                 }
                 $baseCategoriesHtml .= '</table>';
+
+                // Build selected option names set from quote_options
+                $selectedOptionNames = [];
+                foreach ($qOpts as $o) {
+                    $selectedOptionNames[] = strtolower(trim($o['option_name']));
+                }
 
                 $optionCategoriesHtml = '<table style="width:100%;border-collapse:collapse;font-family:Arial,sans-serif;font-size:9pt;">';
                 foreach ($optionCats as $ocat) {
                     $optionCategoriesHtml .= '<tr style="background-color:#fff3e0;"><td colspan="4" style="padding:4px 6px;font-weight:bold;">' . htmlspecialchars($ocat['name']) . '</td></tr>';
+                    $catHasSelected = false;
+                    $catTextLines = [];
                     foreach ($ocat['children'] as $subcat) {
                         $optionCategoriesHtml .= '<tr style="background-color:#fff8e1;"><td colspan="4" style="padding:3px 12px;font-weight:bold;font-size:8pt;">' . htmlspecialchars($subcat['name']) . '</td></tr>';
+                        $selectedLineNames = [];
                         foreach ($subcat['lines'] as $line) {
                             $optionCategoriesHtml .= $renderLineRow($line, 18);
+                            if (in_array(strtolower(trim($line['description'])), $selectedOptionNames)) {
+                                $selectedLineNames[] = htmlspecialchars($line['description']);
+                            }
+                        }
+                        if (!empty($selectedLineNames)) {
+                            $catHasSelected = true;
+                            $catTextLines[] = htmlspecialchars($subcat['name']) . ' (' . implode(', ', $selectedLineNames) . ')';
                         }
                     }
+                    $selectedDirectLines = [];
                     foreach ($ocat['lines'] as $line) {
                         $optionCategoriesHtml .= $renderLineRow($line, 12);
+                        if (in_array(strtolower(trim($line['description'])), $selectedOptionNames)) {
+                            $selectedDirectLines[] = htmlspecialchars($line['description']);
+                            $catHasSelected = true;
+                        }
+                    }
+                    if ($catHasSelected) {
+                        $optionCategoriesText .= '<b>' . htmlspecialchars($ocat['name']) . '</b>' . "\n";
+                        foreach ($catTextLines as $tl) {
+                            $optionCategoriesText .= $tl . "\n";
+                        }
+                        if (!empty($selectedDirectLines)) {
+                            $optionCategoriesText .= implode(', ', $selectedDirectLines) . "\n";
+                        }
+                        $optionCategoriesText .= "\n";
                     }
                 }
                 $optionCategoriesHtml .= '</table>';
@@ -2898,7 +2982,7 @@ try {
             $pdfHtml .= '<colgroup>';
             for ($c = 0; $c < $colCount; $c++) { $w = isset($colWidths[$c]) ? $colWidths[$c] : 19; $pdfHtml .= '<col style="width:' . $w . 'mm">'; }
             $pdfHtml .= '</colgroup>';
-            $htmlVars = ['{{base_categories_html}}', '{{option_categories_html}}'];
+            $htmlVars = ['{{base_categories_html}}', '{{option_categories_html}}', '{{base_categories}}', '{{option_categories}}'];
             for ($r = 0; $r < $rowCount; $r++) {
                 $rh = isset($rowHeights[$r]) ? $rowHeights[$r] : 14;
                 $pdfHtml .= '<tr style="height:' . $rh . 'mm;">';
