@@ -73,14 +73,24 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
   const [baseCategories, setBaseCategories] = useState<BOQBaseCategory[]>([]);
   const [lightbox, setLightbox] = useState<string | null>(null);
   
-  // Pool dimensions state (for pool models)
+  // Pool dimensions state (for pool models) — start empty so user must enter them
   const [poolDimensions, setPoolDimensions] = useState<PoolDimensions>({
-    longueur: 8,
-    largeur: 4,
-    profondeur: 1.5,
+    longueur: 0,
+    largeur: 0,
+    profondeur: 0,
   });
   const [poolVariables, setPoolVariables] = useState<PoolVariable[]>([]);
   const [boqFullCategories, setBOQFullCategories] = useState<BOQFullCategory[]>([]);
+  const [isLoadingPoolData, setIsLoadingPoolData] = useState(false);
+
+  // All 3 dimensions must be filled before we show prices / options
+  const poolDimensionsReady = isPoolModel
+    && poolDimensions.longueur > 0
+    && poolDimensions.largeur > 0
+    && poolDimensions.profondeur > 0;
+
+  // True while we have dimensions but BOQ data hasn't loaded yet
+  const isCalculatingPrice = isPoolModel && poolDimensionsReady && isLoadingPoolData;
   
   // Multi-step state
   const [step, setStep] = useState<'options' | 'details' | 'confirmation'>('options');
@@ -211,6 +221,8 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
       // Load pool-specific data for pool models
       if (model.type === 'pool') {
         loadPoolData(model.id);
+        // Reset dimensions so the user must enter them
+        setPoolDimensions({ longueur: 0, largeur: 0, profondeur: 0 });
       }
       // Reset to first step when opening
       setStep('options');
@@ -399,6 +411,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
 
   // Load pool-specific data (variables + full BOQ with formulas)
   const loadPoolData = async (modelId: number) => {
+    setIsLoadingPoolData(true);
     try {
       const [variables, fullCategories] = await Promise.all([
         api.getPoolBOQVariables(),
@@ -408,6 +421,8 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
       setBOQFullCategories(fullCategories);
     } catch (err) {
       console.error('Error loading pool data:', err);
+    } finally {
+      setIsLoadingPoolData(false);
     }
   };
 
@@ -566,6 +581,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                     <Ruler className="w-4 h-4" />
                     Dimensions de votre piscine
                   </h3>
+                  <p className="text-xs text-blue-600 mb-3">Veuillez saisir les 3 dimensions pour voir le prix estimé.</p>
                   <div className="grid grid-cols-3 gap-4">
                     <div>
                       <label className="block text-xs font-medium text-blue-700 mb-1">Longueur (m)</label>
@@ -574,10 +590,11 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                         step="0.5"
                         min="2"
                         max="20"
-                        value={poolDimensions.longueur}
+                        value={poolDimensions.longueur || ''}
+                        placeholder="ex: 8"
                         onChange={(e) => {
                           const v = Number(e.target.value);
-                          if (v > 0) setPoolDimensions(prev => ({ ...prev, longueur: v }));
+                          setPoolDimensions(prev => ({ ...prev, longueur: v >= 0 ? v : 0 }));
                         }}
                         className="h-9 text-sm bg-white"
                       />
@@ -589,10 +606,11 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                         step="0.5"
                         min="1"
                         max="15"
-                        value={poolDimensions.largeur}
+                        value={poolDimensions.largeur || ''}
+                        placeholder="ex: 4"
                         onChange={(e) => {
                           const v = Number(e.target.value);
-                          if (v > 0) setPoolDimensions(prev => ({ ...prev, largeur: v }));
+                          setPoolDimensions(prev => ({ ...prev, largeur: v >= 0 ? v : 0 }));
                         }}
                         className="h-9 text-sm bg-white"
                       />
@@ -604,27 +622,50 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                         step="0.1"
                         min="0.5"
                         max="3"
-                        value={poolDimensions.profondeur}
+                        value={poolDimensions.profondeur || ''}
+                        placeholder="ex: 1.5"
                         onChange={(e) => {
                           const v = Number(e.target.value);
-                          if (v > 0) setPoolDimensions(prev => ({ ...prev, profondeur: v }));
+                          setPoolDimensions(prev => ({ ...prev, profondeur: v >= 0 ? v : 0 }));
                         }}
                         className="h-9 text-sm bg-white"
                       />
                     </div>
                   </div>
-                  {(() => {
-                    const surface = poolDimensions.longueur * poolDimensions.largeur;
-                    return (
-                      <p className="text-xs text-blue-600 mt-2">
-                        Surface : {surface.toFixed(1)} m² • 
-                        Volume : {(surface * poolDimensions.profondeur).toFixed(1)} m³
-                      </p>
-                    );
-                  })()}
+                  {poolDimensionsReady && (
+                    (() => {
+                      const surface = poolDimensions.longueur * poolDimensions.largeur;
+                      return (
+                        <p className="text-xs text-blue-600 mt-2">
+                          Surface : {surface.toFixed(1)} m² • 
+                          Volume : {(surface * poolDimensions.profondeur).toFixed(1)} m³
+                        </p>
+                      );
+                    })()
+                  )}
                 </div>
               )}
 
+              {/* For pool models: show calculating indicator or hide sections until dimensions are ready */}
+              {isPoolModel && !poolDimensionsReady && (
+                <div className="bg-yellow-50 border border-yellow-200 p-4 rounded text-center">
+                  <p className="text-sm text-yellow-700">
+                    Renseignez les 3 dimensions ci-dessus pour voir le prix estimé et les options disponibles.
+                  </p>
+                </div>
+              )}
+
+              {isPoolModel && poolDimensionsReady && isCalculatingPrice && (
+                <div className="bg-blue-50 border border-blue-200 p-6 rounded text-center">
+                  <Loader2 className="w-6 h-6 animate-spin text-blue-600 mx-auto mb-2" />
+                  <p className="text-sm font-medium text-blue-700">Calculs en cours…</p>
+                  <p className="text-xs text-blue-500 mt-1">Estimation du prix en fonction de vos dimensions</p>
+                </div>
+              )}
+
+              {/* Show content when: not a pool model OR (pool with dimensions ready and not loading) */}
+              {(!isPoolModel || (poolDimensionsReady && !isCalculatingPrice)) && (
+                <>
               {/* INCLUS DANS LE PRIX DE BASE */}
               {baseCategories.length > 0 && (
                 <div className="bg-green-50 border border-green-200 p-4 rounded">
@@ -760,6 +801,8 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                   <ArrowRight className="w-4 h-4 ml-2" />
                 </Button>
               </div>
+                </>
+              )}
             </>
           )}
 
