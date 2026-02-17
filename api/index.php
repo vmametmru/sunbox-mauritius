@@ -136,12 +136,12 @@ try {
             foreach ($models as &$m) {
                 $m['features'] = $m['features'] ? json_decode($m['features'], true) : [];
                 // Fetch plan_url from model_images table
-                $planStmt = $db->prepare("SELECT file_path FROM model_images WHERE model_id = ? AND media_type = 'plan' ORDER BY id DESC LIMIT 1");
+                $planStmt = $db->prepare("SELECT file_path FROM model_images WHERE model_id = ? AND media_type = 'plan' ORDER BY is_primary DESC, id DESC LIMIT 1");
                 $planStmt->execute([$m['id']]);
                 $m['plan_url'] = ($row = $planStmt->fetch()) ? '/' . ltrim($row['file_path'], '/') : null;
                 // Fetch photo image_url from model_images table (media_type = 'photo')
                 // Falls back to the image_url column in models table if no photo found in model_images
-                $photoStmt = $db->prepare("SELECT file_path FROM model_images WHERE model_id = ? AND media_type = 'photo' ORDER BY id DESC LIMIT 1");
+                $photoStmt = $db->prepare("SELECT file_path FROM model_images WHERE model_id = ? AND media_type = 'photo' ORDER BY is_primary DESC, id DESC LIMIT 1");
                 $photoStmt->execute([$m['id']]);
                 $photoRow = $photoStmt->fetch();
                 if ($photoRow && $photoRow['file_path']) {
