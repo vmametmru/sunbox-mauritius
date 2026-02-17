@@ -246,6 +246,10 @@ export const api = {
     });
   },
 
+  resetBOQ(modelId: number) {
+    return this.query('reset_boq', { model_id: modelId });
+  },
+
   getModelBOQPrice(modelId: number) {
     return this.query('get_model_boq_price', { model_id: modelId });
   },
@@ -260,6 +264,10 @@ export const api = {
 
   getBOQCategoryLines(categoryId: number) {
     return this.query('get_boq_category_lines', { category_id: categoryId });
+  },
+
+  getPoolBOQFull(modelId: number) {
+    return this.query('get_pool_boq_full', { model_id: modelId });
   },
 
   /* =====================================================
@@ -732,21 +740,31 @@ export const api = {
     name: string;
     description?: string;
     is_default?: boolean;
+    template_data?: any;
   }) {
     return this.query('create_pool_boq_template', template);
   },
 
   updatePoolBOQTemplate(template: {
     id: number;
-    name: string;
+    name?: string;
     description?: string;
     is_default?: boolean;
+    template_data?: any;
   }) {
     return this.query('update_pool_boq_template', template);
   },
 
   deletePoolBOQTemplate(id: number) {
     return this.query('delete_pool_boq_template', { id });
+  },
+
+  getPoolBOQTemplateById(id: number) {
+    return this.query('get_pool_boq_template_by_id', { id });
+  },
+
+  getDefaultPoolBOQTemplateFromDB() {
+    return this.query('get_default_pool_boq_template');
   },
 };
 

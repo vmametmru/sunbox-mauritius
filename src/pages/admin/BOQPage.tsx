@@ -15,7 +15,8 @@ import {
   Waves,
   DollarSign,
   TrendingUp,
-  Receipt
+  Receipt,
+  RotateCcw
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -54,6 +55,7 @@ import {
   evaluateFormula,
   getDefaultPoolBOQTemplate,
   getDefaultPoolBOQOptionsTemplate,
+  loadTemplateFromDB,
   type PoolVariable,
   type PoolDimensions,
 } from '@/lib/pool-formulas';
@@ -479,6 +481,29 @@ export default function BOQPage() {
   };
 
   /* ======================================================
+     RESET BOQ (delete all categories and lines for re-import)
+  ====================================================== */
+  const resetBOQ = async () => {
+    if (!selectedModelId) return;
+    if (!confirm('ATTENTION: Cela va supprimer TOUTES les catégories et lignes BOQ de ce modèle.\n\nCette action est irréversible.\n\nContinuer ?')) return;
+    try {
+      setSaving(true);
+      await api.resetBOQ(selectedModelId);
+      setCategories([]);
+      setCategoryLines({});
+      setExpandedCategories([]);
+      toast({
+        title: 'BOQ réinitialisé',
+        description: 'Toutes les catégories et lignes ont été supprimées. Vous pouvez maintenant ré-importer le BOQ.',
+      });
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  /* ======================================================
      GENERATE POOL BOQ FROM TEMPLATE
   ====================================================== */
   const generatePoolBOQ = async () => {
@@ -489,8 +514,8 @@ export default function BOQPage() {
     if (!confirm(confirmMessage)) return;
     try {
       setSaving(true);
-      const baseTemplate = getDefaultPoolBOQTemplate();
-      const optionsTemplate = getDefaultPoolBOQOptionsTemplate();
+      // Load template from database (falls back to localStorage/hardcoded)
+      const { base: baseTemplate, options: optionsTemplate } = await loadTemplateFromDB();
       const allTemplates = [...baseTemplate, ...optionsTemplate];
 
       // Build a lookup map: price_list_name -> price_list_item
@@ -985,6 +1010,17 @@ export default function BOQPage() {
               className="bg-blue-500 hover:bg-blue-600"
             >
               <Waves className="h-4 w-4 mr-2" /> {categories.length > 0 ? 'Régénérer BOQ Piscine' : 'Générer BOQ Piscine'}
+            </Button>
+          )}
+
+          {categories.length > 0 && (
+            <Button
+              variant="outline"
+              onClick={resetBOQ}
+              disabled={saving}
+              className="text-red-600 border-red-300 hover:bg-red-50"
+            >
+              <RotateCcw className="h-4 w-4 mr-2" /> Réinitialiser BOQ
             </Button>
           )}
         </div>

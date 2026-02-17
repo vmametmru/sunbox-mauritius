@@ -1,13 +1,15 @@
-import React, { useEffect, useState } from 'react';
-import { ChevronUp, ChevronDown, ZoomIn, Check, User, Mail, Phone, MapPin, MessageSquare, Loader2, ArrowLeft, ArrowRight, CheckCircle } from 'lucide-react';
+import React, { useEffect, useState, useMemo } from 'react';
+import { ChevronUp, ChevronDown, ZoomIn, Check, User, Mail, Phone, MapPin, MessageSquare, Loader2, ArrowLeft, ArrowRight, CheckCircle, Ruler } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { useQuote, ModelOption } from '@/contexts/QuoteContext';
 import { api } from '@/lib/api';
 import { useSiteSettings, calculateTTC } from '@/hooks/use-site-settings';
 import { useToast } from '@/hooks/use-toast';
+import { evaluatePoolVariables, evaluateFormula, type PoolDimensions, type PoolVariable } from '@/lib/pool-formulas';
 
 interface BOQLine {
   id: number;
@@ -29,6 +31,31 @@ interface BOQOption {
   image_url?: string | null;
 }
 
+/** Full BOQ line with formulas for dynamic calculation */
+interface BOQFullLine {
+  id: number;
+  description: string;
+  quantity: number;
+  quantity_formula: string | null;
+  unit: string;
+  unit_cost_ht: number;
+  unit_cost_formula: string | null;
+  price_list_id: number | null;
+  price_list_unit_price: number | null;
+  margin_percent: number;
+  display_order: number;
+}
+
+/** Full BOQ category with lines */
+interface BOQFullCategory {
+  id: number;
+  name: string;
+  is_option: boolean;
+  display_order: number;
+  parent_id: number | null;
+  lines: BOQFullLine[];
+}
+
 // Constants for BOQ options handling
 const BOQ_OPTION_ID_OFFSET = 1000000;
 const BOQ_OPTIONS_CATEGORY_ID = -1;
@@ -45,6 +72,15 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
   const [boqOptions, setBOQOptions] = useState<ModelOption[]>([]);
   const [baseCategories, setBaseCategories] = useState<BOQBaseCategory[]>([]);
   const [lightbox, setLightbox] = useState<string | null>(null);
+  
+  // Pool dimensions state (for pool models)
+  const [poolDimensions, setPoolDimensions] = useState<PoolDimensions>({
+    longueur: 8,
+    largeur: 4,
+    profondeur: 1.5,
+  });
+  const [poolVariables, setPoolVariables] = useState<PoolVariable[]>([]);
+  const [boqFullCategories, setBOQFullCategories] = useState<BOQFullCategory[]>([]);
   
   // Multi-step state
   const [step, setStep] = useState<'options' | 'details' | 'confirmation'>('options');
@@ -66,6 +102,66 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
   const vatRate = Number(siteSettings?.vat_rate) || 15;
 
   const model = quoteData.model;
+  const isPoolModel = model?.type === 'pool';
+
+  // Compute pool variable context (surface_m2, volume_m3, etc.) from dimensions
+  const poolVarContext = useMemo(() => {
+    if (!isPoolModel || poolVariables.length === 0) return {};
+    return evaluatePoolVariables(poolDimensions, poolVariables);
+  }, [isPoolModel, poolDimensions, poolVariables]);
+
+  // Calculate dynamic base price for pool models from BOQ formulas
+  const poolBasePrice = useMemo(() => {
+    if (!isPoolModel || boqFullCategories.length === 0) return 0;
+    
+    // Sum up sale prices for all non-option categories (base categories)
+    const baseCategories = boqFullCategories.filter(c => !c.is_option);
+    let totalSaleHT = 0;
+    
+    for (const cat of baseCategories) {
+      for (const line of cat.lines) {
+        const qty = line.quantity_formula
+          ? evaluateFormula(line.quantity_formula, poolVarContext)
+          : line.quantity;
+        const unitCost = line.unit_cost_formula
+          ? evaluateFormula(line.unit_cost_formula, poolVarContext)
+          : (line.price_list_id && line.price_list_unit_price
+            ? Number(line.price_list_unit_price)
+            : line.unit_cost_ht);
+        const lineCost = qty * unitCost;
+        totalSaleHT += lineCost * (1 + line.margin_percent / 100);
+      }
+    }
+    
+    return totalSaleHT;
+  }, [isPoolModel, boqFullCategories, poolVarContext]);
+
+  // Calculate dynamic option prices for pool BOQ options
+  const poolOptionPrices = useMemo(() => {
+    if (!isPoolModel || boqFullCategories.length === 0) return {};
+    
+    const optionCategories = boqFullCategories.filter(c => c.is_option);
+    const prices: Record<number, number> = {};
+    
+    for (const cat of optionCategories) {
+      let totalSaleHT = 0;
+      for (const line of cat.lines) {
+        const qty = line.quantity_formula
+          ? evaluateFormula(line.quantity_formula, poolVarContext)
+          : line.quantity;
+        const unitCost = line.unit_cost_formula
+          ? evaluateFormula(line.unit_cost_formula, poolVarContext)
+          : (line.price_list_id && line.price_list_unit_price
+            ? Number(line.price_list_unit_price)
+            : line.unit_cost_ht);
+        const lineCost = qty * unitCost;
+        totalSaleHT += lineCost * (1 + line.margin_percent / 100);
+      }
+      prices[cat.id] = totalSaleHT;
+    }
+    
+    return prices;
+  }, [isPoolModel, boqFullCategories, poolVarContext]);
   
   // Generate or retrieve device ID for client info reuse
   const getDeviceId = () => {
@@ -112,6 +208,10 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
       loadBOQOptions();
       loadBaseCategories();
       loadSavedClientInfo();
+      // Load pool-specific data for pool models
+      if (model.type === 'pool') {
+        loadPoolData(model.id);
+      }
       // Reset to first step when opening
       setStep('options');
       setErrors({});
@@ -187,7 +287,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
         model_id: model.id,
         model_name: model.name,
         model_type: model.type,
-        base_price: Number(model.base_price ?? 0),
+        base_price: Math.round(getEffectiveBasePrice()),
         options_total: optionsTotal,
         total_price: totalPrice,
         customer_name: quoteData.customerName,
@@ -199,8 +299,14 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
         selected_options: quoteData.selectedOptions.map(opt => ({
           option_id: opt.id,
           option_name: opt.name,
-          option_price: calculateTTC(opt.price, vatRate),
+          option_price: Math.round(getOptionDisplayPrice(opt)),
         })),
+        // Include pool dimensions in quote if pool model
+        ...(isPoolModel ? {
+          pool_longueur: poolDimensions.longueur,
+          pool_largeur: poolDimensions.largeur,
+          pool_profondeur: poolDimensions.profondeur,
+        } : {}),
       });
       
       setSubmittedQuote(result);
@@ -291,6 +397,35 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
     }
   };
 
+  // Load pool-specific data (variables + full BOQ with formulas)
+  const loadPoolData = async (modelId: number) => {
+    try {
+      const [variables, fullCategories] = await Promise.all([
+        api.getPoolBOQVariables(),
+        api.getPoolBOQFull(modelId),
+      ]);
+      setPoolVariables(variables);
+      setBOQFullCategories(fullCategories);
+    } catch (err) {
+      console.error('Error loading pool data:', err);
+    }
+  };
+
+  // Get the effective base price: for pool models use calculated price, otherwise use model base_price
+  const getEffectiveBasePrice = () => {
+    if (isPoolModel && boqFullCategories.length > 0) {
+      return calculateTTC(poolBasePrice, vatRate);
+    }
+    return Number(model?.base_price ?? 0);
+  };
+
+  // For pool models, BOQ options have dynamic prices based on dimensions
+  const getPoolOptionPrice = (optionId: number): number => {
+    // optionId is offset by BOQ_OPTION_ID_OFFSET
+    const realId = optionId - BOQ_OPTION_ID_OFFSET;
+    return poolOptionPrices[realId] ?? 0;
+  };
+
   // Combine regular options and BOQ options
   const allOptions = [...options, ...boqOptions];
 
@@ -314,12 +449,28 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
 
   // Local TTC calculations
   const calculateOptionsTotalTTC = () => {
-    return quoteData.selectedOptions.reduce((sum, opt) => sum + calculateTTC(Number(opt.price || 0), vatRate), 0);
+    return quoteData.selectedOptions.reduce((sum, opt) => {
+      // For pool BOQ options, use the dynamically calculated price based on dimensions
+      if (isPoolModel && opt.id >= BOQ_OPTION_ID_OFFSET) {
+        const dynamicPrice = getPoolOptionPrice(opt.id);
+        return sum + calculateTTC(dynamicPrice, vatRate);
+      }
+      return sum + calculateTTC(Number(opt.price || 0), vatRate);
+    }, 0);
   };
 
   const calculateTotalTTC = () => {
-    const base = Number(model?.base_price ?? 0);
+    const base = getEffectiveBasePrice();
     return base + calculateOptionsTotalTTC();
+  };
+
+  // Get the display price for an option (dynamic for pool models)
+  const getOptionDisplayPrice = (opt: ModelOption) => {
+    if (isPoolModel && opt.id >= BOQ_OPTION_ID_OFFSET) {
+      const dynamicPrice = getPoolOptionPrice(opt.id);
+      return calculateTTC(dynamicPrice, vatRate);
+    }
+    return calculateTTC(opt.price, vatRate);
   };
 
   if (!model) return null;
@@ -408,6 +559,72 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                 )}
               </div>
 
+              {/* POOL DIMENSIONS INPUT */}
+              {isPoolModel && (
+                <div className="bg-blue-50 border border-blue-200 p-4 rounded">
+                  <h3 className="text-base font-semibold text-blue-800 mb-3 flex items-center gap-2">
+                    <Ruler className="w-4 h-4" />
+                    Dimensions de votre piscine
+                  </h3>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-blue-700 mb-1">Longueur (m)</label>
+                      <Input
+                        type="number"
+                        step="0.5"
+                        min="2"
+                        max="20"
+                        value={poolDimensions.longueur}
+                        onChange={(e) => {
+                          const v = Number(e.target.value);
+                          if (v > 0) setPoolDimensions(prev => ({ ...prev, longueur: v }));
+                        }}
+                        className="h-9 text-sm bg-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-blue-700 mb-1">Largeur (m)</label>
+                      <Input
+                        type="number"
+                        step="0.5"
+                        min="1"
+                        max="15"
+                        value={poolDimensions.largeur}
+                        onChange={(e) => {
+                          const v = Number(e.target.value);
+                          if (v > 0) setPoolDimensions(prev => ({ ...prev, largeur: v }));
+                        }}
+                        className="h-9 text-sm bg-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-blue-700 mb-1">Profondeur (m)</label>
+                      <Input
+                        type="number"
+                        step="0.1"
+                        min="0.5"
+                        max="3"
+                        value={poolDimensions.profondeur}
+                        onChange={(e) => {
+                          const v = Number(e.target.value);
+                          if (v > 0) setPoolDimensions(prev => ({ ...prev, profondeur: v }));
+                        }}
+                        className="h-9 text-sm bg-white"
+                      />
+                    </div>
+                  </div>
+                  {(() => {
+                    const surface = poolDimensions.longueur * poolDimensions.largeur;
+                    return (
+                      <p className="text-xs text-blue-600 mt-2">
+                        Surface : {surface.toFixed(1)} m² • 
+                        Volume : {(surface * poolDimensions.profondeur).toFixed(1)} m³
+                      </p>
+                    );
+                  })()}
+                </div>
+              )}
+
               {/* INCLUS DANS LE PRIX DE BASE */}
               {baseCategories.length > 0 && (
                 <div className="bg-green-50 border border-green-200 p-4 rounded">
@@ -443,19 +660,19 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                 <div className="flex justify-between items-center">
                   <p className="text-sm text-gray-500">Prix de base TTC</p>
                   <p className="text-sm font-medium text-gray-700">
-                    Rs {Number(model.base_price ?? 0).toLocaleString()}
+                    Rs {Math.round(getEffectiveBasePrice()).toLocaleString()}
                   </p>
                 </div>
                 <div className="flex justify-between items-center">
                   <p className="text-sm text-gray-500">Total options TTC</p>
                   <p className="text-sm font-medium text-gray-700">
-                    Rs {calculateOptionsTotalTTC().toLocaleString()}
+                    Rs {Math.round(calculateOptionsTotalTTC()).toLocaleString()}
                   </p>
                 </div>
                 <div className="flex justify-between items-center pt-2 border-t border-gray-200">
                   <p className="text-sm text-gray-500">Total général TTC</p>
                   <p className="text-xl font-bold text-gray-800">
-                    Rs {calculateTotalTTC().toLocaleString()}
+                    Rs {Math.round(calculateTotalTTC()).toLocaleString()}
                   </p>
                 </div>
               </div>
@@ -516,7 +733,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                                     </p>
                                   )}
                                   <p className={`text-sm text-orange-600 font-medium ${opt.description ? 'mt-2' : 'mt-1'}`}>
-                                    Rs {calculateTTC(opt.price, vatRate).toLocaleString()}
+                                    Rs {Math.round(getOptionDisplayPrice(opt)).toLocaleString()}
                                   </p>
                                 </div>
                                 <Switch
@@ -691,19 +908,25 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                   <span className="text-gray-600">Modèle</span>
                   <span className="font-medium">{model.name}</span>
                 </div>
+                {isPoolModel && (
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-600">Dimensions</span>
+                    <span className="font-medium">{poolDimensions.longueur}m × {poolDimensions.largeur}m × {poolDimensions.profondeur}m</span>
+                  </div>
+                )}
                 <div className="flex justify-between items-center text-sm">
                   <span className="text-gray-600">Prix de base TTC</span>
-                  <span className="font-medium">Rs {Number(model.base_price ?? 0).toLocaleString()}</span>
+                  <span className="font-medium">Rs {Math.round(getEffectiveBasePrice()).toLocaleString()}</span>
                 </div>
                 {quoteData.selectedOptions.length > 0 && (
                   <div className="flex justify-between items-center text-sm">
                     <span className="text-gray-600">Options ({quoteData.selectedOptions.length})</span>
-                    <span className="font-medium">Rs {calculateOptionsTotalTTC().toLocaleString()}</span>
+                    <span className="font-medium">Rs {Math.round(calculateOptionsTotalTTC()).toLocaleString()}</span>
                   </div>
                 )}
                 <div className="flex justify-between items-center pt-2 border-t border-gray-200">
                   <span className="font-semibold">Total TTC</span>
-                  <span className="text-xl font-bold text-orange-600">Rs {calculateTotalTTC().toLocaleString()}</span>
+                  <span className="text-xl font-bold text-orange-600">Rs {Math.round(calculateTotalTTC()).toLocaleString()}</span>
                 </div>
               </div>
 
@@ -762,7 +985,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-600">Total TTC</span>
-                    <span className="font-bold text-orange-600">Rs {calculateTotalTTC().toLocaleString()}</span>
+                    <span className="font-bold text-orange-600">Rs {Math.round(calculateTotalTTC()).toLocaleString()}</span>
                   </div>
                 </div>
               </div>

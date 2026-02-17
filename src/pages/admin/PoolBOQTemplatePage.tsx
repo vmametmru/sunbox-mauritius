@@ -12,6 +12,7 @@ import {
   X,
   Plus,
   Trash2,
+  Loader2,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -24,6 +25,10 @@ import {
   savePoolBOQTemplate,
   savePoolBOQOptionsTemplate,
   clearSavedPoolBOQTemplates,
+  loadTemplateFromDB,
+  saveTemplateToDB,
+  getHardcodedBaseTemplate,
+  getHardcodedOptionsTemplate,
   PoolBOQTemplateCategory,
   PoolBOQTemplateSubcategory,
   PoolBOQTemplateLine
@@ -36,7 +41,7 @@ import {
  * The template defines all categories, subcategories, and lines that are created when
  * generating a BOQ for a pool model.
  * 
- * Templates are persisted in localStorage and used by the BOQ generator.
+ * Templates are persisted in the database and used by the BOQ generator.
  */
 
 const PoolBOQTemplatePage: React.FC = () => {
@@ -48,6 +53,11 @@ const PoolBOQTemplatePage: React.FC = () => {
   const [expandedCategories, setExpandedCategories] = useState<number[]>([]);
   const [expandedSubcategories, setExpandedSubcategories] = useState<string[]>([]);
   const [hasChanges, setHasChanges] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Database record tracking
+  const [dbRecordId, setDbRecordId] = useState<number | undefined>(undefined);
 
   // Editing state: tracks which line is currently being edited
   const [editingLine, setEditingLine] = useState<{
@@ -62,19 +72,31 @@ const PoolBOQTemplatePage: React.FC = () => {
     loadTemplates();
   }, []);
 
-  const loadTemplates = () => {
+  const loadTemplates = async () => {
+    setIsLoading(true);
     try {
-      const base = getDefaultPoolBOQTemplate();
-      const options = getDefaultPoolBOQOptionsTemplate();
+      const { record, base, options } = await loadTemplateFromDB();
       setBaseTemplate(base);
       setOptionsTemplate(options);
+      setDbRecordId(record?.id);
       setHasChanges(false);
     } catch (err: any) {
-      toast({
-        title: 'Erreur',
-        description: err.message,
-        variant: 'destructive',
-      });
+      // Fallback to localStorage/hardcoded
+      try {
+        const base = getDefaultPoolBOQTemplate();
+        const options = getDefaultPoolBOQOptionsTemplate();
+        setBaseTemplate(base);
+        setOptionsTemplate(options);
+        setHasChanges(false);
+      } catch (fallbackErr: any) {
+        toast({
+          title: 'Erreur',
+          description: fallbackErr.message,
+          variant: 'destructive',
+        });
+      }
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -97,33 +119,71 @@ const PoolBOQTemplatePage: React.FC = () => {
   /* ======================================================
      SAVE / RESET
   ====================================================== */
-  const saveTemplates = useCallback(() => {
+  const saveTemplates = useCallback(async () => {
+    setIsSaving(true);
     try {
-      savePoolBOQTemplate(baseTemplate);
-      savePoolBOQOptionsTemplate(optionsTemplate);
+      const recordId = await saveTemplateToDB(baseTemplate, optionsTemplate, dbRecordId);
+      if (!dbRecordId) {
+        setDbRecordId(recordId);
+      }
       setHasChanges(false);
       toast({
         title: 'Modèle sauvegardé',
-        description: 'Les modifications du modèle ont été enregistrées.',
+        description: 'Les modifications du modèle ont été enregistrées dans la base de données.',
       });
     } catch (err: any) {
-      toast({
-        title: 'Erreur',
-        description: err.message,
-        variant: 'destructive',
-      });
+      // Fallback to localStorage if DB save fails
+      try {
+        savePoolBOQTemplate(baseTemplate);
+        savePoolBOQOptionsTemplate(optionsTemplate);
+        setHasChanges(false);
+        toast({
+          title: 'Sauvegardé localement',
+          description: 'La base de données est indisponible. Les modifications ont été enregistrées localement.',
+          variant: 'destructive',
+        });
+      } catch (fallbackErr: any) {
+        toast({
+          title: 'Erreur',
+          description: fallbackErr.message,
+          variant: 'destructive',
+        });
+      }
+    } finally {
+      setIsSaving(false);
     }
-  }, [baseTemplate, optionsTemplate, toast]);
+  }, [baseTemplate, optionsTemplate, dbRecordId, toast]);
 
-  const resetToDefaults = useCallback(() => {
+  const resetToDefaults = useCallback(async () => {
     if (!confirm('Réinitialiser le modèle aux valeurs par défaut ?\nToutes les modifications seront perdues.')) return;
-    clearSavedPoolBOQTemplates();
-    loadTemplates();
-    toast({
-      title: 'Modèle réinitialisé',
-      description: 'Le modèle a été réinitialisé aux valeurs par défaut.',
-    });
-  }, [toast]);
+    setIsSaving(true);
+    try {
+      const base = getHardcodedBaseTemplate();
+      const options = getHardcodedOptionsTemplate();
+      // Save defaults to database
+      await saveTemplateToDB(base, options, dbRecordId);
+      clearSavedPoolBOQTemplates();
+      setBaseTemplate(base);
+      setOptionsTemplate(options);
+      setHasChanges(false);
+      toast({
+        title: 'Modèle réinitialisé',
+        description: 'Le modèle a été réinitialisé aux valeurs par défaut.',
+      });
+    } catch {
+      // Fallback: just reset locally
+      clearSavedPoolBOQTemplates();
+      setBaseTemplate(getHardcodedBaseTemplate());
+      setOptionsTemplate(getHardcodedOptionsTemplate());
+      setHasChanges(false);
+      toast({
+        title: 'Modèle réinitialisé localement',
+        description: 'La base de données est indisponible. Réinitialisation locale effectuée.',
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  }, [dbRecordId, toast]);
 
   /* ======================================================
      LINE EDITING
@@ -480,6 +540,17 @@ const PoolBOQTemplatePage: React.FC = () => {
     sum + cat.subcategories.reduce((s, sub) => s + sub.lines.length, 0), 0
   );
 
+  if (isLoading) {
+    return (
+      <div className="p-6 max-w-7xl mx-auto flex items-center justify-center min-h-[400px]">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin text-blue-500 mx-auto mb-4" />
+          <p className="text-gray-600">Chargement du modèle...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <div className="mb-6">
@@ -499,15 +570,21 @@ const PoolBOQTemplatePage: React.FC = () => {
             <Button
               variant="outline"
               onClick={resetToDefaults}
+              disabled={isSaving}
             >
               <RotateCcw className="h-4 w-4 mr-2" /> Réinitialiser
             </Button>
             <Button
               onClick={saveTemplates}
-              disabled={!hasChanges}
+              disabled={!hasChanges || isSaving}
               className="bg-green-600 hover:bg-green-700"
             >
-              <Save className="h-4 w-4 mr-2" /> Sauvegarder
+              {isSaving ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Save className="h-4 w-4 mr-2" />
+              )}
+              Sauvegarder
             </Button>
           </div>
         </div>
@@ -523,7 +600,7 @@ const PoolBOQTemplatePage: React.FC = () => {
               <p>
                 Ce modèle définit la structure complète d'un BOQ piscine : catégories, sous-catégories, 
                 et lignes avec leurs formules de calcul. Cliquez sur l'icône <Edit className="inline h-3 w-3" /> 
-                pour modifier une ligne. Les modifications sont sauvegardées localement et utilisées lors de la 
+                pour modifier une ligne. Les modifications sont sauvegardées dans la base de données et utilisées lors de la 
                 génération de nouveaux BOQ.
               </p>
               <p className="mt-2">
@@ -550,8 +627,13 @@ const PoolBOQTemplatePage: React.FC = () => {
             <span className="text-sm text-yellow-800 font-medium">
               ⚠️ Modifications non sauvegardées
             </span>
-            <Button size="sm" onClick={saveTemplates} className="bg-green-600 hover:bg-green-700">
-              <Save className="h-3 w-3 mr-1" /> Sauvegarder
+            <Button size="sm" onClick={saveTemplates} disabled={isSaving} className="bg-green-600 hover:bg-green-700">
+              {isSaving ? (
+                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+              ) : (
+                <Save className="h-3 w-3 mr-1" />
+              )}
+              Sauvegarder
             </Button>
           </CardContent>
         </Card>

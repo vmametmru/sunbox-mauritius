@@ -671,6 +671,56 @@ try {
             break;
         }
 
+        // === RESET BOQ (delete all categories & lines for a model)
+        case 'reset_boq': {
+            validateRequired($body, ['model_id']);
+            $modelId = (int)$body['model_id'];
+            
+            // Delete all categories for this model (lines are deleted via CASCADE)
+            $stmt = $db->prepare("DELETE FROM boq_categories WHERE model_id = ?");
+            $stmt->execute([$modelId]);
+            $deletedCount = $stmt->rowCount();
+            
+            ok(['deleted_categories' => $deletedCount]);
+            break;
+        }
+
+        // === GET POOL BOQ FULL (all categories + lines with formulas for public price calculation)
+        case 'get_pool_boq_full': {
+            $modelId = (int)($body['model_id'] ?? 0);
+            if ($modelId <= 0) fail("model_id manquant");
+            
+            // Get all categories (both base and options) with parent_id
+            $stmt = $db->prepare("
+                SELECT bc.id, bc.name, bc.is_option, bc.display_order, bc.parent_id
+                FROM boq_categories bc
+                WHERE bc.model_id = ?
+                ORDER BY bc.display_order ASC, bc.name ASC
+            ");
+            $stmt->execute([$modelId]);
+            $categories = $stmt->fetchAll();
+            
+            // For each category, get its lines with full details
+            $lineStmt = $db->prepare("
+                SELECT bl.id, bl.description, bl.quantity, bl.quantity_formula,
+                       bl.unit, bl.unit_cost_ht, bl.unit_cost_formula,
+                       bl.price_list_id, bl.margin_percent, bl.display_order,
+                       pl.unit_price AS price_list_unit_price
+                FROM boq_lines bl
+                LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
+                WHERE bl.category_id = ?
+                ORDER BY bl.display_order ASC, bl.id ASC
+            ");
+            
+            foreach ($categories as &$cat) {
+                $lineStmt->execute([$cat['id']]);
+                $cat['lines'] = $lineStmt->fetchAll();
+            }
+            
+            ok($categories);
+            break;
+        }
+
         // === GET MODEL WITH BOQ PRICE
         case 'get_model_boq_price': {
             $modelId = (int)($body['model_id'] ?? 0);
@@ -2004,20 +2054,30 @@ try {
         // ============================================
         case 'get_pool_boq_templates': {
             $stmt = $db->query("SELECT * FROM pool_boq_templates ORDER BY is_default DESC, name ASC");
-            ok($stmt->fetchAll());
+            $rows = $stmt->fetchAll();
+            // Decode template_data JSON for each row
+            foreach ($rows as &$row) {
+                if (isset($row['template_data']) && is_string($row['template_data'])) {
+                    $row['template_data'] = json_decode($row['template_data'], true);
+                }
+            }
+            unset($row);
+            ok($rows);
             break;
         }
 
         case 'create_pool_boq_template': {
             validateRequired($body, ['name']);
+            $templateData = isset($body['template_data']) ? json_encode($body['template_data']) : null;
             $stmt = $db->prepare("
-                INSERT INTO pool_boq_templates (name, description, is_default)
-                VALUES (?, ?, ?)
+                INSERT INTO pool_boq_templates (name, description, is_default, template_data)
+                VALUES (?, ?, ?, ?)
             ");
             $stmt->execute([
                 sanitize($body['name']),
                 sanitize($body['description'] ?? ''),
                 (bool)($body['is_default'] ?? false),
+                $templateData,
             ]);
             ok(['id' => $db->lastInsertId()]);
             break;
@@ -2025,17 +2085,35 @@ try {
 
         case 'update_pool_boq_template': {
             validateRequired($body, ['id']);
-            $stmt = $db->prepare("
-                UPDATE pool_boq_templates SET
-                    name = ?, description = ?, is_default = ?, updated_at = NOW()
-                WHERE id = ?
-            ");
-            $stmt->execute([
-                sanitize($body['name']),
-                sanitize($body['description'] ?? ''),
-                (bool)($body['is_default'] ?? false),
-                (int)$body['id'],
-            ]);
+            $id = (int)$body['id'];
+            // Build SET clauses dynamically – only update fields that are provided
+            $sets = [];
+            $params = [];
+            if (array_key_exists('name', $body)) {
+                $sets[] = 'name = ?';
+                $params[] = sanitize($body['name']);
+            }
+            if (array_key_exists('description', $body)) {
+                $sets[] = 'description = ?';
+                $params[] = sanitize($body['description']);
+            }
+            if (array_key_exists('is_default', $body)) {
+                $sets[] = 'is_default = ?';
+                $params[] = (bool)$body['is_default'];
+            }
+            if (array_key_exists('template_data', $body)) {
+                $sets[] = 'template_data = ?';
+                $params[] = json_encode($body['template_data']);
+            }
+            if (empty($sets)) {
+                ok();
+                break;
+            }
+            $sets[] = 'updated_at = NOW()';
+            $params[] = $id;
+            $sql = "UPDATE pool_boq_templates SET " . implode(', ', $sets) . " WHERE id = ?";
+            $stmt = $db->prepare($sql);
+            $stmt->execute($params);
             ok();
             break;
         }
@@ -2045,6 +2123,29 @@ try {
             $stmt = $db->prepare("DELETE FROM pool_boq_templates WHERE id = ?");
             $stmt->execute([(int)$body['id']]);
             ok();
+            break;
+        }
+
+        case 'get_pool_boq_template_by_id': {
+            validateRequired($body, ['id']);
+            $stmt = $db->prepare("SELECT * FROM pool_boq_templates WHERE id = ?");
+            $stmt->execute([(int)$body['id']]);
+            $row = $stmt->fetch();
+            if ($row && isset($row['template_data']) && is_string($row['template_data'])) {
+                $row['template_data'] = json_decode($row['template_data'], true);
+            }
+            ok($row ?: null);
+            break;
+        }
+
+        case 'get_default_pool_boq_template': {
+            $stmt = $db->prepare("SELECT * FROM pool_boq_templates WHERE is_default = 1 LIMIT 1");
+            $stmt->execute();
+            $row = $stmt->fetch();
+            if ($row && isset($row['template_data']) && is_string($row['template_data'])) {
+                $row['template_data'] = json_decode($row['template_data'], true);
+            }
+            ok($row ?: null);
             break;
         }
 
