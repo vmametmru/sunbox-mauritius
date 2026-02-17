@@ -575,7 +575,10 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                         min="2"
                         max="20"
                         value={poolDimensions.longueur}
-                        onChange={(e) => setPoolDimensions(prev => ({ ...prev, longueur: Number(e.target.value) || 2 }))}
+                        onChange={(e) => {
+                          const v = Number(e.target.value);
+                          if (v > 0) setPoolDimensions(prev => ({ ...prev, longueur: v }));
+                        }}
                         className="h-9 text-sm bg-white"
                       />
                     </div>
@@ -587,7 +590,10 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                         min="1"
                         max="15"
                         value={poolDimensions.largeur}
-                        onChange={(e) => setPoolDimensions(prev => ({ ...prev, largeur: Number(e.target.value) || 1 }))}
+                        onChange={(e) => {
+                          const v = Number(e.target.value);
+                          if (v > 0) setPoolDimensions(prev => ({ ...prev, largeur: v }));
+                        }}
                         className="h-9 text-sm bg-white"
                       />
                     </div>
@@ -599,15 +605,23 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                         min="0.5"
                         max="3"
                         value={poolDimensions.profondeur}
-                        onChange={(e) => setPoolDimensions(prev => ({ ...prev, profondeur: Number(e.target.value) || 0.5 }))}
+                        onChange={(e) => {
+                          const v = Number(e.target.value);
+                          if (v > 0) setPoolDimensions(prev => ({ ...prev, profondeur: v }));
+                        }}
                         className="h-9 text-sm bg-white"
                       />
                     </div>
                   </div>
-                  <p className="text-xs text-blue-600 mt-2">
-                    Surface : {(poolDimensions.longueur * poolDimensions.largeur).toFixed(1)} m² • 
-                    Volume : {(poolDimensions.longueur * poolDimensions.largeur * poolDimensions.profondeur).toFixed(1)} m³
-                  </p>
+                  {(() => {
+                    const surface = poolDimensions.longueur * poolDimensions.largeur;
+                    return (
+                      <p className="text-xs text-blue-600 mt-2">
+                        Surface : {surface.toFixed(1)} m² • 
+                        Volume : {(surface * poolDimensions.profondeur).toFixed(1)} m³
+                      </p>
+                    );
+                  })()}
                 </div>
               )}
 
@@ -894,19 +908,25 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                   <span className="text-gray-600">Modèle</span>
                   <span className="font-medium">{model.name}</span>
                 </div>
+                {isPoolModel && (
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-600">Dimensions</span>
+                    <span className="font-medium">{poolDimensions.longueur}m × {poolDimensions.largeur}m × {poolDimensions.profondeur}m</span>
+                  </div>
+                )}
                 <div className="flex justify-between items-center text-sm">
                   <span className="text-gray-600">Prix de base TTC</span>
-                  <span className="font-medium">Rs {Number(model.base_price ?? 0).toLocaleString()}</span>
+                  <span className="font-medium">Rs {Math.round(getEffectiveBasePrice()).toLocaleString()}</span>
                 </div>
                 {quoteData.selectedOptions.length > 0 && (
                   <div className="flex justify-between items-center text-sm">
                     <span className="text-gray-600">Options ({quoteData.selectedOptions.length})</span>
-                    <span className="font-medium">Rs {calculateOptionsTotalTTC().toLocaleString()}</span>
+                    <span className="font-medium">Rs {Math.round(calculateOptionsTotalTTC()).toLocaleString()}</span>
                   </div>
                 )}
                 <div className="flex justify-between items-center pt-2 border-t border-gray-200">
                   <span className="font-semibold">Total TTC</span>
-                  <span className="text-xl font-bold text-orange-600">Rs {calculateTotalTTC().toLocaleString()}</span>
+                  <span className="text-xl font-bold text-orange-600">Rs {Math.round(calculateTotalTTC()).toLocaleString()}</span>
                 </div>
               </div>
 
@@ -965,7 +985,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-600">Total TTC</span>
-                    <span className="font-bold text-orange-600">Rs {calculateTotalTTC().toLocaleString()}</span>
+                    <span className="font-bold text-orange-600">Rs {Math.round(calculateTotalTTC()).toLocaleString()}</span>
                   </div>
                 </div>
               </div>
