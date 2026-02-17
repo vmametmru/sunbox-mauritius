@@ -20,6 +20,7 @@ interface BOQBaseCategory {
   id: number;
   name: string;
   display_order: number;
+  parent_id: number | null;
   lines: BOQLine[];
 }
 
@@ -27,6 +28,7 @@ interface BOQOption {
   id: number;
   name: string;
   display_order: number;
+  parent_id: number | null;
   price_ht: string;
   image_url?: string | null;
 }
@@ -366,12 +368,20 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
   const loadBOQOptions = async () => {
     if (!model?.id) return;
     try {
-      const data = await api.getBOQOptions(model.id);
-      // Map BOQ options to ModelOption format with offset ID to avoid conflicts
-      // Also fetch lines for each option category to build the description
+      const data: BOQOption[] = await api.getBOQOptions(model.id);
+      
+      // Separate parent categories (no parent_id) and sub-categories
+      const parentOptions = data.filter(o => !o.parent_id);
+      const childOptions = data.filter(o => o.parent_id);
+      
+      // Build mapped options: sub-categories become selectable options, grouped under parent name
       const mapped: ModelOption[] = await Promise.all(
-        data.map(async (o: BOQOption) => {
-          // Fetch lines for this option category
+        childOptions.map(async (o: BOQOption) => {
+          // Find parent category name
+          const parent = parentOptions.find(p => p.id === o.parent_id);
+          const parentName = parent ? parent.name : 'Options';
+          
+          // Fetch lines for this option sub-category
           let description = '';
           try {
             const lines = await api.getBOQCategoryLines(o.id);
@@ -385,8 +395,8 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
             id: Number(o.id) + BOQ_OPTION_ID_OFFSET,
             model_id: model.id,
             category_id: BOQ_OPTIONS_CATEGORY_ID,
-            category_name: o.name, // Use BOQ option name as category name for proper grouping
-            category_image_url: o.image_url || null, // Include category image URL
+            category_name: parentName, // Group under parent category name
+            category_image_url: o.image_url || null,
             name: o.name,
             description,
             price: parseFloat(o.price_ht),
@@ -394,7 +404,37 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
           };
         })
       );
-      setBOQOptions(mapped);
+      
+      // If there are parent options with no children (leaf categories), include them directly
+      const parentIdsWithChildren = new Set(childOptions.map(c => c.parent_id).filter(Boolean));
+      const leafParents = parentOptions.filter(p => !parentIdsWithChildren.has(p.id));
+      
+      const leafMapped: ModelOption[] = await Promise.all(
+        leafParents.map(async (o: BOQOption) => {
+          let description = '';
+          try {
+            const lines = await api.getBOQCategoryLines(o.id);
+            if (lines && lines.length > 0) {
+              description = lines.map((line: BOQLine) => `• ${line.description}`).join('\n');
+            }
+          } catch (e) {
+            console.error('Error loading BOQ lines for option', o.id, e);
+          }
+          return {
+            id: Number(o.id) + BOQ_OPTION_ID_OFFSET,
+            model_id: model.id,
+            category_id: BOQ_OPTIONS_CATEGORY_ID,
+            category_name: o.name,
+            category_image_url: o.image_url || null,
+            name: o.name,
+            description,
+            price: parseFloat(o.price_ht),
+            is_active: true,
+          };
+        })
+      );
+      
+      setBOQOptions([...mapped, ...leafMapped]);
     } catch (err) {
       console.error(err);
     }
@@ -673,25 +713,51 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                     <Check className="w-4 h-4" />
                     Inclus dans le prix de base
                   </h3>
-                  <div className="columns-1 md:columns-2 gap-4">
-                    {baseCategories.map(cat => (
-                      <div key={cat.id} className="inline-block w-full mb-2 break-inside-avoid">
-                        <span className="font-medium text-green-700 text-sm">{cat.name}</span>
-                        {cat.lines.length > 0 && (
-                          <>
-                            <span className="text-gray-600 text-xs">: </span>
-                            <span className="text-xs text-gray-600">
-                              {cat.lines.map((line, idx) => (
-                                <React.Fragment key={line.id}>
-                                  {line.description}
-                                  {idx < cat.lines.length - 1 && ', '}
-                                </React.Fragment>
+                  <div className="space-y-3">
+                    {/* Parent categories (no parent_id) */}
+                    {baseCategories.filter(c => !c.parent_id).map(parentCat => {
+                      const subCats = baseCategories.filter(c => c.parent_id === parentCat.id);
+                      return (
+                        <div key={parentCat.id}>
+                          <p className="font-semibold text-green-800 text-sm mb-1">{parentCat.name}</p>
+                          {subCats.length > 0 ? (
+                            <div className="pl-3 space-y-1">
+                              {subCats.map(subCat => (
+                                <div key={subCat.id}>
+                                  <span className="font-medium text-green-700 text-xs">{subCat.name}</span>
+                                  {subCat.lines.length > 0 && (
+                                    <>
+                                      <span className="text-gray-600 text-xs">: </span>
+                                      <span className="text-xs text-gray-500">
+                                        {subCat.lines.map((line, idx) => (
+                                          <React.Fragment key={line.id}>
+                                            {line.description}
+                                            {idx < subCat.lines.length - 1 && ', '}
+                                          </React.Fragment>
+                                        ))}
+                                      </span>
+                                    </>
+                                  )}
+                                </div>
                               ))}
-                            </span>
-                          </>
-                        )}
-                      </div>
-                    ))}
+                            </div>
+                          ) : (
+                            parentCat.lines.length > 0 && (
+                              <div className="pl-3">
+                                <span className="text-xs text-gray-500">
+                                  {parentCat.lines.map((line, idx) => (
+                                    <React.Fragment key={line.id}>
+                                      {line.description}
+                                      {idx < parentCat.lines.length - 1 && ', '}
+                                    </React.Fragment>
+                                  ))}
+                                </span>
+                              </div>
+                            )
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}

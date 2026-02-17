@@ -715,6 +715,10 @@ try {
             ");
             
             foreach ($categories as &$cat) {
+                $cat['id'] = (int)$cat['id'];
+                $cat['is_option'] = (bool)$cat['is_option'];
+                $cat['parent_id'] = $cat['parent_id'] ? (int)$cat['parent_id'] : null;
+                $cat['display_order'] = (int)$cat['display_order'];
                 $lineStmt->execute([$cat['id']]);
                 $cat['lines'] = $lineStmt->fetchAll();
             }
@@ -756,7 +760,7 @@ try {
             if ($modelId <= 0) fail("model_id manquant");
             
             $stmt = $db->prepare("
-                SELECT bc.id, bc.name, bc.display_order, mi.file_path as image_path,
+                SELECT bc.id, bc.name, bc.display_order, bc.parent_id, mi.file_path as image_path,
                     COALESCE(SUM(ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS price_ht
                 FROM boq_categories bc
                 LEFT JOIN boq_lines bl ON bc.id = bl.category_id
@@ -769,6 +773,9 @@ try {
             $stmt->execute([$modelId]);
             $options = $stmt->fetchAll();
             foreach ($options as &$opt) {
+                $opt['id'] = (int)$opt['id'];
+                $opt['parent_id'] = $opt['parent_id'] ? (int)$opt['parent_id'] : null;
+                $opt['display_order'] = (int)$opt['display_order'];
                 $opt['image_url'] = $opt['image_path'] ? '/' . ltrim($opt['image_path'], '/') : null;
                 unset($opt['image_path']);
             }
@@ -783,7 +790,7 @@ try {
             
             // Get categories that are NOT options (included in base price)
             $stmt = $db->prepare("
-                SELECT bc.id, bc.name, bc.display_order
+                SELECT bc.id, bc.name, bc.display_order, bc.parent_id
                 FROM boq_categories bc
                 WHERE bc.model_id = ? AND bc.is_option = FALSE
                 ORDER BY bc.display_order ASC, bc.name ASC
@@ -800,6 +807,9 @@ try {
             ");
             
             foreach ($categories as &$cat) {
+                $cat['id'] = (int)$cat['id'];
+                $cat['parent_id'] = $cat['parent_id'] ? (int)$cat['parent_id'] : null;
+                $cat['display_order'] = (int)$cat['display_order'];
                 $lineStmt->execute([$cat['id']]);
                 $cat['lines'] = $lineStmt->fetchAll();
             }
