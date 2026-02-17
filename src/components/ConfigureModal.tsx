@@ -481,7 +481,10 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
   // Get the effective base price: for pool models use calculated price, otherwise use model base_price
   const getEffectiveBasePrice = () => {
     if (isPoolModel && boqFullCategories.length > 0) {
-      return calculateTTC(poolBasePrice, vatRate);
+      // Apply unforeseen cost percentage to the base HT price
+      const unforeseen = Number(model?.unforeseen_cost_percent ?? 10);
+      const basePriceHTWithUnforeseen = poolBasePrice * (1 + unforeseen / 100);
+      return calculateTTC(basePriceHTWithUnforeseen, vatRate);
     }
     return Number(model?.base_price ?? 0);
   };

@@ -41,6 +41,7 @@ interface Model {
   type: 'container' | 'pool';
   description: string;
   base_price: number;
+  unforeseen_cost_percent: number;
   calculated_base_price?: number; // BOQ-calculated price if available
   boq_base_price_ht?: number;
   boq_cost_ht?: number;
@@ -63,6 +64,7 @@ const emptyModel: Model = {
   type: 'container',
   description: '',
   base_price: 0,
+  unforeseen_cost_percent: 10,
   surface_m2: 0,
   bedrooms: 0,
   bathrooms: 0,

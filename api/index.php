@@ -151,6 +151,7 @@ try {
                     $m['image_url'] = '/' . ltrim($m['image_url'], '/');
                 }
                 $m['has_overflow'] = (bool)$m['has_overflow'];
+                $m['unforeseen_cost_percent'] = (float)($m['unforeseen_cost_percent'] ?? 10);
                 
                 // Calculate BOQ price if requested
                 if ($includeBOQPrice) {
@@ -170,9 +171,12 @@ try {
                     $m['boq_base_price_ht'] = $boqPrice;
                     $m['boq_cost_ht'] = (float)($boqResult['boq_cost_ht'] ?? 0);
                     
+                    // Apply unforeseen cost percentage to BOQ price
+                    $unforeseen = (float)$m['unforeseen_cost_percent'];
+                    
                     // Use BOQ price if available, otherwise use manual base_price
                     if ($boqPrice > 0) {
-                        $m['calculated_base_price'] = $boqPrice;
+                        $m['calculated_base_price'] = round($boqPrice * (1 + $unforeseen / 100), 2);
                         $m['price_source'] = 'boq';
                     } else {
                         $m['calculated_base_price'] = (float)$m['base_price'];
@@ -189,19 +193,20 @@ try {
             validateRequired($body, ['name', 'type', 'base_price']);
             $stmt = $db->prepare("
                 INSERT INTO models (
-                    name, type, description, base_price,
+                    name, type, description, base_price, unforeseen_cost_percent,
                     surface_m2, bedrooms, bathrooms,
                     container_20ft_count, container_40ft_count,
                     pool_shape, has_overflow,
                     image_url, plan_image_url,
                     features, is_active, display_order
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ");
             $stmt->execute([
                 sanitize($body['name']),
                 $body['type'],
                 sanitize($body['description'] ?? ''),
                 (float)$body['base_price'],
+                (float)($body['unforeseen_cost_percent'] ?? 10),
                 (float)($body['surface_m2'] ?? 0),
                 (int)($body['bedrooms'] ?? 0),
                 (int)($body['bathrooms'] ?? 0),
@@ -222,7 +227,7 @@ try {
         case 'update_model': {
             validateRequired($body, ['id']);
             $allowed = [
-                'name','type','description','base_price','surface_m2',
+                'name','type','description','base_price','unforeseen_cost_percent','surface_m2',
                 'bedrooms','bathrooms','container_20ft_count','container_40ft_count',
                 'pool_shape','has_overflow','image_url','plan_image_url',
                 'features','is_active','display_order'
@@ -234,7 +239,7 @@ try {
                     $fields[] = "$f = ?";
                     if ($f === 'features') {
                         $params[] = json_encode($body[$f]);
-                    } elseif (in_array($f, ['base_price','surface_m2'])) {
+                    } elseif (in_array($f, ['base_price','surface_m2','unforeseen_cost_percent'])) {
                         $params[] = (float)$body[$f];
                     } elseif (in_array($f, ['bedrooms','bathrooms','container_20ft_count','container_40ft_count','display_order'])) {
                         $params[] = (int)$body[$f];
@@ -747,6 +752,12 @@ try {
             $modelId = (int)($body['model_id'] ?? 0);
             if ($modelId <= 0) fail("model_id manquant");
             
+            // Get model unforeseen cost percent
+            $modelStmt = $db->prepare("SELECT unforeseen_cost_percent FROM models WHERE id = ?");
+            $modelStmt->execute([$modelId]);
+            $modelRow = $modelStmt->fetch();
+            $unforeseen = (float)($modelRow['unforeseen_cost_percent'] ?? 10);
+            
             // Get base price from non-option BOQ categories
             $stmt = $db->prepare("
                 SELECT 
@@ -760,11 +771,16 @@ try {
             $stmt->execute([$modelId]);
             $result = $stmt->fetch();
             
+            $basePriceHT = (float)$result['base_price_ht'];
+            $totalCostHT = (float)$result['total_cost_ht'];
+            
             ok([
                 'model_id' => $modelId,
-                'base_price_ht' => (float)$result['base_price_ht'],
-                'total_cost_ht' => (float)$result['total_cost_ht'],
-                'profit_ht' => round((float)$result['base_price_ht'] - (float)$result['total_cost_ht'], 2),
+                'base_price_ht' => $basePriceHT,
+                'total_cost_ht' => $totalCostHT,
+                'profit_ht' => round($basePriceHT - $totalCostHT, 2),
+                'unforeseen_cost_percent' => $unforeseen,
+                'base_price_ht_with_unforeseen' => round($basePriceHT * (1 + $unforeseen / 100), 2),
             ]);
             break;
         }

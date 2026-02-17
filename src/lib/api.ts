@@ -41,6 +41,7 @@ export const api = {
     type: 'container' | 'pool';
     description?: string;
     base_price: number;
+    unforeseen_cost_percent?: number;
     surface_m2: number;
     bedrooms?: number;
     bathrooms?: number;
@@ -61,6 +62,7 @@ export const api = {
     type?: 'container' | 'pool';
     description?: string;
     base_price?: number;
+    unforeseen_cost_percent?: number;
     surface_m2?: number;
     bedrooms?: number;
     bathrooms?: number;
