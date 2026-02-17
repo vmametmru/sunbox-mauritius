@@ -6,14 +6,11 @@ import {
   Bold,
   Italic,
   Underline,
-  Type,
-  Image,
-  Variable,
   Merge,
   Trash2,
   Undo,
-  Grid,
   Eye,
+  FileText,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
