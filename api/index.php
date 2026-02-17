@@ -2523,11 +2523,11 @@ try {
                 foreach ($baseCats as $bcat) {
                     $baseCategoriesHtml .= '<tr style="background-color:#f0f0f0;"><td colspan="4" style="padding:4px 6px;font-weight:bold;border-bottom:1px solid #ccc;">' . htmlspecialchars($bcat['name']) . '</td></tr>';
                     // Text format: Category (bold)
-                    $baseCategoriesText .= '<b>' . htmlspecialchars($bcat['name']) . '</b>' . "\n";
+                    $baseCategoriesText .= '<b>' . htmlspecialchars($bcat['name']) . '</b><br>';
                     // Sub-categories with lines inline
                     foreach ($bcat['children'] as $subcat) {
                         $baseCategoriesHtml .= '<tr style="background-color:#f8f8f8;"><td colspan="4" style="padding:3px 12px;font-weight:bold;font-size:8pt;border-bottom:1px solid #eee;">' . htmlspecialchars($subcat['name']) . '</td></tr>';
-                        // Text format: SubCategory (Line1, Line2, ...)
+                        // Text format: • SubCategory (Line1, Line2, ...)
                         $lineNames = [];
                         foreach ($subcat['lines'] as $line) {
                             $unitPrice = $line['price_list_price'] ? (float)$line['price_list_price'] : (float)$line['unit_cost_ht'];
@@ -2539,7 +2539,7 @@ try {
                             $lineNames[] = htmlspecialchars($line['description']);
                         }
                         if (!empty($lineNames)) {
-                            $baseCategoriesText .= htmlspecialchars($subcat['name']) . ' (' . implode(', ', $lineNames) . ')' . "\n";
+                            $baseCategoriesText .= '&bull; ' . htmlspecialchars($subcat['name']) . ' (' . implode(', ', $lineNames) . ')<br>';
                         }
                     }
                     // Direct lines (no sub-category)
@@ -2554,9 +2554,9 @@ try {
                         $directLineNames[] = htmlspecialchars($line['description']);
                     }
                     if (!empty($directLineNames)) {
-                        $baseCategoriesText .= implode(', ', $directLineNames) . "\n";
+                        $baseCategoriesText .= '&bull; ' . implode(', ', $directLineNames) . '<br>';
                     }
-                    $baseCategoriesText .= "\n";
+                    $baseCategoriesText .= '<br>';
                 }
                 $baseCategoriesHtml .= '</table>';
 
@@ -2609,14 +2609,14 @@ try {
                     }
                     // Only add category to text if it has selected options
                     if ($catHasSelected) {
-                        $optionCategoriesText .= '<b>' . htmlspecialchars($ocat['name']) . '</b>' . "\n";
+                        $optionCategoriesText .= '<b>' . htmlspecialchars($ocat['name']) . '</b><br>';
                         foreach ($catTextLines as $tl) {
-                            $optionCategoriesText .= $tl . "\n";
+                            $optionCategoriesText .= '&bull; ' . $tl . '<br>';
                         }
                         if (!empty($selectedDirectLines)) {
-                            $optionCategoriesText .= implode(', ', $selectedDirectLines) . "\n";
+                            $optionCategoriesText .= '&bull; ' . implode(', ', $selectedDirectLines) . '<br>';
                         }
-                        $optionCategoriesText .= "\n";
+                        $optionCategoriesText .= '<br>';
                     }
                 }
                 $optionCategoriesHtml .= '</table>';
@@ -2655,8 +2655,23 @@ try {
                 '{{option_categories_html}}' => $optionCategoriesHtml,
             ];
 
-            // Logo vars
+            // Logo and model image vars
             $logoUrl = $siteSettings['pdf_logo'] ?? $siteSettings['site_logo'] ?? '';
+
+            // Get model image and plan URLs
+            $modelImageUrl = '';
+            $modelPlanUrl = '';
+            if ($modelId > 0) {
+                $photoStmt = $db->prepare("SELECT file_path FROM model_images WHERE model_id = ? AND media_type = 'photo' ORDER BY is_primary DESC, id DESC LIMIT 1");
+                $photoStmt->execute([$modelId]);
+                $photoRow = $photoStmt->fetch();
+                if ($photoRow) $modelImageUrl = '/' . ltrim($photoRow['file_path'], '/');
+
+                $planStmt = $db->prepare("SELECT file_path FROM model_images WHERE model_id = ? AND media_type = 'plan' ORDER BY is_primary DESC, id DESC LIMIT 1");
+                $planStmt->execute([$modelId]);
+                $planRow = $planStmt->fetch();
+                if ($planRow) $modelPlanUrl = '/' . ltrim($planRow['file_path'], '/');
+            }
 
             // Render HTML table
             $rowCount = (int)$tpl['row_count'];
@@ -2732,6 +2747,8 @@ try {
                     if (!empty($cell['type']) && $cell['type'] === 'image') {
                         $imgUrl = $cell['imageUrl'] ?? '';
                         if ($imgUrl === '{{logo}}') $imgUrl = $logoUrl;
+                        if ($imgUrl === '{{model_image}}') $imgUrl = $modelImageUrl;
+                        if ($imgUrl === '{{model_plan}}') $imgUrl = $modelPlanUrl;
                         $rendered = $imgUrl ? '<img src="' . htmlspecialchars($imgUrl) . '" style="max-width:100%;max-height:100%;object-fit:contain;" />' : '';
                     }
 
@@ -2859,7 +2876,7 @@ try {
                 $baseCategoriesHtml = '<table style="width:100%;border-collapse:collapse;font-family:Arial,sans-serif;font-size:9pt;">';
                 foreach ($baseCats as $bcat) {
                     $baseCategoriesHtml .= '<tr style="background-color:#f0f0f0;"><td colspan="4" style="padding:4px 6px;font-weight:bold;border-bottom:1px solid #ccc;">' . htmlspecialchars($bcat['name']) . '</td></tr>';
-                    $baseCategoriesText .= '<b>' . htmlspecialchars($bcat['name']) . '</b>' . "\n";
+                    $baseCategoriesText .= '<b>' . htmlspecialchars($bcat['name']) . '</b><br>';
                     foreach ($bcat['children'] as $subcat) {
                         $baseCategoriesHtml .= '<tr style="background-color:#f8f8f8;"><td colspan="4" style="padding:3px 12px;font-weight:bold;font-size:8pt;">' . htmlspecialchars($subcat['name']) . '</td></tr>';
                         $lineNames = [];
@@ -2868,7 +2885,7 @@ try {
                             $lineNames[] = htmlspecialchars($line['description']);
                         }
                         if (!empty($lineNames)) {
-                            $baseCategoriesText .= htmlspecialchars($subcat['name']) . ' (' . implode(', ', $lineNames) . ')' . "\n";
+                            $baseCategoriesText .= '&bull; ' . htmlspecialchars($subcat['name']) . ' (' . implode(', ', $lineNames) . ')<br>';
                         }
                     }
                     $directLineNames = [];
@@ -2877,9 +2894,9 @@ try {
                         $directLineNames[] = htmlspecialchars($line['description']);
                     }
                     if (!empty($directLineNames)) {
-                        $baseCategoriesText .= implode(', ', $directLineNames) . "\n";
+                        $baseCategoriesText .= '&bull; ' . implode(', ', $directLineNames) . '<br>';
                     }
-                    $baseCategoriesText .= "\n";
+                    $baseCategoriesText .= '<br>';
                 }
                 $baseCategoriesHtml .= '</table>';
 
@@ -2917,14 +2934,14 @@ try {
                         }
                     }
                     if ($catHasSelected) {
-                        $optionCategoriesText .= '<b>' . htmlspecialchars($ocat['name']) . '</b>' . "\n";
+                        $optionCategoriesText .= '<b>' . htmlspecialchars($ocat['name']) . '</b><br>';
                         foreach ($catTextLines as $tl) {
-                            $optionCategoriesText .= $tl . "\n";
+                            $optionCategoriesText .= '&bull; ' . $tl . '<br>';
                         }
                         if (!empty($selectedDirectLines)) {
-                            $optionCategoriesText .= implode(', ', $selectedDirectLines) . "\n";
+                            $optionCategoriesText .= '&bull; ' . implode(', ', $selectedDirectLines) . '<br>';
                         }
-                        $optionCategoriesText .= "\n";
+                        $optionCategoriesText .= '<br>';
                     }
                 }
                 $optionCategoriesHtml .= '</table>';
@@ -2963,6 +2980,22 @@ try {
             ];
 
             $logoUrl = $siteSettings['pdf_logo'] ?? $siteSettings['site_logo'] ?? '';
+
+            // Get model image and plan URLs
+            $modelImageUrl = '';
+            $modelPlanUrl = '';
+            if ($modelId > 0) {
+                $mPhotoStmt = $db->prepare("SELECT file_path FROM model_images WHERE model_id = ? AND media_type = 'photo' ORDER BY is_primary DESC, id DESC LIMIT 1");
+                $mPhotoStmt->execute([$modelId]);
+                $mPhotoRow = $mPhotoStmt->fetch();
+                if ($mPhotoRow) $modelImageUrl = '/' . ltrim($mPhotoRow['file_path'], '/');
+
+                $mPlanStmt = $db->prepare("SELECT file_path FROM model_images WHERE model_id = ? AND media_type = 'plan' ORDER BY is_primary DESC, id DESC LIMIT 1");
+                $mPlanStmt->execute([$modelId]);
+                $mPlanRow = $mPlanStmt->fetch();
+                if ($mPlanRow) $modelPlanUrl = '/' . ltrim($mPlanRow['file_path'], '/');
+            }
+
             $rowCount = (int)$tpl['row_count'];
             $colCount = (int)$tpl['col_count'];
             $cells = $gridData ?: [];
@@ -3005,7 +3038,7 @@ try {
                     $styles[] = 'padding:2mm'; $styles[] = 'vertical-align:middle'; $styles[] = 'overflow:hidden'; $styles[] = 'word-wrap:break-word';
                     $rendered = $content;
                     foreach ($vars as $vk => $vv) { if (in_array($vk, $htmlVars)) { $rendered = str_replace($vk, $vv, $rendered); } else { $rendered = str_replace($vk, htmlspecialchars($vv), $rendered); } }
-                    if (!empty($cell['type']) && $cell['type'] === 'image') { $imgUrl = $cell['imageUrl'] ?? ''; if ($imgUrl === '{{logo}}') $imgUrl = $logoUrl; $rendered = $imgUrl ? '<img src="' . htmlspecialchars($imgUrl) . '" style="max-width:100%;max-height:100%;object-fit:contain;" />' : ''; }
+                    if (!empty($cell['type']) && $cell['type'] === 'image') { $imgUrl = $cell['imageUrl'] ?? ''; if ($imgUrl === '{{logo}}') $imgUrl = $logoUrl; if ($imgUrl === '{{model_image}}') $imgUrl = $modelImageUrl; if ($imgUrl === '{{model_plan}}') $imgUrl = $modelPlanUrl; $rendered = $imgUrl ? '<img src="' . htmlspecialchars($imgUrl) . '" style="max-width:100%;max-height:100%;object-fit:contain;" />' : ''; }
                     $attrStr = '';
                     if ($colspan > 1) $attrStr .= ' colspan="' . $colspan . '"';
                     if ($rowspan > 1) $attrStr .= ' rowspan="' . $rowspan . '"';

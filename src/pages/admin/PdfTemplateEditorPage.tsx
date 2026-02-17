@@ -783,7 +783,7 @@ export default function PdfTemplateEditorPage() {
             {cellEditData.type === 'image' ? (
               <div className="space-y-3">
                 {/* Current image preview */}
-                {cellEditData.imageUrl && cellEditData.imageUrl !== '{{logo}}' && (
+                {cellEditData.imageUrl && !['{{logo}}', '{{model_image}}', '{{model_plan}}'].includes(cellEditData.imageUrl) && (
                   <div className="border rounded p-2 flex items-center justify-center bg-gray-50">
                     <img src={cellEditData.imageUrl} alt="Preview" className="max-h-24 object-contain" />
                   </div>
@@ -791,6 +791,16 @@ export default function PdfTemplateEditorPage() {
                 {cellEditData.imageUrl === '{{logo}}' && (
                   <div className="border rounded p-2 text-center text-sm text-gray-500 bg-yellow-50">
                     🏢 Logo du site (variable)
+                  </div>
+                )}
+                {cellEditData.imageUrl === '{{model_image}}' && (
+                  <div className="border rounded p-2 text-center text-sm text-gray-500 bg-blue-50">
+                    🏠 Photo du modèle (variable)
+                  </div>
+                )}
+                {cellEditData.imageUrl === '{{model_plan}}' && (
+                  <div className="border rounded p-2 text-center text-sm text-gray-500 bg-green-50">
+                    📐 Plan du modèle (variable)
                   </div>
                 )}
 
@@ -803,6 +813,22 @@ export default function PdfTemplateEditorPage() {
                     onClick={() => setCellEditData({ ...cellEditData, imageUrl: '{{logo}}' })}
                   >
                     🏢 Logo du site
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={cellEditData.imageUrl === '{{model_image}}' ? 'default' : 'outline'}
+                    onClick={() => setCellEditData({ ...cellEditData, imageUrl: '{{model_image}}' })}
+                  >
+                    🏠 Photo du modèle
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={cellEditData.imageUrl === '{{model_plan}}' ? 'default' : 'outline'}
+                    onClick={() => setCellEditData({ ...cellEditData, imageUrl: '{{model_plan}}' })}
+                  >
+                    📐 Plan du modèle
                   </Button>
                   <label>
                     <Button type="button" size="sm" variant="outline" asChild disabled={uploadingImage}>
