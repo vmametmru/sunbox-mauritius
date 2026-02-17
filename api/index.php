@@ -720,7 +720,18 @@ try {
                 $cat['parent_id'] = $cat['parent_id'] ? (int)$cat['parent_id'] : null;
                 $cat['display_order'] = (int)$cat['display_order'];
                 $lineStmt->execute([$cat['id']]);
-                $cat['lines'] = $lineStmt->fetchAll();
+                $lines = $lineStmt->fetchAll();
+                // Cast numeric fields for proper JSON encoding
+                foreach ($lines as &$ln) {
+                    $ln['id'] = (int)$ln['id'];
+                    $ln['quantity'] = (float)$ln['quantity'];
+                    $ln['unit_cost_ht'] = (float)$ln['unit_cost_ht'];
+                    $ln['margin_percent'] = (float)$ln['margin_percent'];
+                    $ln['display_order'] = (int)$ln['display_order'];
+                    $ln['price_list_id'] = $ln['price_list_id'] ? (int)$ln['price_list_id'] : null;
+                    $ln['price_list_unit_price'] = $ln['price_list_unit_price'] !== null ? (float)$ln['price_list_unit_price'] : null;
+                }
+                $cat['lines'] = $lines;
             }
             
             ok($categories);
@@ -768,7 +779,7 @@ try {
                 LEFT JOIN model_images mi ON bc.image_id = mi.id
                 WHERE bc.model_id = ? AND bc.is_option = TRUE
                 GROUP BY bc.id
-                ORDER BY bc.display_order ASC
+                ORDER BY bc.name ASC
             ");
             $stmt->execute([$modelId]);
             $options = $stmt->fetchAll();
@@ -788,22 +799,22 @@ try {
             $modelId = (int)($body['model_id'] ?? 0);
             if ($modelId <= 0) fail("model_id manquant");
             
-            // Get categories that are NOT options (included in base price)
+            // Get categories that are NOT options (included in base price), sorted alphabetically
             $stmt = $db->prepare("
                 SELECT bc.id, bc.name, bc.display_order, bc.parent_id
                 FROM boq_categories bc
                 WHERE bc.model_id = ? AND bc.is_option = FALSE
-                ORDER BY bc.display_order ASC, bc.name ASC
+                ORDER BY bc.name ASC
             ");
             $stmt->execute([$modelId]);
             $categories = $stmt->fetchAll();
             
-            // For each category, get its lines
+            // For each category, get its lines sorted alphabetically
             $lineStmt = $db->prepare("
                 SELECT id, description
                 FROM boq_lines
                 WHERE category_id = ?
-                ORDER BY display_order ASC, id ASC
+                ORDER BY description ASC
             ");
             
             foreach ($categories as &$cat) {
@@ -827,7 +838,7 @@ try {
                 SELECT id, description
                 FROM boq_lines
                 WHERE category_id = ?
-                ORDER BY display_order ASC, id ASC
+                ORDER BY description ASC
             ");
             $stmt->execute([$categoryId]);
             ok($stmt->fetchAll());

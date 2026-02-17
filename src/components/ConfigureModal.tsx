@@ -70,6 +70,7 @@ interface ConfigureModalProps {
 const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
   const { quoteData, toggleOption, setCustomerDetails, resetQuote } = useQuote();
   const [expandedCategories, setExpandedCategories] = useState<string[]>([]);
+  const [expandedSubOptions, setExpandedSubOptions] = useState<number[]>([]);
   const [options, setOptions] = useState<ModelOption[]>([]);
   const [boqOptions, setBOQOptions] = useState<ModelOption[]>([]);
   const [baseCategories, setBaseCategories] = useState<BOQBaseCategory[]>([]);
@@ -127,21 +128,21 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
     if (!isPoolModel || boqFullCategories.length === 0) return 0;
     
     // Sum up sale prices for all non-option categories (base categories)
-    const baseCategories = boqFullCategories.filter(c => !c.is_option);
+    const baseCats = boqFullCategories.filter(c => !c.is_option);
     let totalSaleHT = 0;
     
-    for (const cat of baseCategories) {
+    for (const cat of baseCats) {
       for (const line of cat.lines) {
         const qty = line.quantity_formula
           ? evaluateFormula(line.quantity_formula, poolVarContext)
-          : line.quantity;
+          : Number(line.quantity);
         const unitCost = line.unit_cost_formula
           ? evaluateFormula(line.unit_cost_formula, poolVarContext)
-          : (line.price_list_id && line.price_list_unit_price
+          : (line.price_list_id && line.price_list_unit_price != null
             ? Number(line.price_list_unit_price)
-            : line.unit_cost_ht);
+            : Number(line.unit_cost_ht));
         const lineCost = qty * unitCost;
-        totalSaleHT += lineCost * (1 + line.margin_percent / 100);
+        totalSaleHT += lineCost * (1 + Number(line.margin_percent) / 100);
       }
     }
     
@@ -160,14 +161,14 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
       for (const line of cat.lines) {
         const qty = line.quantity_formula
           ? evaluateFormula(line.quantity_formula, poolVarContext)
-          : line.quantity;
+          : Number(line.quantity);
         const unitCost = line.unit_cost_formula
           ? evaluateFormula(line.unit_cost_formula, poolVarContext)
-          : (line.price_list_id && line.price_list_unit_price
+          : (line.price_list_id && line.price_list_unit_price != null
             ? Number(line.price_list_unit_price)
-            : line.unit_cost_ht);
+            : Number(line.unit_cost_ht));
         const lineCost = qty * unitCost;
-        totalSaleHT += lineCost * (1 + line.margin_percent / 100);
+        totalSaleHT += lineCost * (1 + Number(line.margin_percent) / 100);
       }
       prices[cat.id] = totalSaleHT;
     }
@@ -486,6 +487,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
 
   const groupedOptions = allOptions
     .filter(opt => opt.is_active)
+    .sort((a, b) => (a.category_name || '').localeCompare(b.category_name || '', 'fr') || a.name.localeCompare(b.name, 'fr'))
     .reduce((acc, opt) => {
       const category = opt.category_name || 'Autres';
       if (!acc[category]) acc[category] = [];
@@ -496,6 +498,12 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
   const toggleCategory = (cat: string) => {
     setExpandedCategories(prev =>
       prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]
+    );
+  };
+
+  const toggleSubOption = (optId: number) => {
+    setExpandedSubOptions(prev =>
+      prev.includes(optId) ? prev.filter(id => id !== optId) : [...prev, optId]
     );
   };
 
@@ -714,41 +722,52 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                     Inclus dans le prix de base
                   </h3>
                   <div className="space-y-3">
-                    {/* Parent categories (no parent_id) */}
-                    {baseCategories.filter(c => !c.parent_id).map(parentCat => {
-                      const subCats = baseCategories.filter(c => c.parent_id === parentCat.id);
+                    {/* Parent categories (no parent_id), sorted alphabetically */}
+                    {baseCategories
+                      .filter(c => !c.parent_id)
+                      .sort((a, b) => a.name.localeCompare(b.name, 'fr'))
+                      .map(parentCat => {
+                      const subCats = baseCategories
+                        .filter(c => c.parent_id === parentCat.id)
+                        .sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+                      const sortedParentLines = [...parentCat.lines].sort((a, b) => a.description.localeCompare(b.description, 'fr'));
                       return (
                         <div key={parentCat.id}>
                           <p className="font-semibold text-green-800 text-sm mb-1">{parentCat.name}</p>
                           {subCats.length > 0 ? (
-                            <div className="pl-3 space-y-1">
-                              {subCats.map(subCat => (
-                                <div key={subCat.id}>
-                                  <span className="font-medium text-green-700 text-xs">{subCat.name}</span>
-                                  {subCat.lines.length > 0 && (
-                                    <>
-                                      <span className="text-gray-600 text-xs">: </span>
-                                      <span className="text-xs text-gray-500">
-                                        {subCat.lines.map((line, idx) => (
-                                          <React.Fragment key={line.id}>
-                                            {line.description}
-                                            {idx < subCat.lines.length - 1 && ', '}
-                                          </React.Fragment>
-                                        ))}
-                                      </span>
-                                    </>
-                                  )}
-                                </div>
-                              ))}
+                            <div className="pl-4 space-y-1">
+                              {subCats.map(subCat => {
+                                const sortedLines = [...subCat.lines].sort((a, b) => a.description.localeCompare(b.description, 'fr'));
+                                return (
+                                  <div key={subCat.id} className="flex items-start gap-1">
+                                    <span className="text-green-600 text-xs mt-0.5">–</span>
+                                    <div>
+                                      <span className="font-medium text-green-700 text-xs">{subCat.name}</span>
+                                      {sortedLines.length > 0 && (
+                                        <span className="text-xs text-gray-500">
+                                          {' ('}
+                                          {sortedLines.map((line, idx) => (
+                                            <React.Fragment key={line.id}>
+                                              {line.description}
+                                              {idx < sortedLines.length - 1 && ', '}
+                                            </React.Fragment>
+                                          ))}
+                                          {')'}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
                             </div>
                           ) : (
-                            parentCat.lines.length > 0 && (
-                              <div className="pl-3">
+                            sortedParentLines.length > 0 && (
+                              <div className="pl-4">
                                 <span className="text-xs text-gray-500">
-                                  {parentCat.lines.map((line, idx) => (
+                                  {sortedParentLines.map((line, idx) => (
                                     <React.Fragment key={line.id}>
                                       {line.description}
-                                      {idx < parentCat.lines.length - 1 && ', '}
+                                      {idx < sortedParentLines.length - 1 && ', '}
                                     </React.Fragment>
                                   ))}
                                 </span>
@@ -789,13 +808,15 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                 <h3 className="text-lg font-semibold text-gray-800">OPTIONS DISPONIBLES :</h3>
               )}
 
-              {/* Options */}
-              {Object.entries(groupedOptions).map(([category, opts]) => {
+              {/* Options — Category → Sub-category (expandable with lines) → Switch */}
+              {Object.entries(groupedOptions)
+                .sort(([a], [b]) => a.localeCompare(b, 'fr'))
+                .map(([category, opts]) => {
                 const isOpen = expandedCategories.includes(category);
-                const categoryDescription = opts[0]?.category_description;
                 const categoryImageUrl = opts[0]?.category_image_url;
                 return (
                   <div key={category} className="border rounded bg-white">
+                    {/* Parent category header */}
                     <button
                       className="w-full flex justify-between items-center px-4 py-3 font-semibold border-b hover:bg-gray-50"
                       onClick={() => toggleCategory(category)}
@@ -808,48 +829,59 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                       )}
                     </button>
                     {isOpen && (
-                      <div className="divide-y">
-                        {categoryDescription && (
-                          <div className="px-4 py-3 bg-gray-50 text-sm text-gray-600 whitespace-pre-line">
-                            {categoryDescription}
+                      <div>
+                        {/* Category Image */}
+                        {categoryImageUrl && (
+                          <div className="px-4 py-3 border-b bg-gray-50 flex justify-center">
+                            <img 
+                              src={categoryImageUrl} 
+                              alt={category}
+                              className="w-[100px] h-[100px] object-cover rounded"
+                            />
                           </div>
                         )}
-                        <div className="flex">
-                          {/* Category Image */}
-                          {categoryImageUrl && (
-                            <div className="flex-shrink-0 p-4 border-r">
-                              <img 
-                                src={categoryImageUrl} 
-                                alt={category}
-                                className="w-[100px] h-[100px] object-cover rounded"
-                              />
-                            </div>
-                          )}
-                          {/* Options List */}
-                          <div className="flex-1 divide-y">
-                            {opts.map(opt => (
-                              <label
-                                key={opt.id}
-                                className="flex justify-between items-center px-4 py-3 hover:bg-gray-50 cursor-pointer"
-                              >
-                                <div className="flex-1 mr-4">
-                                  <p className="font-medium">{opt.name}</p>
-                                  {opt.description && (
-                                    <p className="text-sm text-gray-500 whitespace-pre-line mt-1">
-                                      {opt.description}
-                                    </p>
-                                  )}
-                                  <p className={`text-sm text-orange-600 font-medium ${opt.description ? 'mt-2' : 'mt-1'}`}>
-                                    Rs {Math.round(getOptionDisplayPrice(opt)).toLocaleString()}
-                                  </p>
+                        {/* Sub-category options */}
+                        <div className="divide-y">
+                          {opts.sort((a, b) => a.name.localeCompare(b.name, 'fr')).map(opt => {
+                            const isSubExpanded = expandedSubOptions.includes(opt.id);
+                            return (
+                              <div key={opt.id} className="px-4">
+                                {/* Sub-category name (expandable) */}
+                                <div className="flex justify-between items-center py-3">
+                                  <button
+                                    className="flex items-center gap-2 text-left flex-1 mr-4"
+                                    onClick={() => toggleSubOption(opt.id)}
+                                  >
+                                    {isSubExpanded ? (
+                                      <ChevronUp className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                                    ) : (
+                                      <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                                    )}
+                                    <div>
+                                      <p className="font-medium text-sm">{opt.name}</p>
+                                      <p className="text-sm text-orange-600 font-medium mt-0.5">
+                                        Rs {Math.round(getOptionDisplayPrice(opt)).toLocaleString()}
+                                      </p>
+                                    </div>
+                                  </button>
+                                  <Switch
+                                    checked={isSelected(opt.id)}
+                                    onCheckedChange={() => toggleOption(opt)}
+                                  />
                                 </div>
-                                <Switch
-                                  checked={isSelected(opt.id)}
-                                  onCheckedChange={() => toggleOption(opt)}
-                                />
-                              </label>
-                            ))}
-                          </div>
+                                {/* Expanded lines */}
+                                {isSubExpanded && opt.description && (
+                                  <div className="pl-8 pb-3">
+                                    <div className="text-xs text-gray-500 space-y-0.5">
+                                      {opt.description.split('\n').sort((a, b) => a.localeCompare(b, 'fr')).map((line, idx) => (
+                                        <p key={idx}>{line}</p>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     )}
