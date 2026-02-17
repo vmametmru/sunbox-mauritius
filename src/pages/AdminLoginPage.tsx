@@ -1,5 +1,8 @@
 import { useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { Navigate, useLocation, useNavigate } from "react-router-dom";
+
+// Allow skipping login form in development mode - must be explicitly enabled via env variable
+const DEV_BYPASS_AUTH = import.meta.env.DEV && import.meta.env.VITE_BYPASS_AUTH === 'true';
 
 export default function AdminLoginPage() {
   const [password, setPassword] = useState("");
@@ -8,6 +11,11 @@ export default function AdminLoginPage() {
   const location = useLocation() as any;
 
   const from = location.state?.from?.pathname || "/admin";
+
+  // In development mode with bypass enabled, skip login form entirely
+  if (DEV_BYPASS_AUTH) {
+    return <Navigate to={from} replace />;
+  }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
