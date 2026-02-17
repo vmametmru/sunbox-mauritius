@@ -17,6 +17,12 @@ interface SiteSettings {
   site_slogan: string;
   vat_rate: string;
   dev_mode_no_password: string;
+  payment_terms: string;
+  bank_account: string;
+  company_phone: string;
+  company_email: string;
+  company_address: string;
+  admin_notification_email: string;
 }
 
 const defaultValues: SiteSettings = {
@@ -27,6 +33,12 @@ const defaultValues: SiteSettings = {
   site_slogan: "container home - swimming-pools",
   vat_rate: "15",
   dev_mode_no_password: "false",
+  payment_terms: "",
+  bank_account: "",
+  company_phone: "",
+  company_email: "",
+  company_address: "",
+  admin_notification_email: "",
 };
 
 export default function SiteSettingsPage() {
@@ -60,6 +72,12 @@ export default function SiteSettingsPage() {
         { key: "site_slogan", value: settings.site_slogan, group: "site" },
         { key: "vat_rate", value: settings.vat_rate, group: "site" },
         { key: "dev_mode_no_password", value: settings.dev_mode_no_password, group: "site" },
+        { key: "payment_terms", value: settings.payment_terms, group: "site" },
+        { key: "bank_account", value: settings.bank_account, group: "site" },
+        { key: "company_phone", value: settings.company_phone, group: "site" },
+        { key: "company_email", value: settings.company_email, group: "site" },
+        { key: "company_address", value: settings.company_address, group: "site" },
+        { key: "admin_notification_email", value: settings.admin_notification_email, group: "site" },
       ]);
       toast({ title: "Succès", description: "Paramètres enregistrés." });
     } catch (err: any) {
@@ -213,6 +231,74 @@ export default function SiteSettingsPage() {
                 <p className="text-sm text-gray-500">
                   Le logo sera redimensionné pour l’entête et les documents PDF.
                 </p>
+              </div>
+
+              {/* Company Info Section */}
+              <div className="border-t pt-6 mt-6">
+                <h3 className="text-lg font-semibold text-[#1A365D] mb-4">Informations Entreprise</h3>
+
+                <div className="space-y-4">
+                  <div>
+                    <Label>Téléphone</Label>
+                    <Input
+                      value={settings.company_phone}
+                      onChange={(e) => setSettings({ ...settings, company_phone: e.target.value })}
+                      placeholder="+230 5xxx xxxx"
+                    />
+                  </div>
+
+                  <div>
+                    <Label>Email</Label>
+                    <Input
+                      type="email"
+                      value={settings.company_email}
+                      onChange={(e) => setSettings({ ...settings, company_email: e.target.value })}
+                      placeholder="info@sunbox-mauritius.com"
+                    />
+                  </div>
+
+                  <div>
+                    <Label>Adresse</Label>
+                    <Textarea
+                      rows={2}
+                      value={settings.company_address}
+                      onChange={(e) => setSettings({ ...settings, company_address: e.target.value })}
+                      placeholder="Adresse de l'entreprise"
+                    />
+                  </div>
+
+                  <div>
+                    <Label>Numéro de compte bancaire</Label>
+                    <Input
+                      value={settings.bank_account}
+                      onChange={(e) => setSettings({ ...settings, bank_account: e.target.value })}
+                      placeholder="IBAN ou numéro de compte"
+                    />
+                  </div>
+
+                  <div>
+                    <Label>Modalités de paiement</Label>
+                    <Textarea
+                      rows={3}
+                      value={settings.payment_terms}
+                      onChange={(e) => setSettings({ ...settings, payment_terms: e.target.value })}
+                      placeholder="Ex: 30% à la commande, 40% à la livraison, 30% à la réception"
+                    />
+                  </div>
+
+                  <div>
+                    <Label>Email de notification admin</Label>
+                    <Input
+                      type="email"
+                      value={settings.admin_notification_email}
+                      onChange={(e) => setSettings({ ...settings, admin_notification_email: e.target.value })}
+                      placeholder="admin@sunbox-mauritius.com"
+                    />
+                    <p className="text-sm text-gray-500 mt-1">
+                      Adresse email qui recevra les notifications quand un client crée un devis
+                    </p>
+                  </div>
+                </div>
               </div>
 
               {/* Enregistrer */}

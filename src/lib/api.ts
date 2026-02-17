@@ -770,6 +770,60 @@ export const api = {
   getDefaultPoolBOQTemplateFromDB() {
     return this.query('get_default_pool_boq_template');
   },
+
+  /* =====================================================
+     PDF TEMPLATES
+  ===================================================== */
+  getPdfTemplates(documentType?: string) {
+    return this.query('get_pdf_templates', documentType ? { document_type: documentType } : {});
+  },
+
+  getPdfTemplate(id: number) {
+    return this.query('get_pdf_template', { id });
+  },
+
+  createPdfTemplate(template: {
+    name: string;
+    description?: string;
+    document_type: 'devis' | 'rapport' | 'facture';
+    grid_data?: Record<string, any>;
+    row_count?: number;
+    col_count?: number;
+    row_heights?: number[];
+    col_widths?: number[];
+    is_default?: boolean;
+    is_active?: boolean;
+  }) {
+    return this.query('create_pdf_template', template);
+  },
+
+  updatePdfTemplate(template: {
+    id: number;
+    name?: string;
+    description?: string;
+    document_type?: 'devis' | 'rapport' | 'facture';
+    grid_data?: Record<string, any>;
+    row_count?: number;
+    col_count?: number;
+    row_heights?: number[];
+    col_widths?: number[];
+    is_default?: boolean;
+    is_active?: boolean;
+  }) {
+    return this.query('update_pdf_template', template);
+  },
+
+  deletePdfTemplate(id: number) {
+    return this.query('delete_pdf_template', { id });
+  },
+
+  getDefaultPdfTemplate(documentType: string) {
+    return this.query('get_default_pdf_template', { document_type: documentType });
+  },
+
+  renderPdfHtml(templateId: number, quoteId: number) {
+    return this.query('render_pdf_html', { template_id: templateId, quote_id: quoteId });
+  },
 };
 
 export default api;

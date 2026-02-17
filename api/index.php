@@ -2,6 +2,22 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/config.php';
+
+// Load Composer autoload for PHPMailer (needed for admin notification emails)
+$autoloadPaths = [
+    dirname(__DIR__) . '/vendor/autoload.php',
+    __DIR__ . '/vendor/autoload.php',
+    dirname(__DIR__, 2) . '/vendor/autoload.php',
+    '/home/' . get_current_user() . '/vendor/autoload.php',
+];
+foreach ($autoloadPaths as $autoloadPath) {
+    if (file_exists($autoloadPath)) {
+        require_once $autoloadPath;
+        break;
+    }
+}
+
+require_once __DIR__ . '/email_helpers.php';
 handleCORS();
 
 $action = $_GET['action'] ?? '';
@@ -1053,6 +1069,65 @@ try {
                 }
                 
                 $db->commit();
+
+                // Send admin notification email (best-effort, don't fail the quote)
+                try {
+                    $notifStmt = $db->prepare("SELECT setting_value FROM settings WHERE setting_key = 'admin_notification_email' AND setting_group = 'site'");
+                    $notifStmt->execute();
+                    $adminEmail = $notifStmt->fetchColumn();
+                    if ($adminEmail) {
+                        // Load email settings
+                        $esStmt = $db->query("SELECT setting_key, setting_value FROM settings WHERE setting_group = 'email'");
+                        $eSettings = [];
+                        while ($er = $esStmt->fetch()) { $eSettings[$er['setting_key']] = $er['setting_value']; }
+                        $eSettings = normalizeEmailSettings($eSettings);
+
+                        // Try template first
+                        $tplStmt = $db->prepare("SELECT * FROM email_templates WHERE template_key = 'admin_new_quote' AND is_active = 1");
+                        $tplStmt->execute();
+                        $tpl = $tplStmt->fetch();
+
+                        $notifData = [
+                            'to' => $adminEmail,
+                            'subject' => 'Nouveau devis créé: ' . $reference,
+                            'html' => '<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">'
+                                . '<h2 style="color:#1A365D;">Nouveau Devis Créé</h2>'
+                                . '<p>Un client vient de créer un devis depuis le site.</p>'
+                                . '<table style="width:100%;border-collapse:collapse;margin:20px 0;">'
+                                . '<tr><td style="padding:8px;border:1px solid #ddd;font-weight:bold;">Référence</td><td style="padding:8px;border:1px solid #ddd;">' . htmlspecialchars($reference) . '</td></tr>'
+                                . '<tr><td style="padding:8px;border:1px solid #ddd;font-weight:bold;">Client</td><td style="padding:8px;border:1px solid #ddd;">' . htmlspecialchars($customerName) . '</td></tr>'
+                                . '<tr><td style="padding:8px;border:1px solid #ddd;font-weight:bold;">Email</td><td style="padding:8px;border:1px solid #ddd;">' . htmlspecialchars($customerEmail) . '</td></tr>'
+                                . '<tr><td style="padding:8px;border:1px solid #ddd;font-weight:bold;">Téléphone</td><td style="padding:8px;border:1px solid #ddd;">' . htmlspecialchars($customerPhone) . '</td></tr>'
+                                . '<tr><td style="padding:8px;border:1px solid #ddd;font-weight:bold;">Modèle</td><td style="padding:8px;border:1px solid #ddd;">' . htmlspecialchars(sanitize($body['model_name'])) . '</td></tr>'
+                                . '<tr><td style="padding:8px;border:1px solid #ddd;font-weight:bold;">Total</td><td style="padding:8px;border:1px solid #ddd;">' . number_format((float)$body['total_price'], 0, ',', ' ') . ' Rs</td></tr>'
+                                . '</table>'
+                                . '<p><a href="https://sunbox-mauritius.com/#/admin/quotes/' . $quoteId . '" style="display:inline-block;padding:10px 20px;background:#f97316;color:white;text-decoration:none;border-radius:4px;">Voir le devis</a></p>'
+                                . '</div>',
+                        ];
+
+                        if ($tpl) {
+                            $tvars = [
+                                'reference' => $reference,
+                                'customer_name' => $customerName,
+                                'customer_email' => $customerEmail,
+                                'customer_phone' => $customerPhone,
+                                'model_name' => sanitize($body['model_name']),
+                                'total_price' => number_format((float)$body['total_price'], 0, ',', ' ') . ' Rs',
+                                'quote_url' => 'https://sunbox-mauritius.com/#/admin/quotes/' . $quoteId,
+                            ];
+                            $notifData['subject'] = replaceVariables($tpl['subject'], $tvars);
+                            $notifData['html'] = replaceVariables($tpl['body_html'], $tvars);
+                        }
+
+                        if (!empty($eSettings['smtp_password'])) {
+                            sendEmail($eSettings, $notifData);
+                            logEmail($db, $notifData, 'sent', 'admin_new_quote');
+                        }
+                    }
+                } catch (Exception $notifErr) {
+                    error_log('Admin notification email failed: ' . $notifErr->getMessage());
+                }
+
                 ok(['id' => $quoteId, 'reference_number' => $reference, 'contact_id' => $contactId]);
             } catch (Exception $e) {
                 $db->rollBack();
@@ -2192,6 +2267,317 @@ try {
                 $row['template_data'] = json_decode($row['template_data'], true);
             }
             ok($row ?: null);
+            break;
+        }
+
+        // === PDF TEMPLATES
+        case 'get_pdf_templates': {
+            $docType = $body['document_type'] ?? null;
+            $sql = "SELECT * FROM pdf_templates WHERE 1=1";
+            $params = [];
+            if ($docType) {
+                $sql .= " AND document_type = ?";
+                $params[] = $docType;
+            }
+            $sql .= " ORDER BY created_at DESC";
+            $stmt = $db->prepare($sql);
+            $stmt->execute($params);
+            $rows = $stmt->fetchAll();
+            foreach ($rows as &$r) {
+                if (isset($r['grid_data']) && is_string($r['grid_data'])) {
+                    $r['grid_data'] = json_decode($r['grid_data'], true);
+                }
+                if (isset($r['row_heights']) && is_string($r['row_heights'])) {
+                    $r['row_heights'] = json_decode($r['row_heights'], true);
+                }
+                if (isset($r['col_widths']) && is_string($r['col_widths'])) {
+                    $r['col_widths'] = json_decode($r['col_widths'], true);
+                }
+            }
+            ok($rows);
+            break;
+        }
+
+        case 'get_pdf_template': {
+            validateRequired($body, ['id']);
+            $stmt = $db->prepare("SELECT * FROM pdf_templates WHERE id = ?");
+            $stmt->execute([(int)$body['id']]);
+            $row = $stmt->fetch();
+            if ($row) {
+                if (isset($row['grid_data']) && is_string($row['grid_data'])) {
+                    $row['grid_data'] = json_decode($row['grid_data'], true);
+                }
+                if (isset($row['row_heights']) && is_string($row['row_heights'])) {
+                    $row['row_heights'] = json_decode($row['row_heights'], true);
+                }
+                if (isset($row['col_widths']) && is_string($row['col_widths'])) {
+                    $row['col_widths'] = json_decode($row['col_widths'], true);
+                }
+            }
+            ok($row ?: null);
+            break;
+        }
+
+        case 'create_pdf_template': {
+            validateRequired($body, ['name', 'document_type']);
+            $validTypes = ['devis', 'rapport', 'facture'];
+            if (!in_array($body['document_type'], $validTypes)) {
+                fail('Type de document invalide');
+            }
+
+            $rowCount = (int)($body['row_count'] ?? 20);
+            $colCount = (int)($body['col_count'] ?? 10);
+            $gridData = $body['grid_data'] ?? [];
+            $rowHeights = $body['row_heights'] ?? array_fill(0, $rowCount, 14);
+            $colWidths = $body['col_widths'] ?? array_fill(0, $colCount, 19);
+
+            // If setting as default, unset other defaults of same type
+            if (!empty($body['is_default'])) {
+                $db->prepare("UPDATE pdf_templates SET is_default = FALSE WHERE document_type = ?")->execute([$body['document_type']]);
+            }
+
+            $stmt = $db->prepare("
+                INSERT INTO pdf_templates (name, description, document_type, grid_data, row_count, col_count, row_heights, col_widths, is_default, is_active)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ");
+            $stmt->execute([
+                sanitize($body['name']),
+                sanitize($body['description'] ?? ''),
+                $body['document_type'],
+                json_encode($gridData),
+                $rowCount,
+                $colCount,
+                json_encode($rowHeights),
+                json_encode($colWidths),
+                !empty($body['is_default']) ? 1 : 0,
+                isset($body['is_active']) ? ($body['is_active'] ? 1 : 0) : 1,
+            ]);
+            ok(['id' => (int)$db->lastInsertId()]);
+            break;
+        }
+
+        case 'update_pdf_template': {
+            validateRequired($body, ['id']);
+            $fields = [];
+            $params = [];
+
+            if (isset($body['name'])) { $fields[] = 'name = ?'; $params[] = sanitize($body['name']); }
+            if (isset($body['description'])) { $fields[] = 'description = ?'; $params[] = sanitize($body['description']); }
+            if (isset($body['document_type'])) {
+                $validTypes = ['devis', 'rapport', 'facture'];
+                if (!in_array($body['document_type'], $validTypes)) fail('Type de document invalide');
+                $fields[] = 'document_type = ?'; $params[] = $body['document_type'];
+            }
+            if (isset($body['grid_data'])) { $fields[] = 'grid_data = ?'; $params[] = json_encode($body['grid_data']); }
+            if (isset($body['row_count'])) { $fields[] = 'row_count = ?'; $params[] = (int)$body['row_count']; }
+            if (isset($body['col_count'])) { $fields[] = 'col_count = ?'; $params[] = (int)$body['col_count']; }
+            if (isset($body['row_heights'])) { $fields[] = 'row_heights = ?'; $params[] = json_encode($body['row_heights']); }
+            if (isset($body['col_widths'])) { $fields[] = 'col_widths = ?'; $params[] = json_encode($body['col_widths']); }
+            if (isset($body['is_active'])) { $fields[] = 'is_active = ?'; $params[] = $body['is_active'] ? 1 : 0; }
+
+            if (isset($body['is_default']) && $body['is_default']) {
+                // Get document_type first
+                $typeStmt = $db->prepare("SELECT document_type FROM pdf_templates WHERE id = ?");
+                $typeStmt->execute([(int)$body['id']]);
+                $docType = $typeStmt->fetchColumn();
+                if ($docType) {
+                    $db->prepare("UPDATE pdf_templates SET is_default = FALSE WHERE document_type = ?")->execute([$docType]);
+                }
+                $fields[] = 'is_default = ?'; $params[] = 1;
+            } elseif (isset($body['is_default'])) {
+                $fields[] = 'is_default = ?'; $params[] = 0;
+            }
+
+            if (empty($fields)) fail('Aucun champ à mettre à jour');
+
+            $params[] = (int)$body['id'];
+            $db->prepare("UPDATE pdf_templates SET " . implode(', ', $fields) . " WHERE id = ?")->execute($params);
+            ok();
+            break;
+        }
+
+        case 'delete_pdf_template': {
+            validateRequired($body, ['id']);
+            $db->prepare("DELETE FROM pdf_templates WHERE id = ?")->execute([(int)$body['id']]);
+            ok();
+            break;
+        }
+
+        case 'get_default_pdf_template': {
+            validateRequired($body, ['document_type']);
+            $stmt = $db->prepare("SELECT * FROM pdf_templates WHERE document_type = ? AND is_default = 1 AND is_active = 1 LIMIT 1");
+            $stmt->execute([$body['document_type']]);
+            $row = $stmt->fetch();
+            if (!$row) {
+                // Fallback: get any active template of this type
+                $stmt = $db->prepare("SELECT * FROM pdf_templates WHERE document_type = ? AND is_active = 1 ORDER BY created_at DESC LIMIT 1");
+                $stmt->execute([$body['document_type']]);
+                $row = $stmt->fetch();
+            }
+            if ($row) {
+                if (isset($row['grid_data']) && is_string($row['grid_data'])) $row['grid_data'] = json_decode($row['grid_data'], true);
+                if (isset($row['row_heights']) && is_string($row['row_heights'])) $row['row_heights'] = json_decode($row['row_heights'], true);
+                if (isset($row['col_widths']) && is_string($row['col_widths'])) $row['col_widths'] = json_decode($row['col_widths'], true);
+            }
+            ok($row ?: null);
+            break;
+        }
+
+        case 'render_pdf_html': {
+            validateRequired($body, ['template_id', 'quote_id']);
+
+            // Get template
+            $tplStmt = $db->prepare("SELECT * FROM pdf_templates WHERE id = ?");
+            $tplStmt->execute([(int)$body['template_id']]);
+            $tpl = $tplStmt->fetch();
+            if (!$tpl) fail('Template introuvable');
+
+            $gridData = is_string($tpl['grid_data']) ? json_decode($tpl['grid_data'], true) : $tpl['grid_data'];
+            $rowHeights = is_string($tpl['row_heights']) ? json_decode($tpl['row_heights'], true) : ($tpl['row_heights'] ?? []);
+            $colWidths = is_string($tpl['col_widths']) ? json_decode($tpl['col_widths'], true) : ($tpl['col_widths'] ?? []);
+
+            // Get quote
+            $qStmt = $db->prepare("SELECT * FROM quotes WHERE id = ?");
+            $qStmt->execute([(int)$body['quote_id']]);
+            $q = $qStmt->fetch();
+            if (!$q) fail('Devis introuvable');
+
+            // Get quote options
+            $optStmt = $db->prepare("SELECT * FROM quote_options WHERE quote_id = ?");
+            $optStmt->execute([(int)$body['quote_id']]);
+            $qOpts = $optStmt->fetchAll();
+
+            // Get site settings
+            $settingsStmt = $db->query("SELECT setting_key, setting_value FROM settings WHERE setting_group = 'site'");
+            $siteSettings = [];
+            while ($r = $settingsStmt->fetch()) { $siteSettings[$r['setting_key']] = $r['setting_value']; }
+
+            $vatRate = (float)($siteSettings['vat_rate'] ?? 15);
+            $totalHT = (float)$q['total_price'];
+            $tva = round($totalHT * $vatRate / 100, 2);
+            $totalTTC = round($totalHT + $tva, 2);
+
+            // Build options text
+            $optionsText = '';
+            foreach ($qOpts as $o) {
+                $optionsText .= $o['option_name'] . ' - ' . number_format((float)$o['option_price'], 0, ',', ' ') . " Rs\n";
+            }
+
+            // Variables map
+            $vars = [
+                '{{reference}}' => $q['reference_number'] ?? '',
+                '{{customer_name}}' => $q['customer_name'] ?? '',
+                '{{customer_email}}' => $q['customer_email'] ?? '',
+                '{{customer_phone}}' => $q['customer_phone'] ?? '',
+                '{{customer_address}}' => $q['customer_address'] ?? '',
+                '{{customer_message}}' => $q['customer_message'] ?? '',
+                '{{model_name}}' => $q['model_name'] ?? '',
+                '{{model_type}}' => $q['model_type'] ?? '',
+                '{{base_price}}' => number_format((float)$q['base_price'], 0, ',', ' ') . ' Rs',
+                '{{options_total}}' => number_format((float)$q['options_total'], 0, ',', ' ') . ' Rs',
+                '{{total_ht}}' => number_format($totalHT, 0, ',', ' ') . ' Rs',
+                '{{tva}}' => number_format($tva, 0, ',', ' ') . ' Rs',
+                '{{tva_rate}}' => $vatRate . '%',
+                '{{total_ttc}}' => number_format($totalTTC, 0, ',', ' ') . ' Rs',
+                '{{options_list}}' => $optionsText,
+                '{{valid_until}}' => $q['valid_until'] ? date('d/m/Y', strtotime($q['valid_until'])) : '',
+                '{{created_at}}' => date('d/m/Y', strtotime($q['created_at'])),
+                '{{status}}' => $q['status'] ?? '',
+                '{{payment_terms}}' => $siteSettings['payment_terms'] ?? '',
+                '{{bank_account}}' => $siteSettings['bank_account'] ?? '',
+                '{{company_phone}}' => $siteSettings['company_phone'] ?? '',
+                '{{company_email}}' => $siteSettings['company_email'] ?? '',
+                '{{company_address}}' => $siteSettings['company_address'] ?? '',
+                '{{site_slogan}}' => $siteSettings['site_slogan'] ?? '',
+                '{{date_today}}' => date('d/m/Y'),
+            ];
+
+            // Logo vars
+            $logoUrl = $siteSettings['pdf_logo'] ?? $siteSettings['site_logo'] ?? '';
+
+            // Render HTML table
+            $rowCount = (int)$tpl['row_count'];
+            $colCount = (int)$tpl['col_count'];
+            $cells = $gridData ?: [];
+
+            // Build merged cell tracking
+            $mergedCells = [];
+            foreach ($cells as $key => $cell) {
+                if (!empty($cell['merged'])) {
+                    $colspan = (int)($cell['colspan'] ?? 1);
+                    $rowspan = (int)($cell['rowspan'] ?? 1);
+                    $parts = explode('-', $key);
+                    $sr = (int)$parts[0]; $sc = (int)$parts[1];
+                    for ($r2 = $sr; $r2 < $sr + $rowspan; $r2++) {
+                        for ($c2 = $sc; $c2 < $sc + $colspan; $c2++) {
+                            if ($r2 !== $sr || $c2 !== $sc) {
+                                $mergedCells["$r2-$c2"] = true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            $html = '<table style="width:190mm;border-collapse:collapse;table-layout:fixed;font-family:Arial,sans-serif;font-size:10pt;">';
+            // Colgroup
+            $html .= '<colgroup>';
+            for ($c = 0; $c < $colCount; $c++) {
+                $w = isset($colWidths[$c]) ? $colWidths[$c] : 19;
+                $html .= '<col style="width:' . $w . 'mm">';
+            }
+            $html .= '</colgroup>';
+
+            for ($r = 0; $r < $rowCount; $r++) {
+                $rh = isset($rowHeights[$r]) ? $rowHeights[$r] : 14;
+                $html .= '<tr style="height:' . $rh . 'mm;">';
+                for ($c = 0; $c < $colCount; $c++) {
+                    $cellKey = "$r-$c";
+                    if (isset($mergedCells[$cellKey])) continue;
+
+                    $cell = $cells[$cellKey] ?? null;
+                    $colspan = ($cell && !empty($cell['colspan'])) ? (int)$cell['colspan'] : 1;
+                    $rowspan = ($cell && !empty($cell['rowspan'])) ? (int)$cell['rowspan'] : 1;
+                    $content = $cell['content'] ?? '';
+                    $styles = [];
+
+                    if (!empty($cell['bold'])) $styles[] = 'font-weight:bold';
+                    if (!empty($cell['italic'])) $styles[] = 'font-style:italic';
+                    if (!empty($cell['underline'])) $styles[] = 'text-decoration:underline';
+                    if (!empty($cell['fontSize'])) $styles[] = 'font-size:' . $cell['fontSize'] . 'pt';
+                    if (!empty($cell['fontFamily'])) $styles[] = 'font-family:' . htmlspecialchars($cell['fontFamily']);
+                    if (!empty($cell['textAlign'])) $styles[] = 'text-align:' . $cell['textAlign'];
+                    if (!empty($cell['bgColor'])) $styles[] = 'background-color:' . htmlspecialchars($cell['bgColor']);
+                    if (!empty($cell['color'])) $styles[] = 'color:' . htmlspecialchars($cell['color']);
+                    $styles[] = 'padding:2mm';
+                    $styles[] = 'vertical-align:middle';
+                    $styles[] = 'border:0.5pt solid #ddd';
+                    $styles[] = 'overflow:hidden';
+                    $styles[] = 'word-wrap:break-word';
+
+                    // Replace variables
+                    $rendered = $content;
+                    foreach ($vars as $vk => $vv) {
+                        $rendered = str_replace($vk, htmlspecialchars($vv), $rendered);
+                    }
+
+                    // Handle image variables
+                    if (!empty($cell['type']) && $cell['type'] === 'image') {
+                        $imgUrl = $cell['imageUrl'] ?? '';
+                        if ($imgUrl === '{{logo}}') $imgUrl = $logoUrl;
+                        $rendered = $imgUrl ? '<img src="' . htmlspecialchars($imgUrl) . '" style="max-width:100%;max-height:100%;object-fit:contain;" />' : '';
+                    }
+
+                    $attrStr = '';
+                    if ($colspan > 1) $attrStr .= ' colspan="' . $colspan . '"';
+                    if ($rowspan > 1) $attrStr .= ' rowspan="' . $rowspan . '"';
+
+                    $html .= '<td' . $attrStr . ' style="' . implode(';', $styles) . '">' . $rendered . '</td>';
+                }
+                $html .= '</tr>';
+            }
+            $html .= '</table>';
+
+            ok(['html' => $html, 'vars' => array_keys($vars)]);
             break;
         }
 
