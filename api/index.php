@@ -671,6 +671,56 @@ try {
             break;
         }
 
+        // === RESET BOQ (delete all categories & lines for a model)
+        case 'reset_boq': {
+            validateRequired($body, ['model_id']);
+            $modelId = (int)$body['model_id'];
+            
+            // Delete all categories for this model (lines are deleted via CASCADE)
+            $stmt = $db->prepare("DELETE FROM boq_categories WHERE model_id = ?");
+            $stmt->execute([$modelId]);
+            $deletedCount = $stmt->rowCount();
+            
+            ok(['deleted_categories' => $deletedCount]);
+            break;
+        }
+
+        // === GET POOL BOQ FULL (all categories + lines with formulas for public price calculation)
+        case 'get_pool_boq_full': {
+            $modelId = (int)($body['model_id'] ?? 0);
+            if ($modelId <= 0) fail("model_id manquant");
+            
+            // Get all categories (both base and options) with parent_id
+            $stmt = $db->prepare("
+                SELECT bc.id, bc.name, bc.is_option, bc.display_order, bc.parent_id
+                FROM boq_categories bc
+                WHERE bc.model_id = ?
+                ORDER BY bc.display_order ASC, bc.name ASC
+            ");
+            $stmt->execute([$modelId]);
+            $categories = $stmt->fetchAll();
+            
+            // For each category, get its lines with full details
+            $lineStmt = $db->prepare("
+                SELECT bl.id, bl.description, bl.quantity, bl.quantity_formula,
+                       bl.unit, bl.unit_cost_ht, bl.unit_cost_formula,
+                       bl.price_list_id, bl.margin_percent, bl.display_order,
+                       pl.unit_price AS price_list_unit_price
+                FROM boq_lines bl
+                LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
+                WHERE bl.category_id = ?
+                ORDER BY bl.display_order ASC, bl.id ASC
+            ");
+            
+            foreach ($categories as &$cat) {
+                $lineStmt->execute([$cat['id']]);
+                $cat['lines'] = $lineStmt->fetchAll();
+            }
+            
+            ok($categories);
+            break;
+        }
+
         // === GET MODEL WITH BOQ PRICE
         case 'get_model_boq_price': {
             $modelId = (int)($body['model_id'] ?? 0);

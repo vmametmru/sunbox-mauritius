@@ -246,6 +246,10 @@ export const api = {
     });
   },
 
+  resetBOQ(modelId: number) {
+    return this.query('reset_boq', { model_id: modelId });
+  },
+
   getModelBOQPrice(modelId: number) {
     return this.query('get_model_boq_price', { model_id: modelId });
   },
@@ -260,6 +264,10 @@ export const api = {
 
   getBOQCategoryLines(categoryId: number) {
     return this.query('get_boq_category_lines', { category_id: categoryId });
+  },
+
+  getPoolBOQFull(modelId: number) {
+    return this.query('get_pool_boq_full', { model_id: modelId });
   },
 
   /* =====================================================
