@@ -106,6 +106,40 @@ export default function QuoteDetailPage() {
             variant: 'default'
           });
         }
+
+        // When approving, also generate and open the PDF devis
+        if (status === 'approved') {
+          try {
+            const tpl = await api.getDefaultPdfTemplate('devis');
+            if (tpl) {
+              const pdfResult = await api.renderPdfHtml(tpl.id, quote.id);
+              if (pdfResult?.html) {
+                const printWindow = window.open('', '_blank');
+                if (printWindow) {
+                  printWindow.document.write(`
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                      <title>Devis ${quote.reference_number} - Sunbox Mauritius</title>
+                      <style>
+                        @page { size: A4; margin: 10mm; }
+                        body { margin: 0; padding: 10mm; font-family: Arial, sans-serif; }
+                        @media print { body { padding: 0; } }
+                      </style>
+                    </head>
+                    <body>${pdfResult.html}</body>
+                    </html>
+                  `);
+                  printWindow.document.close();
+                  toast({ title: 'PDF généré', description: 'Le PDF du devis a été ouvert dans un nouvel onglet' });
+                }
+              }
+            }
+          } catch (pdfErr: any) {
+            console.error('PDF generation error:', pdfErr);
+            // Don't fail - the approval was successful
+          }
+        }
       }
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
