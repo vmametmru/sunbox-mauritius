@@ -260,9 +260,11 @@ try {
 
       $up = uploadOne('uploads/models', $ALLOWED_MIME, $MAX_BYTES);
 
-      $count = (int)$db->prepare(
-        "SELECT COUNT(*) FROM model_images WHERE model_id = ?"
-      )->execute([$modelId]) ?: 0;
+      $countStmt = $db->prepare(
+        "SELECT COUNT(*) FROM model_images WHERE model_id = ? AND media_type = 'photo'"
+      );
+      $countStmt->execute([$modelId]);
+      $count = (int)$countStmt->fetchColumn();
 
       $stmt = $db->prepare("
         INSERT INTO model_images (model_id, file_path, is_primary, media_type)

@@ -32,8 +32,8 @@ export const api = {
   /* =====================================================
      MODELS (DB-DRIVEN ONLY)
   ===================================================== */
-  getModels(type?: 'container' | 'pool', activeOnly: boolean = true) {
-    return this.query('get_models', { type, active_only: activeOnly });
+  getModels(type?: 'container' | 'pool', activeOnly: boolean = true, includeBOQPrice: boolean = true) {
+    return this.query('get_models', { type, active_only: activeOnly, include_boq_price: includeBOQPrice });
   },
 
   createModel(model: {

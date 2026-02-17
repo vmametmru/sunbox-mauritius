@@ -101,7 +101,7 @@ export default function MediaPage() {
   // ===============================
   async function loadModels() {
     try {
-      const data = await api.getModels(undefined, false);
+      const data = await api.getModels(undefined, false, false);
       const list: ModelBrief[] = Array.isArray(data)
         ? data.filter((m: any) => m?.id).map((m: any) => ({ id: Number(m.id), name: String(m.name || ""), type: m.type }))
         : [];
