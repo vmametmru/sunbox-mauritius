@@ -12,7 +12,8 @@ import {
   Settings,
   Trash2,
   ExternalLink,
-  RefreshCw
+  RefreshCw,
+  Download,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -126,6 +127,51 @@ export default function QuoteDetailPage() {
 
   const isFreeQuote = (q: any): boolean => {
     return q.is_free_quote === true || q.is_free_quote === 1 || q.is_free_quote === '1';
+  };
+
+  const handleDownloadPdf = async () => {
+    if (!quote) return;
+    try {
+      // Try to get the default PDF template for devis
+      const tpl = await api.getDefaultPdfTemplate('devis');
+      if (!tpl) {
+        toast({ 
+          title: 'Pas de template', 
+          description: 'Créez un template PDF dans la section PDF Templates pour générer un PDF.',
+          variant: 'destructive' 
+        });
+        return;
+      }
+
+      // Render PDF HTML from template
+      const result = await api.renderPdfHtml(tpl.id, quote.id);
+      if (!result?.html) {
+        toast({ title: 'Erreur', description: 'Erreur lors de la génération du PDF', variant: 'destructive' });
+        return;
+      }
+
+      // Open in new window for printing
+      const printWindow = window.open('', '_blank');
+      if (printWindow) {
+        printWindow.document.write(`
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <title>Devis ${quote.reference_number} - Sunbox Mauritius</title>
+            <style>
+              @page { size: A4; margin: 10mm; }
+              body { margin: 0; padding: 10mm; font-family: Arial, sans-serif; }
+              @media print { body { padding: 0; } }
+            </style>
+          </head>
+          <body>${result.html}</body>
+          </html>
+        `);
+        printWindow.document.close();
+      }
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    }
   };
 
   const handleEditQuote = () => {
@@ -398,6 +444,13 @@ export default function QuoteDetailPage() {
             >
               <Copy className="h-4 w-4 mr-2" />
               Cloner
+            </Button>
+            <Button 
+              variant="outline"
+              onClick={handleDownloadPdf}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              PDF
             </Button>
             <Button 
               variant="outline"

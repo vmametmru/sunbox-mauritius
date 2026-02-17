@@ -38,6 +38,8 @@ import PoolBOQVariablesPage from "./pages/admin/PoolBOQVariablesPage";
 import PoolBOQPriceListPage from "./pages/admin/PoolBOQPriceListPage";
 import PoolBOQTemplatePage from "./pages/admin/PoolBOQTemplatePage";
 import DevIdeasPage from "./pages/admin/DevIdeasPage";
+import PdfTemplatesPage from "./pages/admin/PdfTemplatesPage";
+import PdfTemplateEditorPage from "./pages/admin/PdfTemplateEditorPage";
 
 const queryClient = new QueryClient();
 
@@ -78,6 +80,8 @@ const App = () => (
                   <Route path="suppliers" element={<SuppliersPage />} />
                   <Route path="email" element={<EmailSettingsPage />} />
                   <Route path="site" element={<SiteSettingsPage />} />
+                  <Route path="pdf-templates" element={<PdfTemplatesPage />} />
+                  <Route path="pdf-templates/:id" element={<PdfTemplateEditorPage />} />
                   <Route path="dev-ideas" element={<DevIdeasPage />} />
                 </Route>
               </Route>

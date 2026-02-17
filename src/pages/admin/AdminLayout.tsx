@@ -18,6 +18,7 @@ import {
   Waves,
   DollarSign,
   FileCode,
+  Printer,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -26,6 +27,7 @@ import { cn } from '@/lib/utils';
 const menuItems = [
   { icon: LayoutDashboard, label: 'Dashboard', path: '/admin' },
   { icon: FileText, label: 'Devis', path: '/admin/quotes' },
+  { icon: Printer, label: 'PDF Templates', path: '/admin/pdf-templates' },
   { icon: Package, label: 'Modèles', path: '/admin/models' },
 
   // ✅ NEW: Gestion photos (modèles + plans)
