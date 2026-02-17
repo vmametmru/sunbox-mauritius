@@ -89,6 +89,12 @@ const VARIABLES = [
     { key: '{{total_ttc}}', label: 'Total TTC' },
     { key: '{{options_list}}', label: 'Liste des options' },
   ]},
+  { group: 'Détails BOQ', items: [
+    { key: '{{base_categories_html}}', label: 'Catégories de base (tableau)' },
+    { key: '{{base_categories}}', label: 'Catégories de base (texte)' },
+    { key: '{{option_categories_html}}', label: 'Catégories options (tableau)' },
+    { key: '{{option_categories}}', label: 'Catégories options (texte)' },
+  ]},
   { group: 'Entreprise', items: [
     { key: '{{company_phone}}', label: 'Téléphone entreprise' },
     { key: '{{company_email}}', label: 'Email entreprise' },
@@ -130,6 +136,11 @@ export default function PdfTemplateEditorPage() {
   const [showPreview, setShowPreview] = useState(false);
   const [previewHtml, setPreviewHtml] = useState('');
 
+  // Gallery for image picker
+  const [galleryImages, setGalleryImages] = useState<any[]>([]);
+  const [galleryLoading, setGalleryLoading] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
+
   // Dimension editing
   const [editingRowHeight, setEditingRowHeight] = useState<number | null>(null);
   const [editingColWidth, setEditingColWidth] = useState<number | null>(null);
@@ -156,6 +167,56 @@ export default function PdfTemplateEditorPage() {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadGalleryImages = async () => {
+    try {
+      setGalleryLoading(true);
+      const response = await fetch('https://sunbox-mauritius.com/api/media.php?action=list_by_media_type&media_type=photo', {
+        credentials: 'include',
+      });
+      const result = await response.json();
+      const photos = result?.data?.items || result?.data || [];
+      // Also load bandeau images
+      const bannerResponse = await fetch('https://sunbox-mauritius.com/api/media.php?action=list_by_media_type&media_type=bandeau', {
+        credentials: 'include',
+      });
+      const bannerResult = await bannerResponse.json();
+      const banners = bannerResult?.data?.items || bannerResult?.data || [];
+      setGalleryImages([...photos, ...banners]);
+    } catch (err) {
+      console.error('Failed to load gallery:', err);
+      setGalleryImages([]);
+    } finally {
+      setGalleryLoading(false);
+    }
+  };
+
+  const handleImageUpload = async (file: File) => {
+    try {
+      setUploadingImage(true);
+      const formData = new FormData();
+      formData.append('file', file);
+      const response = await fetch('https://sunbox-mauritius.com/api/media.php?action=model_upload&model_id=0&media_type=photo', {
+        method: 'POST',
+        credentials: 'include',
+        body: formData,
+      });
+      const result = await response.json();
+      if (result?.data?.file?.url || result?.data?.file?.relative) {
+        const imageUrl = result.data.file.url || ('/' + result.data.file.relative);
+        setCellEditData({ ...cellEditData, imageUrl });
+        toast({ title: 'Image uploadée' });
+        // Refresh gallery
+        loadGalleryImages();
+      } else {
+        toast({ title: 'Erreur', description: 'Upload échoué', variant: 'destructive' });
+      }
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setUploadingImage(false);
     }
   };
 
@@ -363,7 +424,7 @@ export default function PdfTemplateEditorPage() {
   const handleRowHeightChange = (rowIdx: number, height: number) => {
     if (!template) return;
     const newHeights = [...template.row_heights];
-    newHeights[rowIdx] = Math.max(5, Math.min(100, height));
+    newHeights[rowIdx] = Math.max(1, Math.min(100, height));
     setTemplate({ ...template, row_heights: newHeights });
   };
 
@@ -439,7 +500,7 @@ export default function PdfTemplateEditorPage() {
                       onBlur={() => setEditingRowHeight(null)}
                       onKeyDown={(e) => e.key === 'Enter' && setEditingRowHeight(null)}
                       autoFocus
-                      min={5}
+                      min={1}
                       max={100}
                     />
                   ) : (
@@ -720,16 +781,93 @@ export default function PdfTemplateEditorPage() {
             </div>
 
             {cellEditData.type === 'image' ? (
-              <div>
-                <Label>URL de l'image</Label>
-                <Input
-                  value={cellEditData.imageUrl || ''}
-                  onChange={(e) => setCellEditData({ ...cellEditData, imageUrl: e.target.value })}
-                  placeholder="URL de l'image ou {{logo}} pour le logo"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Utilisez <code>{'{{logo}}'}</code> pour insérer le logo du site
-                </p>
+              <div className="space-y-3">
+                {/* Current image preview */}
+                {cellEditData.imageUrl && cellEditData.imageUrl !== '{{logo}}' && (
+                  <div className="border rounded p-2 flex items-center justify-center bg-gray-50">
+                    <img src={cellEditData.imageUrl} alt="Preview" className="max-h-24 object-contain" />
+                  </div>
+                )}
+                {cellEditData.imageUrl === '{{logo}}' && (
+                  <div className="border rounded p-2 text-center text-sm text-gray-500 bg-yellow-50">
+                    🏢 Logo du site (variable)
+                  </div>
+                )}
+
+                {/* Quick actions */}
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={cellEditData.imageUrl === '{{logo}}' ? 'default' : 'outline'}
+                    onClick={() => setCellEditData({ ...cellEditData, imageUrl: '{{logo}}' })}
+                  >
+                    🏢 Logo du site
+                  </Button>
+                  <label>
+                    <Button type="button" size="sm" variant="outline" asChild disabled={uploadingImage}>
+                      <span>
+                        {uploadingImage ? '⏳ Upload...' : '📤 Uploader'}
+                      </span>
+                    </Button>
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleImageUpload(file);
+                        e.target.value = '';
+                      }}
+                    />
+                  </label>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      if (galleryImages.length === 0) loadGalleryImages();
+                    }}
+                  >
+                    🖼 Galerie
+                  </Button>
+                  {cellEditData.imageUrl && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="text-red-500"
+                      onClick={() => setCellEditData({ ...cellEditData, imageUrl: '' })}
+                    >
+                      ✕ Retirer
+                    </Button>
+                  )}
+                </div>
+
+                {/* Gallery picker */}
+                {galleryImages.length > 0 && (
+                  <div>
+                    <Label className="mb-1 block text-xs">Choisir depuis la galerie</Label>
+                    <div className="grid grid-cols-4 gap-2 max-h-48 overflow-y-auto border rounded p-2">
+                      {galleryLoading ? (
+                        <p className="col-span-4 text-center text-xs text-gray-400 py-4">Chargement...</p>
+                      ) : (
+                        galleryImages.map((img: any) => {
+                          const imgPath = img.file_path ? ('/' + img.file_path.replace(/^\//, '')) : '';
+                          return (
+                            <div
+                              key={img.id}
+                              className={`border rounded cursor-pointer hover:ring-2 hover:ring-orange-400 transition-all ${cellEditData.imageUrl === imgPath ? 'ring-2 ring-orange-500' : ''}`}
+                              onClick={() => setCellEditData({ ...cellEditData, imageUrl: imgPath })}
+                            >
+                              <img src={imgPath} alt="" className="w-full h-16 object-cover rounded" />
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <>

@@ -2463,6 +2463,124 @@ try {
                 $optionsText .= $o['option_name'] . ' - ' . number_format((float)$o['option_price'], 0, ',', ' ') . " Rs\n";
             }
 
+            // Build BOQ categories/lines data for the quote's model
+            $modelId = (int)($q['model_id'] ?? 0);
+            $baseCategoriesHtml = '';
+            $optionCategoriesHtml = '';
+            $baseCategoriesText = '';
+            $optionCategoriesText = '';
+
+            if ($modelId > 0) {
+                // Get BOQ categories for this model
+                $boqCatStmt = $db->prepare("
+                    SELECT bc.id, bc.name, bc.is_option, bc.parent_id, bc.display_order
+                    FROM boq_categories bc
+                    WHERE bc.model_id = ?
+                    ORDER BY bc.is_option ASC, bc.display_order ASC
+                ");
+                $boqCatStmt->execute([$modelId]);
+                $allCats = $boqCatStmt->fetchAll();
+
+                // Separate base and option categories, build parent-child structure
+                $baseCats = [];
+                $optionCats = [];
+                $catMap = [];
+                foreach ($allCats as $cat) {
+                    $catMap[$cat['id']] = $cat;
+                    $catMap[$cat['id']]['children'] = [];
+                    $catMap[$cat['id']]['lines'] = [];
+                }
+                // Build hierarchy
+                foreach ($allCats as $cat) {
+                    if ($cat['parent_id'] && isset($catMap[$cat['parent_id']])) {
+                        $catMap[$cat['parent_id']]['children'][] = &$catMap[$cat['id']];
+                    } else {
+                        if ($cat['is_option']) {
+                            $optionCats[] = &$catMap[$cat['id']];
+                        } else {
+                            $baseCats[] = &$catMap[$cat['id']];
+                        }
+                    }
+                }
+
+                // Get lines for each category
+                $boqLineStmt = $db->prepare("
+                    SELECT bl.*, pl.unit_price as price_list_price
+                    FROM boq_lines bl
+                    LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
+                    WHERE bl.category_id = ?
+                    ORDER BY bl.display_order ASC
+                ");
+
+                foreach ($catMap as $catId => &$cat) {
+                    $boqLineStmt->execute([$catId]);
+                    $cat['lines'] = $boqLineStmt->fetchAll();
+                }
+                unset($cat);
+
+                // Build HTML for base categories
+                $baseCategoriesHtml = '<table style="width:100%;border-collapse:collapse;font-family:Arial,sans-serif;font-size:9pt;">';
+                foreach ($baseCats as $bcat) {
+                    $baseCategoriesHtml .= '<tr style="background-color:#f0f0f0;"><td colspan="4" style="padding:4px 6px;font-weight:bold;border-bottom:1px solid #ccc;">' . htmlspecialchars($bcat['name']) . '</td></tr>';
+                    $baseCategoriesText .= strtoupper($bcat['name']) . "\n";
+                    // Sub-categories
+                    foreach ($bcat['children'] as $subcat) {
+                        $baseCategoriesHtml .= '<tr style="background-color:#f8f8f8;"><td colspan="4" style="padding:3px 12px;font-weight:bold;font-size:8pt;border-bottom:1px solid #eee;">' . htmlspecialchars($subcat['name']) . '</td></tr>';
+                        $baseCategoriesText .= '  ' . $subcat['name'] . "\n";
+                        foreach ($subcat['lines'] as $line) {
+                            $unitPrice = $line['price_list_price'] ? (float)$line['price_list_price'] : (float)$line['unit_cost_ht'];
+                            $salePrice = round($unitPrice * (float)$line['quantity'] * (1 + (float)$line['margin_percent'] / 100), 2);
+                            $baseCategoriesHtml .= '<tr><td style="padding:2px 18px;border-bottom:1px solid #f0f0f0;">' . htmlspecialchars($line['description']) . '</td>';
+                            $baseCategoriesHtml .= '<td style="padding:2px 4px;text-align:center;border-bottom:1px solid #f0f0f0;">' . (float)$line['quantity'] . ' ' . htmlspecialchars($line['unit'] ?? '') . '</td>';
+                            $baseCategoriesHtml .= '<td style="padding:2px 4px;text-align:right;border-bottom:1px solid #f0f0f0;">' . number_format($unitPrice, 0, ',', ' ') . ' Rs</td>';
+                            $baseCategoriesHtml .= '<td style="padding:2px 4px;text-align:right;border-bottom:1px solid #f0f0f0;">' . number_format($salePrice, 0, ',', ' ') . ' Rs</td></tr>';
+                            $baseCategoriesText .= '    - ' . $line['description'] . ': ' . number_format($salePrice, 0, ',', ' ') . " Rs\n";
+                        }
+                    }
+                    // Direct lines (no sub-category)
+                    foreach ($bcat['lines'] as $line) {
+                        $unitPrice = $line['price_list_price'] ? (float)$line['price_list_price'] : (float)$line['unit_cost_ht'];
+                        $salePrice = round($unitPrice * (float)$line['quantity'] * (1 + (float)$line['margin_percent'] / 100), 2);
+                        $baseCategoriesHtml .= '<tr><td style="padding:2px 12px;border-bottom:1px solid #f0f0f0;">' . htmlspecialchars($line['description']) . '</td>';
+                        $baseCategoriesHtml .= '<td style="padding:2px 4px;text-align:center;border-bottom:1px solid #f0f0f0;">' . (float)$line['quantity'] . ' ' . htmlspecialchars($line['unit'] ?? '') . '</td>';
+                        $baseCategoriesHtml .= '<td style="padding:2px 4px;text-align:right;border-bottom:1px solid #f0f0f0;">' . number_format($unitPrice, 0, ',', ' ') . ' Rs</td>';
+                        $baseCategoriesHtml .= '<td style="padding:2px 4px;text-align:right;border-bottom:1px solid #f0f0f0;">' . number_format($salePrice, 0, ',', ' ') . ' Rs</td></tr>';
+                        $baseCategoriesText .= '  - ' . $line['description'] . ': ' . number_format($salePrice, 0, ',', ' ') . " Rs\n";
+                    }
+                }
+                $baseCategoriesHtml .= '</table>';
+
+                // Build HTML for option categories
+                $optionCategoriesHtml = '<table style="width:100%;border-collapse:collapse;font-family:Arial,sans-serif;font-size:9pt;">';
+                foreach ($optionCats as $ocat) {
+                    $optionCategoriesHtml .= '<tr style="background-color:#fff3e0;"><td colspan="4" style="padding:4px 6px;font-weight:bold;border-bottom:1px solid #ffcc80;">' . htmlspecialchars($ocat['name']) . '</td></tr>';
+                    $optionCategoriesText .= strtoupper($ocat['name']) . "\n";
+                    foreach ($ocat['children'] as $subcat) {
+                        $optionCategoriesHtml .= '<tr style="background-color:#fff8e1;"><td colspan="4" style="padding:3px 12px;font-weight:bold;font-size:8pt;border-bottom:1px solid #ffe0b2;">' . htmlspecialchars($subcat['name']) . '</td></tr>';
+                        $optionCategoriesText .= '  ' . $subcat['name'] . "\n";
+                        foreach ($subcat['lines'] as $line) {
+                            $unitPrice = $line['price_list_price'] ? (float)$line['price_list_price'] : (float)$line['unit_cost_ht'];
+                            $salePrice = round($unitPrice * (float)$line['quantity'] * (1 + (float)$line['margin_percent'] / 100), 2);
+                            $optionCategoriesHtml .= '<tr><td style="padding:2px 18px;border-bottom:1px solid #f0f0f0;">' . htmlspecialchars($line['description']) . '</td>';
+                            $optionCategoriesHtml .= '<td style="padding:2px 4px;text-align:center;border-bottom:1px solid #f0f0f0;">' . (float)$line['quantity'] . ' ' . htmlspecialchars($line['unit'] ?? '') . '</td>';
+                            $optionCategoriesHtml .= '<td style="padding:2px 4px;text-align:right;border-bottom:1px solid #f0f0f0;">' . number_format($unitPrice, 0, ',', ' ') . ' Rs</td>';
+                            $optionCategoriesHtml .= '<td style="padding:2px 4px;text-align:right;border-bottom:1px solid #f0f0f0;">' . number_format($salePrice, 0, ',', ' ') . ' Rs</td></tr>';
+                            $optionCategoriesText .= '    - ' . $line['description'] . ': ' . number_format($salePrice, 0, ',', ' ') . " Rs\n";
+                        }
+                    }
+                    foreach ($ocat['lines'] as $line) {
+                        $unitPrice = $line['price_list_price'] ? (float)$line['price_list_price'] : (float)$line['unit_cost_ht'];
+                        $salePrice = round($unitPrice * (float)$line['quantity'] * (1 + (float)$line['margin_percent'] / 100), 2);
+                        $optionCategoriesHtml .= '<tr><td style="padding:2px 12px;border-bottom:1px solid #f0f0f0;">' . htmlspecialchars($line['description']) . '</td>';
+                        $optionCategoriesHtml .= '<td style="padding:2px 4px;text-align:center;border-bottom:1px solid #f0f0f0;">' . (float)$line['quantity'] . ' ' . htmlspecialchars($line['unit'] ?? '') . '</td>';
+                        $optionCategoriesHtml .= '<td style="padding:2px 4px;text-align:right;border-bottom:1px solid #f0f0f0;">' . number_format($unitPrice, 0, ',', ' ') . ' Rs</td>';
+                        $optionCategoriesHtml .= '<td style="padding:2px 4px;text-align:right;border-bottom:1px solid #f0f0f0;">' . number_format($salePrice, 0, ',', ' ') . ' Rs</td></tr>';
+                        $optionCategoriesText .= '  - ' . $line['description'] . ': ' . number_format($salePrice, 0, ',', ' ') . " Rs\n";
+                    }
+                }
+                $optionCategoriesHtml .= '</table>';
+            }
+
             // Variables map
             $vars = [
                 '{{reference}}' => $q['reference_number'] ?? '',
@@ -2490,6 +2608,10 @@ try {
                 '{{company_address}}' => $siteSettings['company_address'] ?? '',
                 '{{site_slogan}}' => $siteSettings['site_slogan'] ?? '',
                 '{{date_today}}' => date('d/m/Y'),
+                '{{base_categories}}' => $baseCategoriesText,
+                '{{base_categories_html}}' => $baseCategoriesHtml,
+                '{{option_categories}}' => $optionCategoriesText,
+                '{{option_categories_html}}' => $optionCategoriesHtml,
             ];
 
             // Logo vars
@@ -2550,14 +2672,19 @@ try {
                     if (!empty($cell['color'])) $styles[] = 'color:' . htmlspecialchars($cell['color']);
                     $styles[] = 'padding:2mm';
                     $styles[] = 'vertical-align:middle';
-                    $styles[] = 'border:0.5pt solid #ddd';
                     $styles[] = 'overflow:hidden';
                     $styles[] = 'word-wrap:break-word';
 
                     // Replace variables
                     $rendered = $content;
+                    // HTML variables should not be escaped
+                    $htmlVars = ['{{base_categories_html}}', '{{option_categories_html}}'];
                     foreach ($vars as $vk => $vv) {
-                        $rendered = str_replace($vk, htmlspecialchars($vv), $rendered);
+                        if (in_array($vk, $htmlVars)) {
+                            $rendered = str_replace($vk, $vv, $rendered);
+                        } else {
+                            $rendered = str_replace($vk, htmlspecialchars($vv), $rendered);
+                        }
                     }
 
                     // Handle image variables
@@ -2578,6 +2705,245 @@ try {
             $html .= '</table>';
 
             ok(['html' => $html, 'vars' => array_keys($vars)]);
+            break;
+        }
+
+        case 'send_quote_pdf_email': {
+            validateRequired($body, ['quote_id']);
+
+            // Get default devis template
+            $tplStmt = $db->prepare("SELECT * FROM pdf_templates WHERE document_type = 'devis' AND is_default = 1 AND is_active = 1 LIMIT 1");
+            $tplStmt->execute();
+            $tpl = $tplStmt->fetch();
+            if (!$tpl) {
+                // Fallback: any active devis template
+                $tplStmt = $db->prepare("SELECT * FROM pdf_templates WHERE document_type = 'devis' AND is_active = 1 ORDER BY created_at DESC LIMIT 1");
+                $tplStmt->execute();
+                $tpl = $tplStmt->fetch();
+            }
+            if (!$tpl) fail('Aucun template PDF devis trouvé');
+
+            // Get quote
+            $qStmt = $db->prepare("SELECT * FROM quotes WHERE id = ?");
+            $qStmt->execute([(int)$body['quote_id']]);
+            $q = $qStmt->fetch();
+            if (!$q) fail('Devis introuvable');
+            if (empty($q['customer_email'])) fail('Email client manquant');
+
+            // Render the PDF HTML by internally calling the render logic
+            // We reconstruct the HTML here to avoid code duplication issues
+            $renderBody = ['template_id' => $tpl['id'], 'quote_id' => $body['quote_id']];
+
+            // Use an internal function call approach: we'll build the HTML inline
+            $gridData = is_string($tpl['grid_data']) ? json_decode($tpl['grid_data'], true) : $tpl['grid_data'];
+            $rowHeights = is_string($tpl['row_heights']) ? json_decode($tpl['row_heights'], true) : ($tpl['row_heights'] ?? []);
+            $colWidths = is_string($tpl['col_widths']) ? json_decode($tpl['col_widths'], true) : ($tpl['col_widths'] ?? []);
+
+            $optStmt = $db->prepare("SELECT * FROM quote_options WHERE quote_id = ?");
+            $optStmt->execute([(int)$body['quote_id']]);
+            $qOpts = $optStmt->fetchAll();
+
+            $settingsStmt = $db->query("SELECT setting_key, setting_value FROM settings WHERE setting_group = 'site'");
+            $siteSettings = [];
+            while ($r = $settingsStmt->fetch()) { $siteSettings[$r['setting_key']] = $r['setting_value']; }
+
+            $vatRate = (float)($siteSettings['vat_rate'] ?? 15);
+            $totalHT = (float)$q['total_price'];
+            $tva = round($totalHT * $vatRate / 100, 2);
+            $totalTTC = round($totalHT + $tva, 2);
+
+            $optionsText = '';
+            foreach ($qOpts as $o) {
+                $optionsText .= $o['option_name'] . ' - ' . number_format((float)$o['option_price'], 0, ',', ' ') . " Rs\n";
+            }
+
+            // BOQ data
+            $modelId = (int)($q['model_id'] ?? 0);
+            $baseCategoriesHtml = '';
+            $optionCategoriesHtml = '';
+            $baseCategoriesText = '';
+            $optionCategoriesText = '';
+            if ($modelId > 0) {
+                $boqCatStmt = $db->prepare("SELECT bc.id, bc.name, bc.is_option, bc.parent_id, bc.display_order FROM boq_categories bc WHERE bc.model_id = ? ORDER BY bc.is_option ASC, bc.display_order ASC");
+                $boqCatStmt->execute([$modelId]);
+                $allCats = $boqCatStmt->fetchAll();
+                $baseCats = []; $optionCats = []; $catMap = [];
+                foreach ($allCats as $cat) { $catMap[$cat['id']] = $cat; $catMap[$cat['id']]['children'] = []; $catMap[$cat['id']]['lines'] = []; }
+                foreach ($allCats as $cat) {
+                    if ($cat['parent_id'] && isset($catMap[$cat['parent_id']])) { $catMap[$cat['parent_id']]['children'][] = &$catMap[$cat['id']]; }
+                    else { if ($cat['is_option']) { $optionCats[] = &$catMap[$cat['id']]; } else { $baseCats[] = &$catMap[$cat['id']]; } }
+                }
+                $boqLineStmt = $db->prepare("SELECT bl.*, pl.unit_price as price_list_price FROM boq_lines bl LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id WHERE bl.category_id = ? ORDER BY bl.display_order ASC");
+                foreach ($catMap as $catId => &$cat) { $boqLineStmt->execute([$catId]); $cat['lines'] = $boqLineStmt->fetchAll(); }
+                unset($cat);
+                // Build HTML similar to render_pdf_html
+                $baseCategoriesHtml = '<table style="width:100%;border-collapse:collapse;font-family:Arial,sans-serif;font-size:9pt;">';
+                foreach ($baseCats as $bcat) {
+                    $baseCategoriesHtml .= '<tr style="background-color:#f0f0f0;"><td colspan="4" style="padding:4px 6px;font-weight:bold;border-bottom:1px solid #ccc;">' . htmlspecialchars($bcat['name']) . '</td></tr>';
+                    foreach ($bcat['children'] as $subcat) {
+                        $baseCategoriesHtml .= '<tr style="background-color:#f8f8f8;"><td colspan="4" style="padding:3px 12px;font-weight:bold;font-size:8pt;">' . htmlspecialchars($subcat['name']) . '</td></tr>';
+                        foreach ($subcat['lines'] as $line) { $up = $line['price_list_price'] ? (float)$line['price_list_price'] : (float)$line['unit_cost_ht']; $sp = round($up * (float)$line['quantity'] * (1 + (float)$line['margin_percent'] / 100), 2); $baseCategoriesHtml .= '<tr><td style="padding:2px 18px;">' . htmlspecialchars($line['description']) . '</td><td style="text-align:center;">' . (float)$line['quantity'] . '</td><td style="text-align:right;">' . number_format($up, 0, ',', ' ') . ' Rs</td><td style="text-align:right;">' . number_format($sp, 0, ',', ' ') . ' Rs</td></tr>'; }
+                    }
+                    foreach ($bcat['lines'] as $line) { $up = $line['price_list_price'] ? (float)$line['price_list_price'] : (float)$line['unit_cost_ht']; $sp = round($up * (float)$line['quantity'] * (1 + (float)$line['margin_percent'] / 100), 2); $baseCategoriesHtml .= '<tr><td style="padding:2px 12px;">' . htmlspecialchars($line['description']) . '</td><td style="text-align:center;">' . (float)$line['quantity'] . '</td><td style="text-align:right;">' . number_format($up, 0, ',', ' ') . ' Rs</td><td style="text-align:right;">' . number_format($sp, 0, ',', ' ') . ' Rs</td></tr>'; }
+                }
+                $baseCategoriesHtml .= '</table>';
+                $optionCategoriesHtml = '<table style="width:100%;border-collapse:collapse;font-family:Arial,sans-serif;font-size:9pt;">';
+                foreach ($optionCats as $ocat) {
+                    $optionCategoriesHtml .= '<tr style="background-color:#fff3e0;"><td colspan="4" style="padding:4px 6px;font-weight:bold;">' . htmlspecialchars($ocat['name']) . '</td></tr>';
+                    foreach ($ocat['children'] as $subcat) { $optionCategoriesHtml .= '<tr style="background-color:#fff8e1;"><td colspan="4" style="padding:3px 12px;font-weight:bold;font-size:8pt;">' . htmlspecialchars($subcat['name']) . '</td></tr>'; foreach ($subcat['lines'] as $line) { $up = $line['price_list_price'] ? (float)$line['price_list_price'] : (float)$line['unit_cost_ht']; $sp = round($up * (float)$line['quantity'] * (1 + (float)$line['margin_percent'] / 100), 2); $optionCategoriesHtml .= '<tr><td style="padding:2px 18px;">' . htmlspecialchars($line['description']) . '</td><td style="text-align:center;">' . (float)$line['quantity'] . '</td><td style="text-align:right;">' . number_format($up, 0, ',', ' ') . ' Rs</td><td style="text-align:right;">' . number_format($sp, 0, ',', ' ') . ' Rs</td></tr>'; } }
+                    foreach ($ocat['lines'] as $line) { $up = $line['price_list_price'] ? (float)$line['price_list_price'] : (float)$line['unit_cost_ht']; $sp = round($up * (float)$line['quantity'] * (1 + (float)$line['margin_percent'] / 100), 2); $optionCategoriesHtml .= '<tr><td style="padding:2px 12px;">' . htmlspecialchars($line['description']) . '</td><td style="text-align:center;">' . (float)$line['quantity'] . '</td><td style="text-align:right;">' . number_format($up, 0, ',', ' ') . ' Rs</td><td style="text-align:right;">' . number_format($sp, 0, ',', ' ') . ' Rs</td></tr>'; }
+                }
+                $optionCategoriesHtml .= '</table>';
+            }
+
+            $vars = [
+                '{{reference}}' => $q['reference_number'] ?? '',
+                '{{customer_name}}' => $q['customer_name'] ?? '',
+                '{{customer_email}}' => $q['customer_email'] ?? '',
+                '{{customer_phone}}' => $q['customer_phone'] ?? '',
+                '{{customer_address}}' => $q['customer_address'] ?? '',
+                '{{customer_message}}' => $q['customer_message'] ?? '',
+                '{{model_name}}' => $q['model_name'] ?? '',
+                '{{model_type}}' => $q['model_type'] ?? '',
+                '{{base_price}}' => number_format((float)$q['base_price'], 0, ',', ' ') . ' Rs',
+                '{{options_total}}' => number_format((float)$q['options_total'], 0, ',', ' ') . ' Rs',
+                '{{total_ht}}' => number_format($totalHT, 0, ',', ' ') . ' Rs',
+                '{{tva}}' => number_format($tva, 0, ',', ' ') . ' Rs',
+                '{{tva_rate}}' => $vatRate . '%',
+                '{{total_ttc}}' => number_format($totalTTC, 0, ',', ' ') . ' Rs',
+                '{{options_list}}' => $optionsText,
+                '{{valid_until}}' => $q['valid_until'] ? date('d/m/Y', strtotime($q['valid_until'])) : '',
+                '{{created_at}}' => date('d/m/Y', strtotime($q['created_at'])),
+                '{{status}}' => $q['status'] ?? '',
+                '{{payment_terms}}' => $siteSettings['payment_terms'] ?? '',
+                '{{bank_account}}' => $siteSettings['bank_account'] ?? '',
+                '{{company_phone}}' => $siteSettings['company_phone'] ?? '',
+                '{{company_email}}' => $siteSettings['company_email'] ?? '',
+                '{{company_address}}' => $siteSettings['company_address'] ?? '',
+                '{{site_slogan}}' => $siteSettings['site_slogan'] ?? '',
+                '{{date_today}}' => date('d/m/Y'),
+                '{{base_categories}}' => $baseCategoriesText,
+                '{{base_categories_html}}' => $baseCategoriesHtml,
+                '{{option_categories}}' => $optionCategoriesText,
+                '{{option_categories_html}}' => $optionCategoriesHtml,
+            ];
+
+            $logoUrl = $siteSettings['pdf_logo'] ?? $siteSettings['site_logo'] ?? '';
+            $rowCount = (int)$tpl['row_count'];
+            $colCount = (int)$tpl['col_count'];
+            $cells = $gridData ?: [];
+
+            $mergedCells = [];
+            foreach ($cells as $key => $cell) {
+                if (!empty($cell['merged'])) {
+                    $colspan = (int)($cell['colspan'] ?? 1);
+                    $rowspan = (int)($cell['rowspan'] ?? 1);
+                    $parts = explode('-', $key);
+                    $sr = (int)$parts[0]; $sc = (int)$parts[1];
+                    for ($r2 = $sr; $r2 < $sr + $rowspan; $r2++) { for ($c2 = $sc; $c2 < $sc + $colspan; $c2++) { if ($r2 !== $sr || $c2 !== $sc) { $mergedCells["$r2-$c2"] = true; } } }
+                }
+            }
+
+            $pdfHtml = '<table style="width:190mm;border-collapse:collapse;table-layout:fixed;font-family:Arial,sans-serif;font-size:10pt;">';
+            $pdfHtml .= '<colgroup>';
+            for ($c = 0; $c < $colCount; $c++) { $w = isset($colWidths[$c]) ? $colWidths[$c] : 19; $pdfHtml .= '<col style="width:' . $w . 'mm">'; }
+            $pdfHtml .= '</colgroup>';
+            $htmlVars = ['{{base_categories_html}}', '{{option_categories_html}}'];
+            for ($r = 0; $r < $rowCount; $r++) {
+                $rh = isset($rowHeights[$r]) ? $rowHeights[$r] : 14;
+                $pdfHtml .= '<tr style="height:' . $rh . 'mm;">';
+                for ($c = 0; $c < $colCount; $c++) {
+                    $cellKey = "$r-$c";
+                    if (isset($mergedCells[$cellKey])) continue;
+                    $cell = $cells[$cellKey] ?? null;
+                    $colspan = ($cell && !empty($cell['colspan'])) ? (int)$cell['colspan'] : 1;
+                    $rowspan = ($cell && !empty($cell['rowspan'])) ? (int)$cell['rowspan'] : 1;
+                    $content = $cell['content'] ?? '';
+                    $styles = [];
+                    if (!empty($cell['bold'])) $styles[] = 'font-weight:bold';
+                    if (!empty($cell['italic'])) $styles[] = 'font-style:italic';
+                    if (!empty($cell['underline'])) $styles[] = 'text-decoration:underline';
+                    if (!empty($cell['fontSize'])) $styles[] = 'font-size:' . $cell['fontSize'] . 'pt';
+                    if (!empty($cell['fontFamily'])) $styles[] = 'font-family:' . htmlspecialchars($cell['fontFamily']);
+                    if (!empty($cell['textAlign'])) $styles[] = 'text-align:' . $cell['textAlign'];
+                    if (!empty($cell['bgColor'])) $styles[] = 'background-color:' . htmlspecialchars($cell['bgColor']);
+                    if (!empty($cell['color'])) $styles[] = 'color:' . htmlspecialchars($cell['color']);
+                    $styles[] = 'padding:2mm'; $styles[] = 'vertical-align:middle'; $styles[] = 'overflow:hidden'; $styles[] = 'word-wrap:break-word';
+                    $rendered = $content;
+                    foreach ($vars as $vk => $vv) { if (in_array($vk, $htmlVars)) { $rendered = str_replace($vk, $vv, $rendered); } else { $rendered = str_replace($vk, htmlspecialchars($vv), $rendered); } }
+                    if (!empty($cell['type']) && $cell['type'] === 'image') { $imgUrl = $cell['imageUrl'] ?? ''; if ($imgUrl === '{{logo}}') $imgUrl = $logoUrl; $rendered = $imgUrl ? '<img src="' . htmlspecialchars($imgUrl) . '" style="max-width:100%;max-height:100%;object-fit:contain;" />' : ''; }
+                    $attrStr = '';
+                    if ($colspan > 1) $attrStr .= ' colspan="' . $colspan . '"';
+                    if ($rowspan > 1) $attrStr .= ' rowspan="' . $rowspan . '"';
+                    $pdfHtml .= '<td' . $attrStr . ' style="' . implode(';', $styles) . '">' . $rendered . '</td>';
+                }
+                $pdfHtml .= '</tr>';
+            }
+            $pdfHtml .= '</table>';
+
+            // Build full PDF page HTML for attachment
+            $fullPdfHtml = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Devis ' . htmlspecialchars($q['reference_number'] ?? '') . '</title>'
+                . '<style>@page{size:A4;margin:10mm}body{margin:0;padding:10mm;font-family:Arial,sans-serif}</style></head><body>'
+                . $pdfHtml . '</body></html>';
+
+            // Load email settings
+            $esStmt = $db->query("SELECT setting_key, setting_value FROM settings WHERE setting_group = 'email'");
+            $eSettings = [];
+            while ($er = $esStmt->fetch()) { $eSettings[$er['setting_key']] = $er['setting_value']; }
+            $eSettings = normalizeEmailSettings($eSettings);
+
+            // Build email
+            $customerName = $q['customer_name'] ?? 'Client';
+            $reference = $q['reference_number'] ?? '';
+            $emailSubject = 'Votre devis ' . $reference . ' - Sunbox Mauritius';
+            $emailHtml = '<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">'
+                . '<h2 style="color:#1A365D;">Votre Devis Approuvé</h2>'
+                . '<p>Bonjour ' . htmlspecialchars($customerName) . ',</p>'
+                . '<p>Veuillez trouver ci-joint votre devis <strong>' . htmlspecialchars($reference) . '</strong> pour le modèle <strong>' . htmlspecialchars($q['model_name'] ?? '') . '</strong>.</p>'
+                . '<p>Montant total TTC: <strong>' . number_format($totalTTC, 0, ',', ' ') . ' Rs</strong></p>'
+                . '<p>Ce devis est valable jusqu\'au ' . ($q['valid_until'] ? date('d/m/Y', strtotime($q['valid_until'])) : 'N/A') . '.</p>'
+                . '<p>N\'hésitez pas à nous contacter pour toute question.</p>'
+                . '<p>Cordialement,<br>L\'équipe Sunbox Mauritius</p>'
+                . '</div>';
+
+            // Try to use a template if one exists
+            $tplEmail = $db->prepare("SELECT * FROM email_templates WHERE template_key = 'quote_approved' AND is_active = 1");
+            $tplEmail->execute();
+            $emailTpl = $tplEmail->fetch();
+            if ($emailTpl) {
+                $tvars = [
+                    'customer_name' => $customerName,
+                    'reference' => $reference,
+                    'model_name' => $q['model_name'] ?? '',
+                    'total_price' => number_format($totalTTC, 0, ',', ' ') . ' Rs',
+                ];
+                $emailSubject = replaceVariables($emailTpl['subject'], $tvars);
+                $emailHtml = replaceVariables($emailTpl['body_html'], $tvars);
+            }
+
+            $emailData = [
+                'to' => $q['customer_email'],
+                'subject' => $emailSubject,
+                'html' => $emailHtml,
+                'attachments' => [
+                    [
+                        'content' => $fullPdfHtml,
+                        'name' => 'Devis_' . preg_replace('/[^A-Za-z0-9_-]/', '_', $reference) . '.html',
+                    ]
+                ],
+            ];
+
+            if (!empty($eSettings['smtp_password'])) {
+                $sent = sendEmail($eSettings, $emailData);
+                logEmail($db, $emailData, $sent ? 'sent' : 'failed', 'quote_approved_pdf');
+                if ($sent) {
+                    ok(['message' => 'Email envoyé avec le PDF en pièce jointe']);
+                } else {
+                    fail('Erreur lors de l\'envoi de l\'email');
+                }
+            } else {
+                fail('Configuration SMTP manquante');
+            }
             break;
         }
 

@@ -107,7 +107,7 @@ export default function QuoteDetailPage() {
           });
         }
 
-        // When approving, also generate and open the PDF devis
+        // When approving, also generate and open the PDF devis + send via email
         if (status === 'approved') {
           try {
             const tpl = await api.getDefaultPdfTemplate('devis');
@@ -120,6 +120,19 @@ export default function QuoteDetailPage() {
             }
           } catch (pdfErr: any) {
             console.error('PDF generation error:', pdfErr);
+          }
+
+          // Send PDF as email attachment to client
+          try {
+            await api.sendQuotePdfEmail(quote.id);
+            toast({ title: 'PDF envoyé', description: 'Le devis PDF a été envoyé par email au client' });
+          } catch (pdfEmailErr: any) {
+            console.error('PDF email error:', pdfEmailErr);
+            toast({
+              title: 'Avertissement',
+              description: 'Le PDF n\'a pas pu être envoyé par email',
+              variant: 'default'
+            });
           }
         }
       }

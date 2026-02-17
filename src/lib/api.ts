@@ -824,6 +824,10 @@ export const api = {
   renderPdfHtml(templateId: number, quoteId: number) {
     return this.query('render_pdf_html', { template_id: templateId, quote_id: quoteId });
   },
+
+  sendQuotePdfEmail(quoteId: number) {
+    return this.query('send_quote_pdf_email', { quote_id: quoteId });
+  },
 };
 
 export default api;
