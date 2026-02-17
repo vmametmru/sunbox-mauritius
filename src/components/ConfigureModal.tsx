@@ -29,6 +29,7 @@ interface BOQOption {
   name: string;
   display_order: number;
   parent_id: number | null;
+  qty_editable: boolean;
   price_ht: string;
   image_url?: string | null;
 }
@@ -53,6 +54,7 @@ interface BOQFullCategory {
   id: number;
   name: string;
   is_option: boolean;
+  qty_editable: boolean;
   display_order: number;
   parent_id: number | null;
   lines: BOQFullLine[];
@@ -61,6 +63,8 @@ interface BOQFullCategory {
 // Constants for BOQ options handling
 const BOQ_OPTION_ID_OFFSET = 1000000;
 const BOQ_OPTIONS_CATEGORY_ID = -1;
+const MIN_OPTION_QTY = 1;
+const MAX_OPTION_QTY = 99;
 
 interface ConfigureModalProps {
   open: boolean;
@@ -75,6 +79,9 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
   const [boqOptions, setBOQOptions] = useState<ModelOption[]>([]);
   const [baseCategories, setBaseCategories] = useState<BOQBaseCategory[]>([]);
   const [lightbox, setLightbox] = useState<string | null>(null);
+  
+  // Option quantities for qty_editable options (keyed by option id)
+  const [optionQuantities, setOptionQuantities] = useState<Record<number, number>>({});
   
   // Pool dimensions state (for pool models) — start empty so user must enter them
   const [poolDimensions, setPoolDimensions] = useState<PoolDimensions>({
@@ -232,6 +239,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
       setErrors({});
       setSubmittedQuote(null);
       setUseLastClientInfo(false);
+      setOptionQuantities({});
     }
   }, [open, model?.id]);
   
@@ -315,6 +323,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
           option_id: opt.id,
           option_name: opt.name,
           option_price: Math.round(getOptionDisplayPrice(opt)),
+          quantity: getOptionQty(opt.id),
         })),
         // Include pool dimensions in quote if pool model
         ...(isPoolModel ? {
@@ -402,6 +411,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
             description,
             price: parseFloat(o.price_ht),
             is_active: true,
+            qty_editable: o.qty_editable || false,
           };
         })
       );
@@ -431,6 +441,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
             description,
             price: parseFloat(o.price_ht),
             is_active: true,
+            qty_editable: o.qty_editable || false,
           };
         })
       );
@@ -510,15 +521,19 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
   const isSelected = (id: number) =>
     quoteData.selectedOptions.some(o => o.id === id);
 
+  // Get the quantity multiplier for an option (1 if not qty_editable)
+  const getOptionQty = (optId: number) => optionQuantities[optId] || 1;
+
   // Local TTC calculations
   const calculateOptionsTotalTTC = () => {
     return quoteData.selectedOptions.reduce((sum, opt) => {
+      const qty = getOptionQty(opt.id);
       // For pool BOQ options, use the dynamically calculated price based on dimensions
       if (isPoolModel && opt.id >= BOQ_OPTION_ID_OFFSET) {
         const dynamicPrice = getPoolOptionPrice(opt.id);
-        return sum + calculateTTC(dynamicPrice, vatRate);
+        return sum + calculateTTC(dynamicPrice, vatRate) * qty;
       }
-      return sum + calculateTTC(Number(opt.price || 0), vatRate);
+      return sum + calculateTTC(Number(opt.price || 0), vatRate) * qty;
     }, 0);
   };
 
@@ -527,8 +542,18 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
     return base + calculateOptionsTotalTTC();
   };
 
-  // Get the display price for an option (dynamic for pool models)
+  // Get the display price for an option (dynamic for pool models), includes quantity multiplier
   const getOptionDisplayPrice = (opt: ModelOption) => {
+    const qty = getOptionQty(opt.id);
+    if (isPoolModel && opt.id >= BOQ_OPTION_ID_OFFSET) {
+      const dynamicPrice = getPoolOptionPrice(opt.id);
+      return calculateTTC(dynamicPrice, vatRate) * qty;
+    }
+    return calculateTTC(opt.price, vatRate) * qty;
+  };
+
+  // Get the unit price for an option (without quantity multiplier)
+  const getOptionUnitPrice = (opt: ModelOption) => {
     if (isPoolModel && opt.id >= BOQ_OPTION_ID_OFFSET) {
       const dynamicPrice = getPoolOptionPrice(opt.id);
       return calculateTTC(dynamicPrice, vatRate);
@@ -844,6 +869,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                         <div className="divide-y">
                           {opts.sort((a, b) => a.name.localeCompare(b.name, 'fr')).map(opt => {
                             const isSubExpanded = expandedSubOptions.includes(opt.id);
+                            const optQty = getOptionQty(opt.id);
                             return (
                               <div key={opt.id} className="px-4">
                                 {/* Sub-category name (expandable) */}
@@ -861,13 +887,33 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                                       <p className="font-medium text-sm">{opt.name}</p>
                                       <p className="text-sm text-orange-600 font-medium mt-0.5">
                                         Rs {Math.round(getOptionDisplayPrice(opt)).toLocaleString()}
+                                        {opt.qty_editable && optQty > 1 && (
+                                          <span className="text-xs text-gray-400 ml-1">
+                                            ({optQty} × Rs {Math.round(getOptionUnitPrice(opt)).toLocaleString()})
+                                          </span>
+                                        )}
                                       </p>
                                     </div>
                                   </button>
-                                  <Switch
-                                    checked={isSelected(opt.id)}
-                                    onCheckedChange={() => toggleOption(opt)}
-                                  />
+                                  <div className="flex items-center gap-2">
+                                    {opt.qty_editable && isSelected(opt.id) && (
+                                      <Input
+                                        type="number"
+                                        min={String(MIN_OPTION_QTY)}
+                                        max={String(MAX_OPTION_QTY)}
+                                        value={optQty}
+                                        onChange={(e) => {
+                                          const v = Math.max(MIN_OPTION_QTY, Math.min(MAX_OPTION_QTY, Number(e.target.value) || MIN_OPTION_QTY));
+                                          setOptionQuantities(prev => ({ ...prev, [opt.id]: v }));
+                                        }}
+                                        className="w-16 h-8 text-center text-sm"
+                                      />
+                                    )}
+                                    <Switch
+                                      checked={isSelected(opt.id)}
+                                      onCheckedChange={() => toggleOption(opt)}
+                                    />
+                                  </div>
                                 </div>
                                 {/* Expanded lines */}
                                 {isSubExpanded && opt.description && (

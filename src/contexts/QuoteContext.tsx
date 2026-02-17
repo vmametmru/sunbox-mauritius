@@ -34,6 +34,7 @@ export interface ModelOption {
   description?: string;
   price: number;
   is_active: boolean;
+  qty_editable?: boolean; // if true, user can set quantity on public configurator
 }
 
 export interface QuoteData {

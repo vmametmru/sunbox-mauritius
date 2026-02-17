@@ -95,6 +95,7 @@ interface BOQCategory {
   parent_id: number | null;
   name: string;
   is_option: boolean;
+  qty_editable: boolean;
   display_order: number;
   image_id: number | null;
   image_url: string | null;
@@ -127,6 +128,7 @@ const emptyCategory: Partial<BOQCategory> = {
   name: '',
   parent_id: null,
   is_option: false,
+  qty_editable: false,
   display_order: 0,
   image_id: null,
   image_url: null,
@@ -337,6 +339,7 @@ export default function BOQPage() {
           name: editingCategory.name!,
           parent_id: editingCategory.parent_id,
           is_option: editingCategory.is_option,
+          qty_editable: editingCategory.qty_editable,
           display_order: editingCategory.display_order,
           image_id: editingCategory.image_id,
         });
@@ -347,6 +350,7 @@ export default function BOQPage() {
           name: editingCategory.name!,
           parent_id: editingCategory.parent_id,
           is_option: editingCategory.is_option,
+          qty_editable: editingCategory.qty_editable,
           display_order: editingCategory.display_order,
           image_id: editingCategory.image_id,
         });
@@ -829,6 +833,9 @@ export default function BOQPage() {
               {category.is_option && (
                 <Badge variant="secondary">Option</Badge>
               )}
+              {category.qty_editable && (
+                <Badge variant="outline" className="text-purple-700 border-purple-300">Qté modifiable</Badge>
+              )}
               {hasSubCategories && (
                 <Badge className="bg-blue-700 hover:bg-blue-800 text-white text-xs font-semibold">
                   {subCategories.length} sous-catégorie{subCategories.length > 1 ? 's' : ''}
@@ -883,6 +890,9 @@ export default function BOQPage() {
                           <ChevronRight className="h-4 w-4 text-gray-400" />
                         )}
                         <h4 className="font-semibold text-gray-700">{subCat.name}</h4>
+                        {subCat.qty_editable && (
+                          <Badge variant="outline" className="text-purple-700 border-purple-300 text-xs">Qté modifiable</Badge>
+                        )}
                       </div>
                       <div className="flex items-center gap-4">
                         <div className="text-right text-sm">
@@ -1430,6 +1440,16 @@ export default function BOQPage() {
                   }
                 />
                 <Label>Catégorie Option (visible dans les options du configurateur)</Label>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Switch
+                  checked={editingCategory.qty_editable || false}
+                  onCheckedChange={(checked) =>
+                    setEditingCategory({ ...editingCategory, qty_editable: checked })
+                  }
+                />
+                <Label>Qté modifiable (le client peut choisir la quantité sur le configurateur)</Label>
               </div>
 
               {/* Image picker - only shown when is_option is checked */}

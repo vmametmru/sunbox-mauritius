@@ -172,6 +172,7 @@ export const api = {
     parent_id?: number | null;
     name: string;
     is_option?: boolean;
+    qty_editable?: boolean;
     display_order?: number;
     image_id?: number | null;
   }) {
@@ -183,6 +184,7 @@ export const api = {
     parent_id?: number | null;
     name: string;
     is_option?: boolean;
+    qty_editable?: boolean;
     display_order?: number;
     image_id?: number | null;
   }) {

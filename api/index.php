@@ -479,6 +479,7 @@ try {
             foreach ($categories as &$cat) {
                 $cat['id'] = (int)$cat['id'];
                 $cat['is_option'] = (bool)$cat['is_option'];
+                $cat['qty_editable'] = (bool)($cat['qty_editable'] ?? false);
                 $cat['parent_id'] = $cat['parent_id'] ? (int)$cat['parent_id'] : null;
                 $cat['total_cost_ht'] = round((float)$cat['total_cost_ht'], 2);
                 $cat['total_sale_price_ht'] = round((float)$cat['total_sale_price_ht'], 2);
@@ -494,14 +495,15 @@ try {
         case 'create_boq_category': {
             validateRequired($body, ['model_id', 'name']);
             $stmt = $db->prepare("
-                INSERT INTO boq_categories (model_id, parent_id, name, is_option, display_order, image_id)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO boq_categories (model_id, parent_id, name, is_option, qty_editable, display_order, image_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             ");
             $stmt->execute([
                 (int)$body['model_id'],
                 !empty($body['parent_id']) ? (int)$body['parent_id'] : null,
                 sanitize($body['name']),
                 (bool)($body['is_option'] ?? false),
+                (bool)($body['qty_editable'] ?? false),
                 (int)($body['display_order'] ?? 0),
                 !empty($body['image_id']) ? (int)$body['image_id'] : null,
             ]);
@@ -513,13 +515,14 @@ try {
             validateRequired($body, ['id']);
             $stmt = $db->prepare("
                 UPDATE boq_categories SET
-                    name = ?, parent_id = ?, is_option = ?, display_order = ?, image_id = ?, updated_at = NOW()
+                    name = ?, parent_id = ?, is_option = ?, qty_editable = ?, display_order = ?, image_id = ?, updated_at = NOW()
                 WHERE id = ?
             ");
             $stmt->execute([
                 sanitize($body['name']),
                 !empty($body['parent_id']) ? (int)$body['parent_id'] : null,
                 (bool)($body['is_option'] ?? false),
+                (bool)($body['qty_editable'] ?? false),
                 (int)($body['display_order'] ?? 0),
                 !empty($body['image_id']) ? (int)$body['image_id'] : null,
                 (int)$body['id'],
@@ -694,7 +697,7 @@ try {
             
             // Get all categories (both base and options) with parent_id
             $stmt = $db->prepare("
-                SELECT bc.id, bc.name, bc.is_option, bc.display_order, bc.parent_id
+                SELECT bc.id, bc.name, bc.is_option, bc.qty_editable, bc.display_order, bc.parent_id
                 FROM boq_categories bc
                 WHERE bc.model_id = ?
                 ORDER BY bc.display_order ASC, bc.name ASC
@@ -717,6 +720,7 @@ try {
             foreach ($categories as &$cat) {
                 $cat['id'] = (int)$cat['id'];
                 $cat['is_option'] = (bool)$cat['is_option'];
+                $cat['qty_editable'] = (bool)($cat['qty_editable'] ?? false);
                 $cat['parent_id'] = $cat['parent_id'] ? (int)$cat['parent_id'] : null;
                 $cat['display_order'] = (int)$cat['display_order'];
                 $lineStmt->execute([$cat['id']]);
@@ -771,7 +775,7 @@ try {
             if ($modelId <= 0) fail("model_id manquant");
             
             $stmt = $db->prepare("
-                SELECT bc.id, bc.name, bc.display_order, bc.parent_id, mi.file_path as image_path,
+                SELECT bc.id, bc.name, bc.display_order, bc.parent_id, bc.qty_editable, mi.file_path as image_path,
                     COALESCE(SUM(ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS price_ht
                 FROM boq_categories bc
                 LEFT JOIN boq_lines bl ON bc.id = bl.category_id
@@ -787,6 +791,7 @@ try {
                 $opt['id'] = (int)$opt['id'];
                 $opt['parent_id'] = $opt['parent_id'] ? (int)$opt['parent_id'] : null;
                 $opt['display_order'] = (int)$opt['display_order'];
+                $opt['qty_editable'] = (bool)($opt['qty_editable'] ?? false);
                 $opt['image_url'] = $opt['image_path'] ? '/' . ltrim($opt['image_path'], '/') : null;
                 unset($opt['image_path']);
             }
