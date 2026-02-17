@@ -20,6 +20,7 @@ interface BOQBaseCategory {
   id: number;
   name: string;
   display_order: number;
+  parent_id: number | null;
   lines: BOQLine[];
 }
 
@@ -27,6 +28,8 @@ interface BOQOption {
   id: number;
   name: string;
   display_order: number;
+  parent_id: number | null;
+  qty_editable: boolean;
   price_ht: string;
   image_url?: string | null;
 }
@@ -51,6 +54,7 @@ interface BOQFullCategory {
   id: number;
   name: string;
   is_option: boolean;
+  qty_editable: boolean;
   display_order: number;
   parent_id: number | null;
   lines: BOQFullLine[];
@@ -59,6 +63,8 @@ interface BOQFullCategory {
 // Constants for BOQ options handling
 const BOQ_OPTION_ID_OFFSET = 1000000;
 const BOQ_OPTIONS_CATEGORY_ID = -1;
+const MIN_OPTION_QTY = 1;
+const MAX_OPTION_QTY = 99;
 
 interface ConfigureModalProps {
   open: boolean;
@@ -68,19 +74,24 @@ interface ConfigureModalProps {
 const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
   const { quoteData, toggleOption, setCustomerDetails, resetQuote } = useQuote();
   const [expandedCategories, setExpandedCategories] = useState<string[]>([]);
+  const [expandedSubOptions, setExpandedSubOptions] = useState<number[]>([]);
   const [options, setOptions] = useState<ModelOption[]>([]);
   const [boqOptions, setBOQOptions] = useState<ModelOption[]>([]);
   const [baseCategories, setBaseCategories] = useState<BOQBaseCategory[]>([]);
   const [lightbox, setLightbox] = useState<string | null>(null);
   
-  // Pool dimensions state (for pool models)
+  // Option quantities for qty_editable options (keyed by option id)
+  const [optionQuantities, setOptionQuantities] = useState<Record<number, number>>({});
+  
+  // Pool dimensions state (for pool models) — start empty so user must enter them
   const [poolDimensions, setPoolDimensions] = useState<PoolDimensions>({
-    longueur: 8,
-    largeur: 4,
-    profondeur: 1.5,
+    longueur: 0,
+    largeur: 0,
+    profondeur: 0,
   });
   const [poolVariables, setPoolVariables] = useState<PoolVariable[]>([]);
   const [boqFullCategories, setBOQFullCategories] = useState<BOQFullCategory[]>([]);
+  const [isLoadingPoolData, setIsLoadingPoolData] = useState(false);
   
   // Multi-step state
   const [step, setStep] = useState<'options' | 'details' | 'confirmation'>('options');
@@ -104,9 +115,18 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
   const model = quoteData.model;
   const isPoolModel = model?.type === 'pool';
 
+  // All 3 dimensions must be filled before we show prices / options
+  const poolDimensionsReady = isPoolModel
+    && poolDimensions.longueur > 0
+    && poolDimensions.largeur > 0
+    && poolDimensions.profondeur > 0;
+
+  // True while we have dimensions but BOQ data hasn't loaded yet
+  const isCalculatingPrice = isPoolModel && poolDimensionsReady && isLoadingPoolData;
+
   // Compute pool variable context (surface_m2, volume_m3, etc.) from dimensions
   const poolVarContext = useMemo(() => {
-    if (!isPoolModel || poolVariables.length === 0) return {};
+    if (!isPoolModel) return {};
     return evaluatePoolVariables(poolDimensions, poolVariables);
   }, [isPoolModel, poolDimensions, poolVariables]);
 
@@ -115,21 +135,21 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
     if (!isPoolModel || boqFullCategories.length === 0) return 0;
     
     // Sum up sale prices for all non-option categories (base categories)
-    const baseCategories = boqFullCategories.filter(c => !c.is_option);
+    const baseCats = boqFullCategories.filter(c => !c.is_option);
     let totalSaleHT = 0;
     
-    for (const cat of baseCategories) {
+    for (const cat of baseCats) {
       for (const line of cat.lines) {
         const qty = line.quantity_formula
           ? evaluateFormula(line.quantity_formula, poolVarContext)
-          : line.quantity;
+          : Number(line.quantity);
         const unitCost = line.unit_cost_formula
           ? evaluateFormula(line.unit_cost_formula, poolVarContext)
-          : (line.price_list_id && line.price_list_unit_price
+          : (line.price_list_id && line.price_list_unit_price != null
             ? Number(line.price_list_unit_price)
-            : line.unit_cost_ht);
+            : Number(line.unit_cost_ht));
         const lineCost = qty * unitCost;
-        totalSaleHT += lineCost * (1 + line.margin_percent / 100);
+        totalSaleHT += lineCost * (1 + Number(line.margin_percent) / 100);
       }
     }
     
@@ -148,14 +168,14 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
       for (const line of cat.lines) {
         const qty = line.quantity_formula
           ? evaluateFormula(line.quantity_formula, poolVarContext)
-          : line.quantity;
+          : Number(line.quantity);
         const unitCost = line.unit_cost_formula
           ? evaluateFormula(line.unit_cost_formula, poolVarContext)
-          : (line.price_list_id && line.price_list_unit_price
+          : (line.price_list_id && line.price_list_unit_price != null
             ? Number(line.price_list_unit_price)
-            : line.unit_cost_ht);
+            : Number(line.unit_cost_ht));
         const lineCost = qty * unitCost;
-        totalSaleHT += lineCost * (1 + line.margin_percent / 100);
+        totalSaleHT += lineCost * (1 + Number(line.margin_percent) / 100);
       }
       prices[cat.id] = totalSaleHT;
     }
@@ -211,12 +231,15 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
       // Load pool-specific data for pool models
       if (model.type === 'pool') {
         loadPoolData(model.id);
+        // Reset dimensions so the user must enter them
+        setPoolDimensions({ longueur: 0, largeur: 0, profondeur: 0 });
       }
       // Reset to first step when opening
       setStep('options');
       setErrors({});
       setSubmittedQuote(null);
       setUseLastClientInfo(false);
+      setOptionQuantities({});
     }
   }, [open, model?.id]);
   
@@ -300,6 +323,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
           option_id: opt.id,
           option_name: opt.name,
           option_price: Math.round(getOptionDisplayPrice(opt)),
+          quantity: getOptionQty(opt.id),
         })),
         // Include pool dimensions in quote if pool model
         ...(isPoolModel ? {
@@ -354,12 +378,20 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
   const loadBOQOptions = async () => {
     if (!model?.id) return;
     try {
-      const data = await api.getBOQOptions(model.id);
-      // Map BOQ options to ModelOption format with offset ID to avoid conflicts
-      // Also fetch lines for each option category to build the description
+      const data: BOQOption[] = await api.getBOQOptions(model.id);
+      
+      // Separate parent categories (no parent_id) and sub-categories
+      const parentOptions = data.filter(o => !o.parent_id);
+      const childOptions = data.filter(o => o.parent_id);
+      
+      // Build mapped options: sub-categories become selectable options, grouped under parent name
       const mapped: ModelOption[] = await Promise.all(
-        data.map(async (o: BOQOption) => {
-          // Fetch lines for this option category
+        childOptions.map(async (o: BOQOption) => {
+          // Find parent category name
+          const parent = parentOptions.find(p => p.id === o.parent_id);
+          const parentName = parent ? parent.name : 'Options';
+          
+          // Fetch lines for this option sub-category
           let description = '';
           try {
             const lines = await api.getBOQCategoryLines(o.id);
@@ -373,16 +405,48 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
             id: Number(o.id) + BOQ_OPTION_ID_OFFSET,
             model_id: model.id,
             category_id: BOQ_OPTIONS_CATEGORY_ID,
-            category_name: o.name, // Use BOQ option name as category name for proper grouping
-            category_image_url: o.image_url || null, // Include category image URL
+            category_name: parentName, // Group under parent category name
+            category_image_url: o.image_url || null,
             name: o.name,
             description,
             price: parseFloat(o.price_ht),
             is_active: true,
+            qty_editable: o.qty_editable || false,
           };
         })
       );
-      setBOQOptions(mapped);
+      
+      // If there are parent options with no children (leaf categories), include them directly
+      const parentIdsWithChildren = new Set(childOptions.map(c => c.parent_id).filter(Boolean));
+      const leafParents = parentOptions.filter(p => !parentIdsWithChildren.has(p.id));
+      
+      const leafMapped: ModelOption[] = await Promise.all(
+        leafParents.map(async (o: BOQOption) => {
+          let description = '';
+          try {
+            const lines = await api.getBOQCategoryLines(o.id);
+            if (lines && lines.length > 0) {
+              description = lines.map((line: BOQLine) => `• ${line.description}`).join('\n');
+            }
+          } catch (e) {
+            console.error('Error loading BOQ lines for option', o.id, e);
+          }
+          return {
+            id: Number(o.id) + BOQ_OPTION_ID_OFFSET,
+            model_id: model.id,
+            category_id: BOQ_OPTIONS_CATEGORY_ID,
+            category_name: o.name,
+            category_image_url: o.image_url || null,
+            name: o.name,
+            description,
+            price: parseFloat(o.price_ht),
+            is_active: true,
+            qty_editable: o.qty_editable || false,
+          };
+        })
+      );
+      
+      setBOQOptions([...mapped, ...leafMapped]);
     } catch (err) {
       console.error(err);
     }
@@ -399,6 +463,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
 
   // Load pool-specific data (variables + full BOQ with formulas)
   const loadPoolData = async (modelId: number) => {
+    setIsLoadingPoolData(true);
     try {
       const [variables, fullCategories] = await Promise.all([
         api.getPoolBOQVariables(),
@@ -408,13 +473,18 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
       setBOQFullCategories(fullCategories);
     } catch (err) {
       console.error('Error loading pool data:', err);
+    } finally {
+      setIsLoadingPoolData(false);
     }
   };
 
   // Get the effective base price: for pool models use calculated price, otherwise use model base_price
   const getEffectiveBasePrice = () => {
     if (isPoolModel && boqFullCategories.length > 0) {
-      return calculateTTC(poolBasePrice, vatRate);
+      // Apply unforeseen cost percentage to the base HT price
+      const unforeseen = Number(model?.unforeseen_cost_percent ?? 10);
+      const basePriceHTWithUnforeseen = poolBasePrice * (1 + unforeseen / 100);
+      return calculateTTC(basePriceHTWithUnforeseen, vatRate);
     }
     return Number(model?.base_price ?? 0);
   };
@@ -431,6 +501,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
 
   const groupedOptions = allOptions
     .filter(opt => opt.is_active)
+    .sort((a, b) => (a.category_name || '').localeCompare(b.category_name || '', 'fr') || a.name.localeCompare(b.name, 'fr'))
     .reduce((acc, opt) => {
       const category = opt.category_name || 'Autres';
       if (!acc[category]) acc[category] = [];
@@ -444,18 +515,28 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
     );
   };
 
+  const toggleSubOption = (optId: number) => {
+    setExpandedSubOptions(prev =>
+      prev.includes(optId) ? prev.filter(id => id !== optId) : [...prev, optId]
+    );
+  };
+
   const isSelected = (id: number) =>
     quoteData.selectedOptions.some(o => o.id === id);
+
+  // Get the quantity multiplier for an option (1 if not qty_editable)
+  const getOptionQty = (optId: number) => optionQuantities[optId] || 1;
 
   // Local TTC calculations
   const calculateOptionsTotalTTC = () => {
     return quoteData.selectedOptions.reduce((sum, opt) => {
+      const qty = getOptionQty(opt.id);
       // For pool BOQ options, use the dynamically calculated price based on dimensions
       if (isPoolModel && opt.id >= BOQ_OPTION_ID_OFFSET) {
         const dynamicPrice = getPoolOptionPrice(opt.id);
-        return sum + calculateTTC(dynamicPrice, vatRate);
+        return sum + calculateTTC(dynamicPrice, vatRate) * qty;
       }
-      return sum + calculateTTC(Number(opt.price || 0), vatRate);
+      return sum + calculateTTC(Number(opt.price || 0), vatRate) * qty;
     }, 0);
   };
 
@@ -464,8 +545,18 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
     return base + calculateOptionsTotalTTC();
   };
 
-  // Get the display price for an option (dynamic for pool models)
+  // Get the display price for an option (dynamic for pool models), includes quantity multiplier
   const getOptionDisplayPrice = (opt: ModelOption) => {
+    const qty = getOptionQty(opt.id);
+    if (isPoolModel && opt.id >= BOQ_OPTION_ID_OFFSET) {
+      const dynamicPrice = getPoolOptionPrice(opt.id);
+      return calculateTTC(dynamicPrice, vatRate) * qty;
+    }
+    return calculateTTC(opt.price, vatRate) * qty;
+  };
+
+  // Get the unit price for an option (without quantity multiplier)
+  const getOptionUnitPrice = (opt: ModelOption) => {
     if (isPoolModel && opt.id >= BOQ_OPTION_ID_OFFSET) {
       const dynamicPrice = getPoolOptionPrice(opt.id);
       return calculateTTC(dynamicPrice, vatRate);
@@ -566,6 +657,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                     <Ruler className="w-4 h-4" />
                     Dimensions de votre piscine
                   </h3>
+                  <p className="text-xs text-blue-600 mb-3">Veuillez saisir les 3 dimensions pour voir le prix estimé.</p>
                   <div className="grid grid-cols-3 gap-4">
                     <div>
                       <label className="block text-xs font-medium text-blue-700 mb-1">Longueur (m)</label>
@@ -574,10 +666,11 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                         step="0.5"
                         min="2"
                         max="20"
-                        value={poolDimensions.longueur}
+                        value={poolDimensions.longueur || ''}
+                        placeholder="ex: 8"
                         onChange={(e) => {
                           const v = Number(e.target.value);
-                          if (v > 0) setPoolDimensions(prev => ({ ...prev, longueur: v }));
+                          setPoolDimensions(prev => ({ ...prev, longueur: v >= 0 ? v : 0 }));
                         }}
                         className="h-9 text-sm bg-white"
                       />
@@ -589,10 +682,11 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                         step="0.5"
                         min="1"
                         max="15"
-                        value={poolDimensions.largeur}
+                        value={poolDimensions.largeur || ''}
+                        placeholder="ex: 4"
                         onChange={(e) => {
                           const v = Number(e.target.value);
-                          if (v > 0) setPoolDimensions(prev => ({ ...prev, largeur: v }));
+                          setPoolDimensions(prev => ({ ...prev, largeur: v >= 0 ? v : 0 }));
                         }}
                         className="h-9 text-sm bg-white"
                       />
@@ -604,27 +698,50 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                         step="0.1"
                         min="0.5"
                         max="3"
-                        value={poolDimensions.profondeur}
+                        value={poolDimensions.profondeur || ''}
+                        placeholder="ex: 1.5"
                         onChange={(e) => {
                           const v = Number(e.target.value);
-                          if (v > 0) setPoolDimensions(prev => ({ ...prev, profondeur: v }));
+                          setPoolDimensions(prev => ({ ...prev, profondeur: v >= 0 ? v : 0 }));
                         }}
                         className="h-9 text-sm bg-white"
                       />
                     </div>
                   </div>
-                  {(() => {
-                    const surface = poolDimensions.longueur * poolDimensions.largeur;
-                    return (
-                      <p className="text-xs text-blue-600 mt-2">
-                        Surface : {surface.toFixed(1)} m² • 
-                        Volume : {(surface * poolDimensions.profondeur).toFixed(1)} m³
-                      </p>
-                    );
-                  })()}
+                  {poolDimensionsReady && (
+                    (() => {
+                      const surface = poolDimensions.longueur * poolDimensions.largeur;
+                      return (
+                        <p className="text-xs text-blue-600 mt-2">
+                          Surface : {surface.toFixed(1)} m² • 
+                          Volume : {(surface * poolDimensions.profondeur).toFixed(1)} m³
+                        </p>
+                      );
+                    })()
+                  )}
                 </div>
               )}
 
+              {/* For pool models: show calculating indicator or hide sections until dimensions are ready */}
+              {isPoolModel && !poolDimensionsReady && (
+                <div className="bg-yellow-50 border border-yellow-200 p-4 rounded text-center">
+                  <p className="text-sm text-yellow-700">
+                    Renseignez les 3 dimensions ci-dessus pour voir le prix estimé et les options disponibles.
+                  </p>
+                </div>
+              )}
+
+              {isPoolModel && poolDimensionsReady && isCalculatingPrice && (
+                <div className="bg-blue-50 border border-blue-200 p-6 rounded text-center">
+                  <Loader2 className="w-6 h-6 animate-spin text-blue-600 mx-auto mb-2" />
+                  <p className="text-sm font-medium text-blue-700">Calculs en cours…</p>
+                  <p className="text-xs text-blue-500 mt-1">Estimation du prix en fonction de vos dimensions</p>
+                </div>
+              )}
+
+              {/* Show content when: not a pool model OR (pool with dimensions ready and not loading) */}
+              {(!isPoolModel || (poolDimensionsReady && !isCalculatingPrice)) && (
+                <>
               {/* INCLUS DANS LE PRIX DE BASE */}
               {baseCategories.length > 0 && (
                 <div className="bg-green-50 border border-green-200 p-4 rounded">
@@ -632,25 +749,62 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                     <Check className="w-4 h-4" />
                     Inclus dans le prix de base
                   </h3>
-                  <div className="columns-1 md:columns-2 gap-4">
-                    {baseCategories.map(cat => (
-                      <div key={cat.id} className="inline-block w-full mb-2 break-inside-avoid">
-                        <span className="font-medium text-green-700 text-sm">{cat.name}</span>
-                        {cat.lines.length > 0 && (
-                          <>
-                            <span className="text-gray-600 text-xs">: </span>
-                            <span className="text-xs text-gray-600">
-                              {cat.lines.map((line, idx) => (
-                                <React.Fragment key={line.id}>
-                                  {line.description}
-                                  {idx < cat.lines.length - 1 && ', '}
-                                </React.Fragment>
-                              ))}
-                            </span>
-                          </>
-                        )}
-                      </div>
-                    ))}
+                  <div className="space-y-3">
+                    {/* Parent categories (no parent_id), sorted alphabetically */}
+                    {baseCategories
+                      .filter(c => !c.parent_id)
+                      .sort((a, b) => a.name.localeCompare(b.name, 'fr'))
+                      .map(parentCat => {
+                      const subCats = baseCategories
+                        .filter(c => c.parent_id === parentCat.id)
+                        .sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+                      const sortedParentLines = [...parentCat.lines].sort((a, b) => a.description.localeCompare(b.description, 'fr'));
+                      return (
+                        <div key={parentCat.id}>
+                          <p className="font-semibold text-green-800 text-sm mb-1">{parentCat.name}</p>
+                          {subCats.length > 0 ? (
+                            <div className="pl-4 space-y-1">
+                              {subCats.map(subCat => {
+                                const sortedLines = [...subCat.lines].sort((a, b) => a.description.localeCompare(b.description, 'fr'));
+                                return (
+                                  <div key={subCat.id} className="flex items-start gap-1">
+                                    <span className="text-green-600 text-xs mt-0.5">–</span>
+                                    <div>
+                                      <span className="font-medium text-green-700 text-xs">{subCat.name}</span>
+                                      {sortedLines.length > 0 && (
+                                        <span className="text-xs text-gray-500">
+                                          {' ('}
+                                          {sortedLines.map((line, idx) => (
+                                            <React.Fragment key={line.id}>
+                                              {line.description}
+                                              {idx < sortedLines.length - 1 && ', '}
+                                            </React.Fragment>
+                                          ))}
+                                          {')'}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            sortedParentLines.length > 0 && (
+                              <div className="pl-4">
+                                <span className="text-xs text-gray-500">
+                                  {sortedParentLines.map((line, idx) => (
+                                    <React.Fragment key={line.id}>
+                                      {line.description}
+                                      {idx < sortedParentLines.length - 1 && ', '}
+                                    </React.Fragment>
+                                  ))}
+                                </span>
+                              </div>
+                            )
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -682,13 +836,15 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                 <h3 className="text-lg font-semibold text-gray-800">OPTIONS DISPONIBLES :</h3>
               )}
 
-              {/* Options */}
-              {Object.entries(groupedOptions).map(([category, opts]) => {
+              {/* Options — Category → Sub-category (expandable with lines) → Switch */}
+              {Object.entries(groupedOptions)
+                .sort(([a], [b]) => a.localeCompare(b, 'fr'))
+                .map(([category, opts]) => {
                 const isOpen = expandedCategories.includes(category);
-                const categoryDescription = opts[0]?.category_description;
                 const categoryImageUrl = opts[0]?.category_image_url;
                 return (
                   <div key={category} className="border rounded bg-white">
+                    {/* Parent category header */}
                     <button
                       className="w-full flex justify-between items-center px-4 py-3 font-semibold border-b hover:bg-gray-50"
                       onClick={() => toggleCategory(category)}
@@ -701,48 +857,80 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                       )}
                     </button>
                     {isOpen && (
-                      <div className="divide-y">
-                        {categoryDescription && (
-                          <div className="px-4 py-3 bg-gray-50 text-sm text-gray-600 whitespace-pre-line">
-                            {categoryDescription}
+                      <div>
+                        {/* Category Image */}
+                        {categoryImageUrl && (
+                          <div className="px-4 py-3 border-b bg-gray-50 flex justify-center">
+                            <img 
+                              src={categoryImageUrl} 
+                              alt={category}
+                              className="w-[100px] h-[100px] object-cover rounded"
+                            />
                           </div>
                         )}
-                        <div className="flex">
-                          {/* Category Image */}
-                          {categoryImageUrl && (
-                            <div className="flex-shrink-0 p-4 border-r">
-                              <img 
-                                src={categoryImageUrl} 
-                                alt={category}
-                                className="w-[100px] h-[100px] object-cover rounded"
-                              />
-                            </div>
-                          )}
-                          {/* Options List */}
-                          <div className="flex-1 divide-y">
-                            {opts.map(opt => (
-                              <label
-                                key={opt.id}
-                                className="flex justify-between items-center px-4 py-3 hover:bg-gray-50 cursor-pointer"
-                              >
-                                <div className="flex-1 mr-4">
-                                  <p className="font-medium">{opt.name}</p>
-                                  {opt.description && (
-                                    <p className="text-sm text-gray-500 whitespace-pre-line mt-1">
-                                      {opt.description}
-                                    </p>
-                                  )}
-                                  <p className={`text-sm text-orange-600 font-medium ${opt.description ? 'mt-2' : 'mt-1'}`}>
-                                    Rs {Math.round(getOptionDisplayPrice(opt)).toLocaleString()}
-                                  </p>
+                        {/* Sub-category options */}
+                        <div className="divide-y">
+                          {opts.sort((a, b) => a.name.localeCompare(b.name, 'fr')).map(opt => {
+                            const isSubExpanded = expandedSubOptions.includes(opt.id);
+                            const optQty = getOptionQty(opt.id);
+                            return (
+                              <div key={opt.id} className="px-4">
+                                {/* Sub-category name (expandable) */}
+                                <div className="flex justify-between items-center py-3">
+                                  <button
+                                    className="flex items-center gap-2 text-left flex-1 mr-4"
+                                    onClick={() => toggleSubOption(opt.id)}
+                                  >
+                                    {isSubExpanded ? (
+                                      <ChevronUp className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                                    ) : (
+                                      <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                                    )}
+                                    <div>
+                                      <p className="font-medium text-sm">{opt.name}</p>
+                                      <p className="text-sm text-orange-600 font-medium mt-0.5">
+                                        Rs {Math.round(getOptionDisplayPrice(opt)).toLocaleString()}
+                                        {opt.qty_editable && optQty > 1 && (
+                                          <span className="text-xs text-gray-400 ml-1">
+                                            ({optQty} × Rs {Math.round(getOptionUnitPrice(opt)).toLocaleString()})
+                                          </span>
+                                        )}
+                                      </p>
+                                    </div>
+                                  </button>
+                                  <div className="flex items-center gap-2">
+                                    {opt.qty_editable && isSelected(opt.id) && (
+                                      <Input
+                                        type="number"
+                                        min={String(MIN_OPTION_QTY)}
+                                        max={String(MAX_OPTION_QTY)}
+                                        value={optQty}
+                                        onChange={(e) => {
+                                          const v = Math.max(MIN_OPTION_QTY, Math.min(MAX_OPTION_QTY, Number(e.target.value) || MIN_OPTION_QTY));
+                                          setOptionQuantities(prev => ({ ...prev, [opt.id]: v }));
+                                        }}
+                                        className="w-16 h-8 text-center text-sm"
+                                      />
+                                    )}
+                                    <Switch
+                                      checked={isSelected(opt.id)}
+                                      onCheckedChange={() => toggleOption(opt)}
+                                    />
+                                  </div>
                                 </div>
-                                <Switch
-                                  checked={isSelected(opt.id)}
-                                  onCheckedChange={() => toggleOption(opt)}
-                                />
-                              </label>
-                            ))}
-                          </div>
+                                {/* Expanded lines */}
+                                {isSubExpanded && opt.description && (
+                                  <div className="pl-8 pb-3">
+                                    <div className="text-xs text-gray-500 space-y-0.5">
+                                      {opt.description.split('\n').sort((a, b) => a.localeCompare(b, 'fr')).map((line, idx) => (
+                                        <p key={idx}>{line}</p>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     )}
@@ -760,6 +948,8 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                   <ArrowRight className="w-4 h-4 ml-2" />
                 </Button>
               </div>
+                </>
+              )}
             </>
           )}
 

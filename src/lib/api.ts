@@ -41,6 +41,7 @@ export const api = {
     type: 'container' | 'pool';
     description?: string;
     base_price: number;
+    unforeseen_cost_percent?: number;
     surface_m2: number;
     bedrooms?: number;
     bathrooms?: number;
@@ -61,6 +62,7 @@ export const api = {
     type?: 'container' | 'pool';
     description?: string;
     base_price?: number;
+    unforeseen_cost_percent?: number;
     surface_m2?: number;
     bedrooms?: number;
     bathrooms?: number;
@@ -172,6 +174,7 @@ export const api = {
     parent_id?: number | null;
     name: string;
     is_option?: boolean;
+    qty_editable?: boolean;
     display_order?: number;
     image_id?: number | null;
   }) {
@@ -183,6 +186,7 @@ export const api = {
     parent_id?: number | null;
     name: string;
     is_option?: boolean;
+    qty_editable?: boolean;
     display_order?: number;
     image_id?: number | null;
   }) {

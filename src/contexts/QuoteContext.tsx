@@ -10,6 +10,7 @@ export interface Model {
   type: 'container' | 'pool';
   description: string;
   base_price: number;
+  unforeseen_cost_percent?: number;
   calculated_base_price?: number; // BOQ-calculated price if available
   price_source?: 'boq' | 'manual';
   surface_m2: number;
@@ -34,6 +35,7 @@ export interface ModelOption {
   description?: string;
   price: number;
   is_active: boolean;
+  qty_editable?: boolean; // if true, user can set quantity on public configurator
 }
 
 export interface QuoteData {

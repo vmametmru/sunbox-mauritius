@@ -16,7 +16,8 @@ import {
   DollarSign,
   TrendingUp,
   Receipt,
-  RotateCcw
+  RotateCcw,
+  AlertTriangle
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -70,6 +71,7 @@ interface Model {
   name: string;
   type: 'container' | 'pool';
   base_price: number;
+  unforeseen_cost_percent: number;
 }
 
 interface Supplier {
@@ -95,6 +97,7 @@ interface BOQCategory {
   parent_id: number | null;
   name: string;
   is_option: boolean;
+  qty_editable: boolean;
   display_order: number;
   image_id: number | null;
   image_url: string | null;
@@ -127,6 +130,7 @@ const emptyCategory: Partial<BOQCategory> = {
   name: '',
   parent_id: null,
   is_option: false,
+  qty_editable: false,
   display_order: 0,
   image_id: null,
   image_url: null,
@@ -188,6 +192,9 @@ export default function BOQPage() {
   const [poolVariables, setPoolVariables] = useState<PoolVariable[]>([]);
   const [priceListItems, setPriceListItems] = useState<PriceListItem[]>([]);
 
+  // Unforeseen cost percent (editable, synced with model)
+  const [unforeseenPercent, setUnforeseenPercent] = useState<number>(10);
+
   const selectedModel = models.find(m => m.id === selectedModelId);
   const isPoolModel = selectedModel?.type === 'pool';
 
@@ -210,6 +217,9 @@ export default function BOQPage() {
       setCategories([]);
       setExpandedCategories([]);
       setCategoryLines({});
+      // Sync unforeseen cost percent from model
+      const m = models.find(model => model.id === selectedModelId);
+      setUnforeseenPercent(m?.unforeseen_cost_percent ?? 10);
       let cancelled = false;
       (async () => {
         try {
@@ -337,6 +347,7 @@ export default function BOQPage() {
           name: editingCategory.name!,
           parent_id: editingCategory.parent_id,
           is_option: editingCategory.is_option,
+          qty_editable: editingCategory.qty_editable,
           display_order: editingCategory.display_order,
           image_id: editingCategory.image_id,
         });
@@ -347,6 +358,7 @@ export default function BOQPage() {
           name: editingCategory.name!,
           parent_id: editingCategory.parent_id,
           is_option: editingCategory.is_option,
+          qty_editable: editingCategory.qty_editable,
           display_order: editingCategory.display_order,
           image_id: editingCategory.image_id,
         });
@@ -675,6 +687,11 @@ export default function BOQPage() {
   const totalBaseProfitHT = totalBasePriceHT - totalBaseCostHT;
   const totalBasePriceTTC = calculateTTC(totalBasePriceHT, vatRate);
 
+  // Unforeseen cost amounts (applied to base HT price)
+  const unforeseenAmountHT = totalBasePriceHT * (unforeseenPercent / 100);
+  const totalBasePriceHTWithUnforeseen = totalBasePriceHT + unforeseenAmountHT;
+  const totalBasePriceTTCWithUnforeseen = calculateTTC(totalBasePriceHTWithUnforeseen, vatRate);
+
   // Options
   const allOptionCategories = categories.filter(c => c.is_option);
   
@@ -689,6 +706,18 @@ export default function BOQPage() {
 
   const formatPrice = (price: number) => `Rs ${price.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 
+  // Save unforeseen cost percent to model
+  const saveUnforeseenPercent = async (value: number) => {
+    if (!selectedModelId) return;
+    try {
+      await api.updateModel({ id: selectedModelId, unforeseen_cost_percent: value });
+      // Update local models state
+      setModels(prev => prev.map(m => m.id === selectedModelId ? { ...m, unforeseen_cost_percent: value } : m));
+      toast({ title: 'Succès', description: 'Coût inconnu mis à jour' });
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    }
+  };
   /* ======================================================
      RENDER LINES TABLE
   ====================================================== */
@@ -829,6 +858,9 @@ export default function BOQPage() {
               {category.is_option && (
                 <Badge variant="secondary">Option</Badge>
               )}
+              {category.qty_editable && (
+                <Badge variant="outline" className="text-purple-700 border-purple-300">Qté modifiable</Badge>
+              )}
               {hasSubCategories && (
                 <Badge className="bg-blue-700 hover:bg-blue-800 text-white text-xs font-semibold">
                   {subCategories.length} sous-catégorie{subCategories.length > 1 ? 's' : ''}
@@ -883,6 +915,9 @@ export default function BOQPage() {
                           <ChevronRight className="h-4 w-4 text-gray-400" />
                         )}
                         <h4 className="font-semibold text-gray-700">{subCat.name}</h4>
+                        {subCat.qty_editable && (
+                          <Badge variant="outline" className="text-purple-700 border-purple-300 text-xs">Qté modifiable</Badge>
+                        )}
                       </div>
                       <div className="flex items-center gap-4">
                         <div className="text-right text-sm">
@@ -1139,7 +1174,8 @@ export default function BOQPage() {
                     </div>
                     <div>
                       <p className="text-xs text-gray-500 font-medium">Prix Total HT</p>
-                      <p className="text-2xl font-bold text-orange-600">{formatPrice(totalBasePriceHT + totalOptionsPriceHT)}</p>
+                      <p className="text-2xl font-bold text-orange-600">{formatPrice(totalBasePriceHTWithUnforeseen + totalOptionsPriceHT)}</p>
+                      {unforeseenPercent > 0 && <p className="text-xs text-amber-600">incl. {unforeseenPercent}% coût inconnu</p>}
                     </div>
                   </div>
                 </CardContent>
@@ -1153,7 +1189,8 @@ export default function BOQPage() {
                     </div>
                     <div>
                       <p className="text-xs text-gray-500 font-medium">Prix Total TTC</p>
-                      <p className="text-2xl font-bold text-blue-700">{formatPrice(totalBasePriceTTC + totalOptionsPriceTTC)}</p>
+                      <p className="text-2xl font-bold text-blue-700">{formatPrice(totalBasePriceTTCWithUnforeseen + totalOptionsPriceTTC)}</p>
+                      {unforeseenPercent > 0 && <p className="text-xs text-amber-600">incl. {unforeseenPercent}% coût inconnu</p>}
                     </div>
                   </div>
                 </CardContent>
@@ -1231,6 +1268,59 @@ export default function BOQPage() {
               </CardContent>
             </Card>
           </div>
+
+          {/* Unforeseen cost (Coût Inconnu) */}
+          {totalBasePriceHT > 0 && (
+            <Card className="border-amber-300 bg-amber-50">
+              <CardContent className="p-4">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                  <div className="flex items-center gap-3 flex-1">
+                    <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center flex-shrink-0">
+                      <AlertTriangle className="h-5 w-5 text-amber-600" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-amber-800">Coût Inconnu (Unforeseen Cost)</p>
+                      <p className="text-xs text-amber-600">Pourcentage appliqué au prix de vente HT de base</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.5"
+                      value={unforeseenPercent}
+                      onChange={(e) => setUnforeseenPercent(e.target.value === '' ? 0 : Number(e.target.value))}
+                      className="w-20 text-center font-bold text-amber-800"
+                    />
+                    <span className="text-sm font-semibold text-amber-700">%</span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="border-amber-400 text-amber-700 hover:bg-amber-100"
+                      onClick={() => saveUnforeseenPercent(unforeseenPercent)}
+                    >
+                      Sauver
+                    </Button>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs text-amber-600">Montant HT</p>
+                    <p className="text-lg font-bold text-amber-700">+ {formatPrice(unforeseenAmountHT)}</p>
+                  </div>
+                </div>
+                <div className="mt-3 pt-3 border-t border-amber-300 grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-xs text-amber-600">Prix Vente HT avec Coût Inconnu</p>
+                    <p className="text-xl font-bold text-amber-800">{formatPrice(totalBasePriceHTWithUnforeseen)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-amber-600">Prix Vente TTC avec Coût Inconnu</p>
+                    <p className="text-xl font-bold text-amber-800">{formatPrice(totalBasePriceTTCWithUnforeseen)}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Base categories list */}
           {isPoolModel && baseCategories.length > 0 && (
@@ -1430,6 +1520,16 @@ export default function BOQPage() {
                   }
                 />
                 <Label>Catégorie Option (visible dans les options du configurateur)</Label>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Switch
+                  checked={editingCategory.qty_editable || false}
+                  onCheckedChange={(checked) =>
+                    setEditingCategory({ ...editingCategory, qty_editable: checked })
+                  }
+                />
+                <Label>Qté modifiable (le client peut choisir la quantité sur le configurateur)</Label>
               </div>
 
               {/* Image picker - only shown when is_option is checked */}

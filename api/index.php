@@ -151,15 +151,17 @@ try {
                     $m['image_url'] = '/' . ltrim($m['image_url'], '/');
                 }
                 $m['has_overflow'] = (bool)$m['has_overflow'];
+                $m['unforeseen_cost_percent'] = (float)($m['unforeseen_cost_percent'] ?? 10);
                 
                 // Calculate BOQ price if requested
                 if ($includeBOQPrice) {
                     $boqStmt = $db->prepare("
                         SELECT 
-                            COALESCE(SUM(ROUND(bl.quantity * bl.unit_cost_ht * (1 + bl.margin_percent / 100), 2)), 0) AS boq_base_price_ht,
-                            COALESCE(SUM(ROUND(bl.quantity * bl.unit_cost_ht, 2)), 0) AS boq_cost_ht
+                            COALESCE(SUM(ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS boq_base_price_ht,
+                            COALESCE(SUM(ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht), 2)), 0) AS boq_cost_ht
                         FROM boq_categories bc
                         LEFT JOIN boq_lines bl ON bc.id = bl.category_id
+                        LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
                         WHERE bc.model_id = ? AND bc.is_option = FALSE
                     ");
                     $boqStmt->execute([$m['id']]);
@@ -169,9 +171,12 @@ try {
                     $m['boq_base_price_ht'] = $boqPrice;
                     $m['boq_cost_ht'] = (float)($boqResult['boq_cost_ht'] ?? 0);
                     
+                    // Apply unforeseen cost percentage to BOQ price
+                    $unforeseen = (float)$m['unforeseen_cost_percent'];
+                    
                     // Use BOQ price if available, otherwise use manual base_price
                     if ($boqPrice > 0) {
-                        $m['calculated_base_price'] = $boqPrice;
+                        $m['calculated_base_price'] = round($boqPrice * (1 + $unforeseen / 100), 2);
                         $m['price_source'] = 'boq';
                     } else {
                         $m['calculated_base_price'] = (float)$m['base_price'];
@@ -188,19 +193,20 @@ try {
             validateRequired($body, ['name', 'type', 'base_price']);
             $stmt = $db->prepare("
                 INSERT INTO models (
-                    name, type, description, base_price,
+                    name, type, description, base_price, unforeseen_cost_percent,
                     surface_m2, bedrooms, bathrooms,
                     container_20ft_count, container_40ft_count,
                     pool_shape, has_overflow,
                     image_url, plan_image_url,
                     features, is_active, display_order
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ");
             $stmt->execute([
                 sanitize($body['name']),
                 $body['type'],
                 sanitize($body['description'] ?? ''),
                 (float)$body['base_price'],
+                (float)($body['unforeseen_cost_percent'] ?? 10),
                 (float)($body['surface_m2'] ?? 0),
                 (int)($body['bedrooms'] ?? 0),
                 (int)($body['bathrooms'] ?? 0),
@@ -221,7 +227,7 @@ try {
         case 'update_model': {
             validateRequired($body, ['id']);
             $allowed = [
-                'name','type','description','base_price','surface_m2',
+                'name','type','description','base_price','unforeseen_cost_percent','surface_m2',
                 'bedrooms','bathrooms','container_20ft_count','container_40ft_count',
                 'pool_shape','has_overflow','image_url','plan_image_url',
                 'features','is_active','display_order'
@@ -233,7 +239,7 @@ try {
                     $fields[] = "$f = ?";
                     if ($f === 'features') {
                         $params[] = json_encode($body[$f]);
-                    } elseif (in_array($f, ['base_price','surface_m2'])) {
+                    } elseif (in_array($f, ['base_price','surface_m2','unforeseen_cost_percent'])) {
                         $params[] = (float)$body[$f];
                     } elseif (in_array($f, ['bedrooms','bathrooms','container_20ft_count','container_40ft_count','display_order'])) {
                         $params[] = (int)$body[$f];
@@ -462,10 +468,11 @@ try {
             $stmt = $db->prepare("
                 SELECT bc.*, 
                     mi.file_path AS image_path,
-                    COALESCE(SUM(ROUND(bl.quantity * bl.unit_cost_ht, 2)), 0) AS total_cost_ht,
-                    COALESCE(SUM(ROUND(bl.quantity * bl.unit_cost_ht * (1 + bl.margin_percent / 100), 2)), 0) AS total_sale_price_ht
+                    COALESCE(SUM(ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht), 2)), 0) AS total_cost_ht,
+                    COALESCE(SUM(ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS total_sale_price_ht
                 FROM boq_categories bc
                 LEFT JOIN boq_lines bl ON bc.id = bl.category_id
+                LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
                 LEFT JOIN model_images mi ON bc.image_id = mi.id
                 WHERE bc.model_id = ?
                 GROUP BY bc.id
@@ -477,6 +484,7 @@ try {
             foreach ($categories as &$cat) {
                 $cat['id'] = (int)$cat['id'];
                 $cat['is_option'] = (bool)$cat['is_option'];
+                $cat['qty_editable'] = (bool)($cat['qty_editable'] ?? false);
                 $cat['parent_id'] = $cat['parent_id'] ? (int)$cat['parent_id'] : null;
                 $cat['total_cost_ht'] = round((float)$cat['total_cost_ht'], 2);
                 $cat['total_sale_price_ht'] = round((float)$cat['total_sale_price_ht'], 2);
@@ -492,14 +500,15 @@ try {
         case 'create_boq_category': {
             validateRequired($body, ['model_id', 'name']);
             $stmt = $db->prepare("
-                INSERT INTO boq_categories (model_id, parent_id, name, is_option, display_order, image_id)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO boq_categories (model_id, parent_id, name, is_option, qty_editable, display_order, image_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             ");
             $stmt->execute([
                 (int)$body['model_id'],
                 !empty($body['parent_id']) ? (int)$body['parent_id'] : null,
                 sanitize($body['name']),
                 (bool)($body['is_option'] ?? false),
+                (bool)($body['qty_editable'] ?? false),
                 (int)($body['display_order'] ?? 0),
                 !empty($body['image_id']) ? (int)$body['image_id'] : null,
             ]);
@@ -511,13 +520,14 @@ try {
             validateRequired($body, ['id']);
             $stmt = $db->prepare("
                 UPDATE boq_categories SET
-                    name = ?, parent_id = ?, is_option = ?, display_order = ?, image_id = ?, updated_at = NOW()
+                    name = ?, parent_id = ?, is_option = ?, qty_editable = ?, display_order = ?, image_id = ?, updated_at = NOW()
                 WHERE id = ?
             ");
             $stmt->execute([
                 sanitize($body['name']),
                 !empty($body['parent_id']) ? (int)$body['parent_id'] : null,
                 (bool)($body['is_option'] ?? false),
+                (bool)($body['qty_editable'] ?? false),
                 (int)($body['display_order'] ?? 0),
                 !empty($body['image_id']) ? (int)$body['image_id'] : null,
                 (int)$body['id'],
@@ -542,8 +552,8 @@ try {
             
             $stmt = $db->prepare("
                 SELECT bl.*, s.name AS supplier_name, pl.name AS price_list_name, pl.unit_price AS price_list_unit_price,
-                    ROUND(bl.quantity * bl.unit_cost_ht, 2) AS total_cost_ht,
-                    ROUND(bl.quantity * bl.unit_cost_ht * (1 + bl.margin_percent / 100), 2) AS sale_price_ht
+                    ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht), 2) AS total_cost_ht,
+                    ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2) AS sale_price_ht
                 FROM boq_lines bl
                 LEFT JOIN suppliers s ON bl.supplier_id = s.id
                 LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
@@ -692,7 +702,7 @@ try {
             
             // Get all categories (both base and options) with parent_id
             $stmt = $db->prepare("
-                SELECT bc.id, bc.name, bc.is_option, bc.display_order, bc.parent_id
+                SELECT bc.id, bc.name, bc.is_option, bc.qty_editable, bc.display_order, bc.parent_id
                 FROM boq_categories bc
                 WHERE bc.model_id = ?
                 ORDER BY bc.display_order ASC, bc.name ASC
@@ -713,8 +723,24 @@ try {
             ");
             
             foreach ($categories as &$cat) {
+                $cat['id'] = (int)$cat['id'];
+                $cat['is_option'] = (bool)$cat['is_option'];
+                $cat['qty_editable'] = (bool)($cat['qty_editable'] ?? false);
+                $cat['parent_id'] = $cat['parent_id'] ? (int)$cat['parent_id'] : null;
+                $cat['display_order'] = (int)$cat['display_order'];
                 $lineStmt->execute([$cat['id']]);
-                $cat['lines'] = $lineStmt->fetchAll();
+                $lines = $lineStmt->fetchAll();
+                // Cast numeric fields for proper JSON encoding
+                foreach ($lines as &$ln) {
+                    $ln['id'] = (int)$ln['id'];
+                    $ln['quantity'] = (float)$ln['quantity'];
+                    $ln['unit_cost_ht'] = (float)$ln['unit_cost_ht'];
+                    $ln['margin_percent'] = (float)$ln['margin_percent'];
+                    $ln['display_order'] = (int)$ln['display_order'];
+                    $ln['price_list_id'] = $ln['price_list_id'] ? (int)$ln['price_list_id'] : null;
+                    $ln['price_list_unit_price'] = $ln['price_list_unit_price'] !== null ? (float)$ln['price_list_unit_price'] : null;
+                }
+                $cat['lines'] = $lines;
             }
             
             ok($categories);
@@ -726,23 +752,35 @@ try {
             $modelId = (int)($body['model_id'] ?? 0);
             if ($modelId <= 0) fail("model_id manquant");
             
+            // Get model unforeseen cost percent
+            $modelStmt = $db->prepare("SELECT unforeseen_cost_percent FROM models WHERE id = ?");
+            $modelStmt->execute([$modelId]);
+            $modelRow = $modelStmt->fetch();
+            $unforeseen = (float)($modelRow['unforeseen_cost_percent'] ?? 10);
+            
             // Get base price from non-option BOQ categories
             $stmt = $db->prepare("
                 SELECT 
-                    COALESCE(SUM(ROUND(bl.quantity * bl.unit_cost_ht * (1 + bl.margin_percent / 100), 2)), 0) AS base_price_ht,
-                    COALESCE(SUM(ROUND(bl.quantity * bl.unit_cost_ht, 2)), 0) AS total_cost_ht
+                    COALESCE(SUM(ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS base_price_ht,
+                    COALESCE(SUM(ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht), 2)), 0) AS total_cost_ht
                 FROM boq_categories bc
                 LEFT JOIN boq_lines bl ON bc.id = bl.category_id
+                LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
                 WHERE bc.model_id = ? AND bc.is_option = FALSE
             ");
             $stmt->execute([$modelId]);
             $result = $stmt->fetch();
             
+            $basePriceHT = (float)$result['base_price_ht'];
+            $totalCostHT = (float)$result['total_cost_ht'];
+            
             ok([
                 'model_id' => $modelId,
-                'base_price_ht' => (float)$result['base_price_ht'],
-                'total_cost_ht' => (float)$result['total_cost_ht'],
-                'profit_ht' => round((float)$result['base_price_ht'] - (float)$result['total_cost_ht'], 2),
+                'base_price_ht' => $basePriceHT,
+                'total_cost_ht' => $totalCostHT,
+                'profit_ht' => round($basePriceHT - $totalCostHT, 2),
+                'unforeseen_cost_percent' => $unforeseen,
+                'base_price_ht_with_unforeseen' => round($basePriceHT * (1 + $unforeseen / 100), 2),
             ]);
             break;
         }
@@ -753,18 +791,23 @@ try {
             if ($modelId <= 0) fail("model_id manquant");
             
             $stmt = $db->prepare("
-                SELECT bc.id, bc.name, bc.display_order, mi.file_path as image_path,
-                    COALESCE(SUM(ROUND(bl.quantity * bl.unit_cost_ht * (1 + bl.margin_percent / 100), 2)), 0) AS price_ht
+                SELECT bc.id, bc.name, bc.display_order, bc.parent_id, bc.qty_editable, mi.file_path as image_path,
+                    COALESCE(SUM(ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS price_ht
                 FROM boq_categories bc
                 LEFT JOIN boq_lines bl ON bc.id = bl.category_id
+                LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
                 LEFT JOIN model_images mi ON bc.image_id = mi.id
                 WHERE bc.model_id = ? AND bc.is_option = TRUE
                 GROUP BY bc.id
-                ORDER BY bc.display_order ASC
+                ORDER BY bc.name ASC
             ");
             $stmt->execute([$modelId]);
             $options = $stmt->fetchAll();
             foreach ($options as &$opt) {
+                $opt['id'] = (int)$opt['id'];
+                $opt['parent_id'] = $opt['parent_id'] ? (int)$opt['parent_id'] : null;
+                $opt['display_order'] = (int)$opt['display_order'];
+                $opt['qty_editable'] = (bool)($opt['qty_editable'] ?? false);
                 $opt['image_url'] = $opt['image_path'] ? '/' . ltrim($opt['image_path'], '/') : null;
                 unset($opt['image_path']);
             }
@@ -777,25 +820,28 @@ try {
             $modelId = (int)($body['model_id'] ?? 0);
             if ($modelId <= 0) fail("model_id manquant");
             
-            // Get categories that are NOT options (included in base price)
+            // Get categories that are NOT options (included in base price), sorted alphabetically
             $stmt = $db->prepare("
-                SELECT bc.id, bc.name, bc.display_order
+                SELECT bc.id, bc.name, bc.display_order, bc.parent_id
                 FROM boq_categories bc
                 WHERE bc.model_id = ? AND bc.is_option = FALSE
-                ORDER BY bc.display_order ASC, bc.name ASC
+                ORDER BY bc.name ASC
             ");
             $stmt->execute([$modelId]);
             $categories = $stmt->fetchAll();
             
-            // For each category, get its lines
+            // For each category, get its lines sorted alphabetically
             $lineStmt = $db->prepare("
                 SELECT id, description
                 FROM boq_lines
                 WHERE category_id = ?
-                ORDER BY display_order ASC, id ASC
+                ORDER BY description ASC
             ");
             
             foreach ($categories as &$cat) {
+                $cat['id'] = (int)$cat['id'];
+                $cat['parent_id'] = $cat['parent_id'] ? (int)$cat['parent_id'] : null;
+                $cat['display_order'] = (int)$cat['display_order'];
                 $lineStmt->execute([$cat['id']]);
                 $cat['lines'] = $lineStmt->fetchAll();
             }
@@ -813,7 +859,7 @@ try {
                 SELECT id, description
                 FROM boq_lines
                 WHERE category_id = ?
-                ORDER BY display_order ASC, id ASC
+                ORDER BY description ASC
             ");
             $stmt->execute([$categoryId]);
             ok($stmt->fetchAll());
