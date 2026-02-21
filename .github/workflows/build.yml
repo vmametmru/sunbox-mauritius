@@ -51,11 +51,11 @@ jobs:
       - name: Upload dist artifact
         uses: actions/upload-artifact@v4
         with:
-          name: dist-${{ steps.branch.outputs.name }}
+          name: dist-${{ steps.branch.outputs.name }}.zip
           path: dist
 
       - name: Upload api artifact
         uses: actions/upload-artifact@v4
         with:
-          name: api-${{ steps.branch.outputs.name }}
+          name: api-${{ steps.branch.outputs.name }}.zip
           path: api
