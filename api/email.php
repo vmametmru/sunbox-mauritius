@@ -334,49 +334,79 @@ function sendWithPHPMailer($settings, $data)
 function sendWithNativeMail($settings, $data)
 {
     try {
-        $to = is_array($data['to']) ? implode(', ', $data['to']) : $data['to'];
-        $subject = (string)($data['subject'] ?? '');
-        $htmlBody = (string)($data['html'] ?? $data['body'] ?? '');
-        $textBody = (string)($data['text'] ?? strip_tags($htmlBody));
-        
-        // Get from email and name from settings (already normalized from env in normalizeEmailSettings)
+        $to        = is_array($data['to']) ? implode(', ', $data['to']) : $data['to'];
+        $subject   = (string)($data['subject'] ?? '');
+        $htmlBody  = (string)($data['html'] ?? $data['body'] ?? '');
         $fromEmail = $settings['smtp_from_email'] ?? $settings['smtp_user'] ?? '';
-        $fromName = $settings['smtp_from_name'] ?? '';
-        
+        $fromName  = $settings['smtp_from_name'] ?? '';
+
         if (empty($fromEmail)) {
             error_log('Native mail: No from email configured');
             return false;
         }
-        
-        // Build headers
-        $headers = [];
-        $headers[] = 'MIME-Version: 1.0';
-        $headers[] = 'Content-type: text/html; charset=UTF-8';
-        $headers[] = 'From: ' . ($fromName ? $fromName . ' <' . $fromEmail . '>' : $fromEmail);
-        $headers[] = 'Reply-To: ' . $fromEmail;
-        $headers[] = 'X-Mailer: PHP/' . phpversion();
-        
-        // Add CC if provided
+
+        $fromHeader = $fromName ? $fromName . ' <' . $fromEmail . '>' : $fromEmail;
+
+        // Build CC header value (reused in both branches)
+        $ccHeader = '';
         if (!empty($data['cc'])) {
             $ccList = is_array($data['cc']) ? $data['cc'] : explode(',', $data['cc']);
-            $ccList = array_map('trim', $ccList);
-            $ccList = array_filter($ccList);
+            $ccList = array_filter(array_map('trim', $ccList));
             if (!empty($ccList)) {
-                $headers[] = 'Cc: ' . implode(', ', $ccList);
+                $ccHeader = implode(', ', $ccList);
             }
         }
-        
-        $headerString = implode("\r\n", $headers);
-        
-        // Use mail() function
-        $result = mail($to, $subject, $htmlBody, $headerString);
-        
+
+        $hasPdf = !empty($data['pdf_base64']) && !empty($data['filename']);
+
+        if ($hasPdf) {
+            // ── Multipart/mixed: HTML body + PDF attachment ───────────────
+            $boundary = '==SUNBOX_' . md5(uniqid((string)mt_rand(), true));
+
+            $headers   = [];
+            $headers[] = 'MIME-Version: 1.0';
+            $headers[] = 'Content-Type: multipart/mixed; boundary="' . $boundary . '"';
+            $headers[] = 'From: ' . $fromHeader;
+            $headers[] = 'Reply-To: ' . $fromEmail;
+            $headers[] = 'X-Mailer: PHP/' . phpversion();
+            if ($ccHeader) $headers[] = 'Cc: ' . $ccHeader;
+
+            // HTML part
+            $body  = '--' . $boundary . "\r\n";
+            $body .= 'Content-Type: text/html; charset=UTF-8' . "\r\n";
+            $body .= 'Content-Transfer-Encoding: quoted-printable' . "\r\n\r\n";
+            $body .= quoted_printable_encode($htmlBody) . "\r\n\r\n";
+
+            // PDF attachment (pdf_base64 is already base64 – pass through directly)
+            $filename = basename((string)$data['filename']);
+            $body .= '--' . $boundary . "\r\n";
+            $body .= 'Content-Type: application/pdf; name="' . $filename . '"' . "\r\n";
+            $body .= 'Content-Transfer-Encoding: base64' . "\r\n";
+            $body .= 'Content-Disposition: attachment; filename="' . $filename . '"' . "\r\n\r\n";
+            $body .= chunk_split((string)$data['pdf_base64']) . "\r\n";
+            $body .= '--' . $boundary . '--';
+
+        } else {
+            // ── Plain HTML email, no attachment ──────────────────────────
+            $headers   = [];
+            $headers[] = 'MIME-Version: 1.0';
+            $headers[] = 'Content-Type: text/html; charset=UTF-8';
+            $headers[] = 'From: ' . $fromHeader;
+            $headers[] = 'Reply-To: ' . $fromEmail;
+            $headers[] = 'X-Mailer: PHP/' . phpversion();
+            if ($ccHeader) $headers[] = 'Cc: ' . $ccHeader;
+
+            $body = $htmlBody;
+        }
+
+        $result = mail($to, $subject, $body, implode("\r\n", $headers));
+
         if (!$result) {
             error_log('Native mail() failed for recipient: ' . $to);
         }
-        
+
         return $result;
-        
+
     } catch (Exception $e) {
         error_log('Native mail Error: ' . $e->getMessage());
         return false;
