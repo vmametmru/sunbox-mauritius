@@ -54,8 +54,11 @@ jobs:
           name: dist-${{ steps.ts.outputs.stamp }}
           path: dist
 
+      - name: Prepare API artifact
+        run: mkdir -p _api-pkg && cp -r api _api-pkg/
+
       - name: Upload api artifact
         uses: actions/upload-artifact@v4
         with:
           name: api-${{ steps.ts.outputs.stamp }}
-          path: api
+          path: _api-pkg
