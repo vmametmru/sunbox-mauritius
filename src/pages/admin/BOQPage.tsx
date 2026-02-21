@@ -70,6 +70,7 @@ interface Model {
   id: number;
   name: string;
   type: 'container' | 'pool';
+  pool_shape?: 'Rectangulaire' | 'L' | 'T';
   base_price: number;
   unforeseen_cost_percent: number;
 }
@@ -188,6 +189,10 @@ export default function BOQPage() {
     longueur: 8,
     largeur: 4,
     profondeur: 1.5,
+    longueur_la: 8, largeur_la: 4, profondeur_la: 1.5,
+    longueur_lb: 3, largeur_lb: 2, profondeur_lb: 1.5,
+    longueur_ta: 8, largeur_ta: 4, profondeur_ta: 1.5,
+    longueur_tb: 4, largeur_tb: 3, profondeur_tb: 1.5,
   });
   const [poolVariables, setPoolVariables] = useState<PoolVariable[]>([]);
   const [priceListItems, setPriceListItems] = useState<PriceListItem[]>([]);
@@ -197,6 +202,7 @@ export default function BOQPage() {
 
   const selectedModel = models.find(m => m.id === selectedModelId);
   const isPoolModel = selectedModel?.type === 'pool';
+  const poolShape = selectedModel?.pool_shape || 'Rectangulaire';
 
   // Calculate pool variable values
   const poolVarContext = useMemo(() => {
@@ -1073,38 +1079,137 @@ export default function BOQPage() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-              <div>
-                <Label>Longueur (m)</Label>
-                <Input
-                  type="number"
-                  step="0.1"
-                  min="1"
-                  value={poolDimensions.longueur}
-                  onChange={(e) => setPoolDimensions(prev => ({ ...prev, longueur: Number(e.target.value) || 1 }))}
-                />
+            {/* Rectangular pool */}
+            {poolShape === 'Rectangulaire' && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                <div>
+                  <Label>Longueur (m)</Label>
+                  <Input
+                    type="number"
+                    step="0.1"
+                    min="1"
+                    value={poolDimensions.longueur}
+                    onChange={(e) => setPoolDimensions(prev => ({ ...prev, longueur: Number(e.target.value) || 1 }))}
+                  />
+                </div>
+                <div>
+                  <Label>Largeur (m)</Label>
+                  <Input
+                    type="number"
+                    step="0.1"
+                    min="1"
+                    value={poolDimensions.largeur}
+                    onChange={(e) => setPoolDimensions(prev => ({ ...prev, largeur: Number(e.target.value) || 1 }))}
+                  />
+                </div>
+                <div>
+                  <Label>Profondeur (m)</Label>
+                  <Input
+                    type="number"
+                    step="0.1"
+                    min="0.5"
+                    value={poolDimensions.profondeur}
+                    onChange={(e) => setPoolDimensions(prev => ({ ...prev, profondeur: Number(e.target.value) || 0.5 }))}
+                  />
+                </div>
               </div>
-              <div>
-                <Label>Largeur (m)</Label>
-                <Input
-                  type="number"
-                  step="0.1"
-                  min="1"
-                  value={poolDimensions.largeur}
-                  onChange={(e) => setPoolDimensions(prev => ({ ...prev, largeur: Number(e.target.value) || 1 }))}
-                />
+            )}
+
+            {/* L-shape pool */}
+            {poolShape === 'L' && (
+              <div className="mb-4 space-y-3">
+                <p className="text-xs font-semibold text-blue-700">Partie LA (piscine principale)</p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <Label>Longueur LA (m)</Label>
+                    <Input type="number" step="0.1" min="1"
+                      value={poolDimensions.longueur_la ?? 8}
+                      onChange={(e) => { const v = Number(e.target.value) || 1; setPoolDimensions(prev => ({ ...prev, longueur_la: v, longueur: v })); }} />
+                  </div>
+                  <div>
+                    <Label>Largeur LA (m)</Label>
+                    <Input type="number" step="0.1" min="1"
+                      value={poolDimensions.largeur_la ?? 4}
+                      onChange={(e) => { const v = Number(e.target.value) || 1; setPoolDimensions(prev => ({ ...prev, largeur_la: v, largeur: v })); }} />
+                  </div>
+                  <div>
+                    <Label>Profondeur LA (m)</Label>
+                    <Input type="number" step="0.1" min="0.5"
+                      value={poolDimensions.profondeur_la ?? 1.5}
+                      onChange={(e) => { const v = Number(e.target.value) || 0.5; setPoolDimensions(prev => ({ ...prev, profondeur_la: v, profondeur: v })); }} />
+                  </div>
+                </div>
+                <p className="text-xs font-semibold text-blue-700">Partie LB (bout qui dépasse)</p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <Label>Longueur LB (m)</Label>
+                    <Input type="number" step="0.1" min="1"
+                      value={poolDimensions.longueur_lb ?? 3}
+                      onChange={(e) => { const v = Number(e.target.value) || 1; setPoolDimensions(prev => ({ ...prev, longueur_lb: v })); }} />
+                  </div>
+                  <div>
+                    <Label>Largeur LB (m)</Label>
+                    <Input type="number" step="0.1" min="1"
+                      value={poolDimensions.largeur_lb ?? 2}
+                      onChange={(e) => { const v = Number(e.target.value) || 1; setPoolDimensions(prev => ({ ...prev, largeur_lb: v })); }} />
+                  </div>
+                  <div>
+                    <Label>Profondeur LB (m)</Label>
+                    <Input type="number" step="0.1" min="0.5"
+                      value={poolDimensions.profondeur_lb ?? 1.5}
+                      onChange={(e) => { const v = Number(e.target.value) || 0.5; setPoolDimensions(prev => ({ ...prev, profondeur_lb: v })); }} />
+                  </div>
+                </div>
               </div>
-              <div>
-                <Label>Profondeur (m)</Label>
-                <Input
-                  type="number"
-                  step="0.1"
-                  min="0.5"
-                  value={poolDimensions.profondeur}
-                  onChange={(e) => setPoolDimensions(prev => ({ ...prev, profondeur: Number(e.target.value) || 0.5 }))}
-                />
+            )}
+
+            {/* T-shape pool */}
+            {poolShape === 'T' && (
+              <div className="mb-4 space-y-3">
+                <p className="text-xs font-semibold text-blue-700">Partie TA (piscine 1)</p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <Label>Longueur TA (m)</Label>
+                    <Input type="number" step="0.1" min="1"
+                      value={poolDimensions.longueur_ta ?? 8}
+                      onChange={(e) => { const v = Number(e.target.value) || 1; setPoolDimensions(prev => ({ ...prev, longueur_ta: v, longueur: v })); }} />
+                  </div>
+                  <div>
+                    <Label>Largeur TA (m)</Label>
+                    <Input type="number" step="0.1" min="1"
+                      value={poolDimensions.largeur_ta ?? 4}
+                      onChange={(e) => { const v = Number(e.target.value) || 1; setPoolDimensions(prev => ({ ...prev, largeur_ta: v, largeur: v })); }} />
+                  </div>
+                  <div>
+                    <Label>Profondeur TA (m)</Label>
+                    <Input type="number" step="0.1" min="0.5"
+                      value={poolDimensions.profondeur_ta ?? 1.5}
+                      onChange={(e) => { const v = Number(e.target.value) || 0.5; setPoolDimensions(prev => ({ ...prev, profondeur_ta: v, profondeur: v })); }} />
+                  </div>
+                </div>
+                <p className="text-xs font-semibold text-blue-700">Partie TB (piscine 2)</p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <Label>Longueur TB (m)</Label>
+                    <Input type="number" step="0.1" min="1"
+                      value={poolDimensions.longueur_tb ?? 4}
+                      onChange={(e) => { const v = Number(e.target.value) || 1; setPoolDimensions(prev => ({ ...prev, longueur_tb: v })); }} />
+                  </div>
+                  <div>
+                    <Label>Largeur TB (m)</Label>
+                    <Input type="number" step="0.1" min="1"
+                      value={poolDimensions.largeur_tb ?? 3}
+                      onChange={(e) => { const v = Number(e.target.value) || 1; setPoolDimensions(prev => ({ ...prev, largeur_tb: v })); }} />
+                  </div>
+                  <div>
+                    <Label>Profondeur TB (m)</Label>
+                    <Input type="number" step="0.1" min="0.5"
+                      value={poolDimensions.profondeur_tb ?? 1.5}
+                      onChange={(e) => { const v = Number(e.target.value) || 0.5; setPoolDimensions(prev => ({ ...prev, profondeur_tb: v })); }} />
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
 
             {poolVariables.length > 0 && (
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
@@ -1775,7 +1880,7 @@ export default function BOQPage() {
                     className="font-mono text-sm"
                   />
                   <p className="text-xs text-gray-400 mt-1">
-                    Variables: longueur, largeur, profondeur, {poolVariables.map(v => v.name).join(', ')}. Fonctions: CEIL(), FLOOR(), ROUND()
+                    Variables: longueur, largeur, profondeur, {poolVariables.map(v => v.name).join(', ')}. Fonctions: CEIL(), FLOOR(), ROUND(), ROUNDUP(), ROUNDDOWN(), IF(condition, valeur_si_vrai, valeur_si_faux)
                   </p>
                   {editingLine.quantity_formula && Object.keys(poolVarContext).length > 0 && (
                     <p className="text-xs text-blue-600 mt-1">

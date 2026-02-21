@@ -44,14 +44,18 @@ jobs:
           NODE_OPTIONS: "--max-old-space-size=4096"
         run: npm run build
 
+      - name: Get sanitized branch name
+        id: branch
+        run: echo "name=$(echo '${{ github.ref_name }}' | tr '/' '-')" >> $GITHUB_OUTPUT
+
       - name: Upload dist artifact
         uses: actions/upload-artifact@v4
         with:
-          name: dist
+          name: dist-${{ steps.branch.outputs.name }}.zip
           path: dist
 
       - name: Upload api artifact
         uses: actions/upload-artifact@v4
         with:
-          name: api
+          name: api-${{ steps.branch.outputs.name }}.zip
           path: api
