@@ -543,6 +543,34 @@ export const api = {
     return result.data !== undefined ? result.data : result;
   },
 
+  async sendQuotePdf(data: {
+    to: string | string[];
+    subject: string;
+    html: string;
+    pdf_base64: string;
+    filename: string;
+    cc?: string | string[];
+  }) {
+    const response = await fetch(`${API_BASE_URL}/email.php?action=send_quote_pdf`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    const result = await response.json();
+    if (!response.ok || result.error) {
+      throw new Error(result.error || 'Failed to send PDF email');
+    }
+    return result.data !== undefined ? result.data : result;
+  },
+
+  getQuoteByToken(token: string) {
+    return this.query('get_quote_by_token', { token });
+  },
+
+  updateQuoteStatusByToken(token: string, status: 'approved' | 'rejected' | 'revision_requested') {
+    return this.query('update_quote_status_by_token', { token, status });
+  },
+
   /* =====================================================
      EMAIL SIGNATURES
   ===================================================== */
