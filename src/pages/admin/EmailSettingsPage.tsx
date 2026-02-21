@@ -16,7 +16,7 @@ import {
   Trash2,
   Pen,
   Image,
-  Upload
+  Upload,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -30,6 +30,7 @@ import { Badge } from '@/components/ui/badge';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { WysiwygEditor } from '@/components/ui/wysiwyg-editor';
+import PdfTemplatesPage from './PdfTemplatesPage';
 
 interface EmailSettings {
   smtp_host: string;
@@ -475,7 +476,7 @@ export default function EmailSettingsPage() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-5">
+        <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="smtp" className="flex items-center gap-2">
             <Server className="h-4 w-4" />
             SMTP
@@ -495,6 +496,10 @@ export default function EmailSettingsPage() {
           <TabsTrigger value="logs" className="flex items-center gap-2">
             <History className="h-4 w-4" />
             Historique
+          </TabsTrigger>
+          <TabsTrigger value="pdf" className="flex items-center gap-2">
+            <FileText className="h-4 w-4" />
+            PDF Template
           </TabsTrigger>
         </TabsList>
 
@@ -1510,6 +1515,11 @@ export default function EmailSettingsPage() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* PDF Template Tab */}
+        <TabsContent value="pdf">
+          <PdfTemplatesPage />
         </TabsContent>
       </Tabs>
     </div>
