@@ -16,7 +16,8 @@ import {
   Trash2,
   Pen,
   Image,
-  Upload
+  Upload,
+  FileImage,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -143,6 +144,32 @@ const defaultNewSignature: Omit<EmailSignature, 'id'> = {
   is_default: false,
 };
 
+interface PdfSettings {
+  pdf_primary_color: string;
+  pdf_accent_color: string;
+  pdf_footer_text: string;
+  pdf_terms: string;
+  pdf_bank_details: string;
+  pdf_validity_days: string;
+  pdf_show_logo: string;
+  pdf_show_vat: string;
+  pdf_show_bank_details: string;
+  pdf_show_terms: string;
+}
+
+const defaultPdfSettings: PdfSettings = {
+  pdf_primary_color: '#1A365D',
+  pdf_accent_color: '#f97316',
+  pdf_footer_text: 'Sunbox Ltd – Grand Baie, Mauritius | info@sunbox-mauritius.com',
+  pdf_terms: 'Ce devis est valable pour la durée indiquée. Les prix sont en MUR et hors TVA sauf mention contraire. Paiement selon conditions convenues.',
+  pdf_bank_details: '',
+  pdf_validity_days: '30',
+  pdf_show_logo: 'true',
+  pdf_show_vat: 'true',
+  pdf_show_bank_details: 'false',
+  pdf_show_terms: 'true',
+};
+
 export default function EmailSettingsPage() {
   const [settings, setSettings] = useState<EmailSettings>(defaultSettings);
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
@@ -162,6 +189,8 @@ export default function EmailSettingsPage() {
   const [newSignature, setNewSignature] = useState<Omit<EmailSignature, 'id'>>(defaultNewSignature);
   const [siteLogo, setSiteLogo] = useState<string>('');
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [pdfSettings, setPdfSettings] = useState<PdfSettings>(defaultPdfSettings);
+  const [savingPdf, setSavingPdf] = useState(false);
   const newPhotoInputRef = useRef<HTMLInputElement>(null);
   const editPhotoInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -219,6 +248,16 @@ export default function EmailSettingsPage() {
       } catch (e) {
         console.log('Signatures not available');
       }
+
+      // Load PDF template settings
+      try {
+        const pdfResult = await api.getSettings('pdf');
+        if (pdfResult) {
+          setPdfSettings({ ...defaultPdfSettings, ...pdfResult });
+        }
+      } catch (e) {
+        console.log('PDF settings not available');
+      }
       
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
@@ -244,6 +283,23 @@ export default function EmailSettingsPage() {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const savePdfSettings = async () => {
+    try {
+      setSavingPdf(true);
+      const settingsArray = Object.entries(pdfSettings).map(([key, value]) => ({
+        key,
+        value: value ?? '',
+        group: 'pdf',
+      }));
+      await api.updateSettingsBulk(settingsArray);
+      toast({ title: 'Succès', description: 'Modèle PDF enregistré avec succès' });
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setSavingPdf(false);
     }
   };
 
@@ -475,7 +531,7 @@ export default function EmailSettingsPage() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-5">
+        <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="smtp" className="flex items-center gap-2">
             <Server className="h-4 w-4" />
             SMTP
@@ -495,6 +551,10 @@ export default function EmailSettingsPage() {
           <TabsTrigger value="logs" className="flex items-center gap-2">
             <History className="h-4 w-4" />
             Historique
+          </TabsTrigger>
+          <TabsTrigger value="pdf" className="flex items-center gap-2">
+            <FileImage className="h-4 w-4" />
+            PDF Template
           </TabsTrigger>
         </TabsList>
 
@@ -1508,6 +1568,140 @@ export default function EmailSettingsPage() {
                   </table>
                 </div>
               )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* PDF Template Tab */}
+        <TabsContent value="pdf" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileImage className="h-5 w-5 text-orange-500" />
+                Modèle PDF des Devis
+              </CardTitle>
+              <CardDescription>
+                Personnalisez l'apparence et le contenu des documents PDF générés pour les devis
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Colors */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <Label>Couleur principale</Label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="color"
+                      value={pdfSettings.pdf_primary_color}
+                      onChange={(e) => setPdfSettings({ ...pdfSettings, pdf_primary_color: e.target.value })}
+                      className="w-12 h-10 rounded border cursor-pointer"
+                    />
+                    <Input
+                      value={pdfSettings.pdf_primary_color}
+                      onChange={(e) => setPdfSettings({ ...pdfSettings, pdf_primary_color: e.target.value })}
+                      placeholder="#1A365D"
+                      className="flex-1"
+                    />
+                  </div>
+                  <p className="text-sm text-gray-500">Entête, titres de section</p>
+                </div>
+                <div className="space-y-2">
+                  <Label>Couleur accent</Label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="color"
+                      value={pdfSettings.pdf_accent_color}
+                      onChange={(e) => setPdfSettings({ ...pdfSettings, pdf_accent_color: e.target.value })}
+                      className="w-12 h-10 rounded border cursor-pointer"
+                    />
+                    <Input
+                      value={pdfSettings.pdf_accent_color}
+                      onChange={(e) => setPdfSettings({ ...pdfSettings, pdf_accent_color: e.target.value })}
+                      placeholder="#f97316"
+                      className="flex-1"
+                    />
+                  </div>
+                  <p className="text-sm text-gray-500">Bordures, totaux, mise en évidence</p>
+                </div>
+              </div>
+
+              {/* Validity */}
+              <div className="space-y-2">
+                <Label>Validité du devis (jours)</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  max="365"
+                  value={pdfSettings.pdf_validity_days}
+                  onChange={(e) => setPdfSettings({ ...pdfSettings, pdf_validity_days: e.target.value })}
+                  className="w-40"
+                />
+                <p className="text-sm text-gray-500">Durée par défaut de validité des devis</p>
+              </div>
+
+              {/* Display options */}
+              <div className="space-y-4">
+                <Label className="text-base font-semibold">Sections à afficher</Label>
+                <div className="space-y-3">
+                  {[
+                    { key: 'pdf_show_logo' as keyof PdfSettings, label: 'Logo de la société', desc: 'Afficher le logo en haut du document' },
+                    { key: 'pdf_show_vat' as keyof PdfSettings, label: 'TVA', desc: 'Afficher le montant de TVA dans le récapitulatif' },
+                    { key: 'pdf_show_terms' as keyof PdfSettings, label: 'Conditions générales', desc: 'Afficher les conditions en bas du PDF' },
+                    { key: 'pdf_show_bank_details' as keyof PdfSettings, label: 'Coordonnées bancaires', desc: 'Afficher les informations de paiement' },
+                  ].map(({ key, label, desc }) => (
+                    <div key={key} className="flex items-center justify-between gap-6 py-2">
+                      <div>
+                        <p className="font-medium text-sm">{label}</p>
+                        <p className="text-sm text-gray-500">{desc}</p>
+                      </div>
+                      <Switch
+                        checked={pdfSettings[key] === 'true'}
+                        onCheckedChange={(v) => setPdfSettings({ ...pdfSettings, [key]: v ? 'true' : 'false' })}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Footer text */}
+              <div className="space-y-2">
+                <Label>Texte de pied de page</Label>
+                <Input
+                  value={pdfSettings.pdf_footer_text}
+                  onChange={(e) => setPdfSettings({ ...pdfSettings, pdf_footer_text: e.target.value })}
+                  placeholder="Sunbox Ltd – Grand Baie, Mauritius | info@sunbox-mauritius.com"
+                />
+              </div>
+
+              {/* Terms */}
+              <div className="space-y-2">
+                <Label>Conditions générales</Label>
+                <Textarea
+                  rows={4}
+                  value={pdfSettings.pdf_terms}
+                  onChange={(e) => setPdfSettings({ ...pdfSettings, pdf_terms: e.target.value })}
+                  placeholder="Entrez ici les conditions générales de vente..."
+                />
+              </div>
+
+              {/* Bank details */}
+              {pdfSettings.pdf_show_bank_details === 'true' && (
+                <div className="space-y-2">
+                  <Label>Coordonnées bancaires</Label>
+                  <Textarea
+                    rows={3}
+                    value={pdfSettings.pdf_bank_details}
+                    onChange={(e) => setPdfSettings({ ...pdfSettings, pdf_bank_details: e.target.value })}
+                    placeholder={"Banque : MCB\nIBAN : MU12 MCBL 0000 0000 0000 0000 000\nBIC : MCBLMUMU"}
+                  />
+                </div>
+              )}
+
+              <div className="flex justify-end">
+                <Button onClick={savePdfSettings} disabled={savingPdf}>
+                  {savingPdf ? 'Enregistrement…' : 'Enregistrer le modèle PDF'}
+                </Button>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
