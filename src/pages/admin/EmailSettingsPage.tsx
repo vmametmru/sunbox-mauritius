@@ -248,8 +248,9 @@ export default function EmailSettingsPage() {
           options_total:    Number(q.options_total),
           total_price:      Number(q.total_price),
           vat_rate:         vatRate,
-          options:          q.options   || [],
-          categories:       q.categories || [],
+          options:          q.options          || [],
+          base_categories:  q.base_categories  || [],
+          categories:       q.categories       || [],
           is_free_quote:    !!q.is_free_quote,
         });
       })
@@ -1921,6 +1922,64 @@ export default function EmailSettingsPage() {
             { option_name: 'Climatisation 3 pièces',  option_price: 120000 },
             { option_name: 'Cuisine équipée',          option_price: 95000  },
             { option_name: 'Panneaux solaires 5 kWc', option_price: 135000 },
+          ],
+          base_categories: [
+            {
+              name: 'Structure',
+              total_sale_price_ht: 1200000,
+              subcategories: [
+                {
+                  name: 'Fondations',
+                  total_sale_price_ht: 350000,
+                  lines: [
+                    { description: 'Dalle béton armé 15cm', quantity: 40, unit: 'm²', unit_cost_ht: 5000, margin_percent: 30, sale_price_ht: 260000 },
+                    { description: 'Ferraillage HA12', quantity: 200, unit: 'kg', unit_cost_ht: 450, margin_percent: 30, sale_price_ht: 90000 },
+                  ],
+                },
+                {
+                  name: 'Charpente & toiture',
+                  total_sale_price_ht: 850000,
+                  lines: [
+                    { description: 'Charpente métallique galvanisée', quantity: 1, unit: 'fft', unit_cost_ht: 480000, margin_percent: 30, sale_price_ht: 624000 },
+                    { description: 'Couverture tôle bac acier', quantity: 45, unit: 'm²', unit_cost_ht: 3500, margin_percent: 30, sale_price_ht: 204750 },
+                  ],
+                },
+              ],
+              lines: [],
+            },
+            {
+              name: 'Électricité',
+              total_sale_price_ht: 850000,
+              subcategories: [
+                {
+                  name: 'Tableau électrique',
+                  total_sale_price_ht: 280000,
+                  lines: [
+                    { description: 'Tableau divisionnaire 63A', quantity: 1, unit: 'unité', unit_cost_ht: 120000, margin_percent: 30, sale_price_ht: 156000 },
+                    { description: 'Disjoncteurs différentiels 30mA', quantity: 8, unit: 'unité', unit_cost_ht: 12000, margin_percent: 30, sale_price_ht: 124800 },
+                  ],
+                },
+                {
+                  name: 'Câblage & prises',
+                  total_sale_price_ht: 570000,
+                  lines: [
+                    { description: 'Câble NYM 2.5mm² sous conduit', quantity: 150, unit: 'ml', unit_cost_ht: 1800, margin_percent: 30, sale_price_ht: 351000 },
+                    { description: 'Prises doubles 16A avec terre', quantity: 12, unit: 'unité', unit_cost_ht: 9500, margin_percent: 30, sale_price_ht: 148200 },
+                  ],
+                },
+              ],
+              lines: [],
+            },
+            {
+              name: 'Plomberie',
+              total_sale_price_ht: 750000,
+              subcategories: [],
+              lines: [
+                { description: 'Alimentation eau froide PER 16mm', quantity: 30, unit: 'ml', unit_cost_ht: 3200, margin_percent: 30, sale_price_ht: 124800 },
+                { description: 'Évacuation PVC DN100', quantity: 20, unit: 'ml', unit_cost_ht: 2800, margin_percent: 30, sale_price_ht: 72800 },
+                { description: 'Chauffe-eau solaire 150L', quantity: 1, unit: 'unité', unit_cost_ht: 85000, margin_percent: 30, sale_price_ht: 110500 },
+              ],
+            },
           ],
           categories: [],
         };

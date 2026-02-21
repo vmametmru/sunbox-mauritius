@@ -211,6 +211,7 @@ export default function QuoteDetailPage() {
       total_price:      Number(fullQuote.total_price),
       vat_rate:         vatRate,
       options:          fullQuote.options,
+      base_categories:  fullQuote.base_categories,
       categories:       fullQuote.categories,
       is_free_quote:    !!fullQuote.is_free_quote,
     };
