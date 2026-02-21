@@ -105,6 +105,29 @@ export function evaluateFormula(
   }
 }
 
+/**
+ * Validate formula syntax without needing a real variable context.
+ * Uses a Proxy that accepts any variable name so only true syntax errors are reported.
+ */
+export function validateFormulaSyntax(formula: string): { valid: boolean; error?: string } {
+  if (!formula || !formula.trim()) return { valid: false, error: 'Formule vide' };
+  // Proxy context: every property lookup returns 1, so unknown variables don't throw
+  const context = new Proxy({} as Record<string, number>, {
+    get: () => 1,
+    has: () => true,
+  });
+  try {
+    const result = parseExpression(formula.trim(), context);
+    if (typeof result !== 'number' || !isFinite(result)) {
+      return { valid: false, error: 'Résultat invalide (ex: division par zéro)' };
+    }
+    return { valid: true };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Erreur de syntaxe';
+    return { valid: false, error: msg };
+  }
+}
+
 /* ---- Safe recursive descent parser ---- */
 
 interface ParserState {

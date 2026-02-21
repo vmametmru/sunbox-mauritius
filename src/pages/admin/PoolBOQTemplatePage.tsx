@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   ChevronDown,
   ChevronRight,
@@ -26,11 +26,191 @@ import {
   getHardcodedOptionsTemplate,
   loadTemplateFromDBByShape,
   saveTemplateToDBByShape,
+  validateFormulaSyntax,
   PoolBOQTemplateCategory,
   PoolBOQTemplateSubcategory,
   PoolBOQTemplateLine,
   PoolShape,
 } from '@/lib/pool-formulas';
+
+/* ======================================================
+   Autocomplete constants
+====================================================== */
+const FORMULA_FUNCTIONS = ['CEIL', 'FLOOR', 'ROUND', 'ROUNDUP', 'ROUNDDOWN', 'IF'];
+
+const SHAPE_VARS: Record<PoolShape, string[]> = {
+  Rectangulaire: ['longueur', 'largeur', 'profondeur'],
+  L: ['longueur_la', 'largeur_la', 'profondeur_la', 'longueur_lb', 'largeur_lb', 'profondeur_lb'],
+  T: ['longueur_ta', 'largeur_ta', 'profondeur_ta', 'longueur_tb', 'largeur_tb', 'profondeur_tb'],
+};
+
+const COMMON_DERIVED_VARS = [
+  'surface_m2', 'volume_m3', 'perimetre_m', 'surface_interieur_m2',
+  'perimetre_base_m', 'surface_base_m2',
+];
+
+const UNIT_OPTIONS = [
+  'unité', 'jour', 'sac', 'barre', 'planche', 'tonne', 'kg', 'm²', 'm³',
+  'mètre', 'bouteille', 'kit', 'forfait',
+];
+
+const PRICE_LIST_OPTIONS = [
+  "Main d'oeuvre (1 jour)",
+  'Location JCB (1 jour)',
+  'Location Dammeuse (1 jour)',
+  'Transport Matériaux',
+  'Bloc BAB',
+  'Bois de coffrage (Planche de 2.4m x 15cm)',
+  'Ciment (sac de 25kg)',
+  'Fer Y12 (barre de 9m)',
+  'Fer Y10 (barre de 9m)',
+  'Plastique noir',
+  'Crusherrun',
+  'Macadam 3/8 (tonne)',
+  'Rocksand .4 (tonne)',
+  'Rocksand .2 (tonne)',
+  'Béton Toupie',
+  'Colle Ciment (sac de 15Kg)',
+  'Latex (Bouteille de 5 Lts)',
+  'Colle Carreau (sac de 15Kg)',
+  'Carrelage',
+  'Carreleur',
+  'Joints (1 Kg)',
+  'Tiles Spacers (forfait)',
+  'TAL Sureproof (kit)',
+  'Pekay Noir',
+  'Skimmer',
+  'Traversée de Parois',
+  'Buses',
+  'Tuyaux 50mm Haute Pression',
+  'Colle PVC (Forfait)',
+  'Plombier',
+  'Spot Led',
+  'Tuyau Spot Led',
+  'Boite de connexion electrique',
+  'Câbles électriques 2.5mm2 3 cors',
+  'Panneau Electrique',
+  'Electricien',
+  'Pompe de Piscine',
+  'Pompe de Circulation',
+  'Filtre à Sable',
+  'Salt Chlorinateur',
+  'Domotique',
+  'Nylon (forfait)',
+  'Pinceau (forfait)',
+  'Clous (forfait)',
+  'Eau Béton (Forfait)',
+];
+
+/* ======================================================
+   FormulaInput – formula field with variable autocomplete
+====================================================== */
+interface FormulaInputProps {
+  value: string;
+  onChange: (value: string) => void;
+  shape: PoolShape;
+  extraVars?: string[];  // user-defined BOQ variable names
+  error?: string | null;
+}
+
+const FormulaInput: React.FC<FormulaInputProps> = ({ value, onChange, shape, extraVars = [], error }) => {
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [selectedIdx, setSelectedIdx] = useState(0);
+  const [currentToken, setCurrentToken] = useState('');
+  const [tokenStart, setTokenStart] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  const allSuggestions = [
+    ...SHAPE_VARS[shape],
+    ...COMMON_DERIVED_VARS,
+    ...extraVars,
+    ...FORMULA_FUNCTIONS,
+  ];
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    const cursor = e.target.selectionStart ?? val.length;
+    onChange(val);
+    // Extract current identifier token before cursor
+    const before = val.slice(0, cursor);
+    const match = before.match(/[a-zA-Z_][a-zA-Z0-9_]*$/);
+    if (match) {
+      const token = match[0];
+      const start = cursor - token.length;
+      setCurrentToken(token);
+      setTokenStart(start);
+      const filtered = allSuggestions.filter(s =>
+        s.toLowerCase().startsWith(token.toLowerCase()) && s !== token
+      );
+      setSuggestions(filtered);
+      setSelectedIdx(0);
+    } else {
+      setSuggestions([]);
+    }
+  };
+
+  const applySuggestion = (suggestion: string) => {
+    const cursor = inputRef.current?.selectionStart ?? value.length;
+    const newVal = value.slice(0, tokenStart) + suggestion + value.slice(cursor);
+    onChange(newVal);
+    setSuggestions([]);
+    // Refocus and move cursor after inserted token
+    setTimeout(() => {
+      const newPos = tokenStart + suggestion.length;
+      inputRef.current?.focus();
+      inputRef.current?.setSelectionRange(newPos, newPos);
+    }, 0);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (suggestions.length === 0) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); setSelectedIdx(i => Math.min(i + 1, suggestions.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setSelectedIdx(i => Math.max(i - 1, 0)); }
+    else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); applySuggestion(suggestions[selectedIdx]); }
+    else if (e.key === 'Escape') { setSuggestions([]); }
+  };
+
+  return (
+    <div className="relative">
+      <input
+        ref={inputRef}
+        type="text"
+        value={value}
+        onChange={handleChange}
+        onKeyDown={handleKeyDown}
+        onBlur={() => setTimeout(() => setSuggestions([]), 150)}
+        placeholder="Ex: surface_m2 * 1.6"
+        className={`h-8 text-sm font-mono w-full rounded-md border px-3 py-1 focus:outline-none focus:ring-2 ${
+          error ? 'border-red-400 focus:ring-red-300' : 'border-input focus:ring-ring'
+        }`}
+        autoComplete="off"
+      />
+      {error && <p className="text-xs text-red-600 mt-0.5">{error}</p>}
+      {suggestions.length > 0 && (
+        <div
+          ref={listRef}
+          className="absolute z-50 top-full left-0 mt-0.5 w-full max-h-48 overflow-y-auto bg-white border border-gray-200 rounded-md shadow-lg text-sm"
+        >
+          {suggestions.map((s, i) => (
+            <div
+              key={s}
+              className={`px-3 py-1.5 cursor-pointer font-mono ${
+                i === selectedIdx ? 'bg-blue-100 text-blue-900' : 'hover:bg-gray-50'
+              } ${FORMULA_FUNCTIONS.includes(s) ? 'text-purple-700' : 'text-blue-700'}`}
+              onMouseDown={(e) => { e.preventDefault(); applySuggestion(s); }}
+            >
+              {s}{FORMULA_FUNCTIONS.includes(s) ? '()' : ''}
+              <span className="ml-2 text-xs text-gray-400">
+                {FORMULA_FUNCTIONS.includes(s) ? 'fonction' : 'variable'}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const SHAPES: PoolShape[] = ['Rectangulaire', 'L', 'T'];
 const SHAPE_LABELS: Record<PoolShape, string> = {
@@ -64,6 +244,7 @@ const PoolBOQTemplatePage: React.FC = () => {
     lineIndex: number;
   } | null>(null);
   const [editForm, setEditForm] = useState<Partial<PoolBOQTemplateLine>>({});
+  const [formulaError, setFormulaError] = useState<string | null>(null);
 
   // Inline rename state for categories
   const [renamingCat, setRenamingCat] = useState<{ type: 'base' | 'options'; catIndex: number } | null>(null);
@@ -299,15 +480,27 @@ const PoolBOQTemplatePage: React.FC = () => {
   ) => {
     setEditingLine({ type, catIndex, subIndex, lineIndex });
     setEditForm({ ...line });
+    setFormulaError(null);
   };
 
   const cancelEdit = () => {
     setEditingLine(null);
     setEditForm({});
+    setFormulaError(null);
   };
 
   const applyEdit = () => {
     if (!editingLine) return;
+    // Validate formula syntax
+    const formula = editForm.quantity_formula ?? '';
+    if (formula.trim()) {
+      const validation = validateFormulaSyntax(formula);
+      if (!validation.valid) {
+        setFormulaError(validation.error ?? 'Erreur de syntaxe');
+        return;
+      }
+    }
+    setFormulaError(null);
     const { type, catIndex, subIndex, lineIndex } = editingLine;
     const setter = type === 'base' ? setBaseTemplate : setOptionsTemplate;
     setter(prev => prev.map((cat, ci) => {
@@ -408,30 +601,38 @@ const PoolBOQTemplatePage: React.FC = () => {
             <div className="flex flex-wrap gap-2 ml-[38px]">
               <div className="flex-1 min-w-[200px]">
                 <label className="text-xs text-gray-500 font-medium">Formule quantité</label>
-                <Input
+                <FormulaInput
                   value={editForm.quantity_formula ?? ''}
-                  onChange={(e) => setEditForm(prev => ({ ...prev, quantity_formula: e.target.value }))}
-                  placeholder="Ex: surface_m2 * 1.6"
-                  className="h-8 text-sm font-mono"
+                  onChange={(v) => { setEditForm(prev => ({ ...prev, quantity_formula: v })); setFormulaError(null); }}
+                  shape={activeShape}
+                  error={formulaError}
                 />
               </div>
-              <div className="w-24">
+              <div className="w-28">
                 <label className="text-xs text-gray-500 font-medium">Unité</label>
-                <Input
+                <input
+                  list="unit-datalist"
                   value={editForm.unit ?? ''}
                   onChange={(e) => setEditForm(prev => ({ ...prev, unit: e.target.value }))}
                   placeholder="Unité"
-                  className="h-8 text-sm"
+                  className="h-8 text-sm w-full rounded-md border border-input px-3 py-1 focus:outline-none focus:ring-2 focus:ring-ring"
                 />
+                <datalist id="unit-datalist">
+                  {UNIT_OPTIONS.map(u => <option key={u} value={u} />)}
+                </datalist>
               </div>
-              <div className="flex-1 min-w-[180px]">
+              <div className="flex-1 min-w-[220px]">
                 <label className="text-xs text-gray-500 font-medium">Référence prix</label>
-                <Input
+                <input
+                  list="price-datalist"
                   value={editForm.price_list_name ?? ''}
                   onChange={(e) => setEditForm(prev => ({ ...prev, price_list_name: e.target.value }))}
                   placeholder="Nom dans la liste de prix"
-                  className="h-8 text-sm"
+                  className="h-8 text-sm w-full rounded-md border border-input px-3 py-1 focus:outline-none focus:ring-2 focus:ring-ring"
                 />
+                <datalist id="price-datalist">
+                  {PRICE_LIST_OPTIONS.map(p => <option key={p} value={p} />)}
+                </datalist>
               </div>
             </div>
             <div className="flex gap-2 ml-[38px]">
