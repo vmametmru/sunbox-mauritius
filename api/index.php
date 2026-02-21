@@ -1568,9 +1568,15 @@ try {
             
             // Get quote options (for model-based quotes)
             $optStmt = $db->prepare("
-                SELECT option_id, option_name, option_price
-                FROM quote_options
-                WHERE quote_id = ?
+                SELECT qo.option_id, qo.option_name, qo.option_price,
+                       COALESCE(oc.name, 'Options') as category_name,
+                       COALESCE(oc.display_order, 0) as category_order,
+                       COALESCE(mo.display_order, 0) as option_order
+                FROM quote_options qo
+                LEFT JOIN model_options mo ON qo.option_id = mo.id
+                LEFT JOIN option_categories oc ON mo.category_id = oc.id
+                WHERE qo.quote_id = ?
+                ORDER BY category_order ASC, option_order ASC
             ");
             $optStmt->execute([$id]);
             $quote['options'] = $optStmt->fetchAll();
@@ -1624,7 +1630,17 @@ try {
             if (!$quote) fail('Devis non trouvé ou lien invalide', 404);
 
             // Options
-            $optStmt = $db->prepare("SELECT option_id, option_name, option_price FROM quote_options WHERE quote_id = ?");
+            $optStmt = $db->prepare("
+                SELECT qo.option_id, qo.option_name, qo.option_price,
+                       COALESCE(oc.name, 'Options') as category_name,
+                       COALESCE(oc.display_order, 0) as category_order,
+                       COALESCE(mo.display_order, 0) as option_order
+                FROM quote_options qo
+                LEFT JOIN model_options mo ON qo.option_id = mo.id
+                LEFT JOIN option_categories oc ON mo.category_id = oc.id
+                WHERE qo.quote_id = ?
+                ORDER BY category_order ASC, option_order ASC
+            ");
             $optStmt->execute([$quote['id']]);
             $quote['options'] = $optStmt->fetchAll();
 
