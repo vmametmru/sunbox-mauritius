@@ -4,9 +4,6 @@ import DOMPurify from 'dompurify';
 import {
   ArrowLeft,
   Save,
-  Bold,
-  Italic,
-  Underline,
   Merge,
   Trash2,
   Undo,
@@ -26,6 +23,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
+import { WysiwygEditor } from '@/components/ui/wysiwyg-editor';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 
@@ -135,7 +133,6 @@ export default function PdfTemplateEditorPage() {
     content: '', type: 'text',
     fontSize: 10, fontFamily: 'Arial', textAlign: 'left',
   });
-  const editorRef = React.useRef<HTMLDivElement>(null);
 
   // Preview
   const [showPreview, setShowPreview] = useState(false);
@@ -352,7 +349,7 @@ export default function PdfTemplateEditorPage() {
   const handleSaveCellEdit = () => {
     if (!editingCell || !template) return;
     const existingCell = template.grid_data[editingCell] || {};
-    const htmlContent = sanitizeHtml(editorRef.current?.innerHTML || cellEditData.content || '');
+    const htmlContent = sanitizeHtml(cellEditData.content || '');
     updateCell(editingCell, {
       ...cellEditData,
       content: htmlContent,
@@ -871,68 +868,16 @@ export default function PdfTemplateEditorPage() {
               </div>
             ) : (
               <>
-                {/* Inline formatting toolbar */}
+                {/* WYSIWYG Editor */}
                 <div>
                   <Label>Contenu</Label>
-                  {(() => {
-                    const toolbarBtnClass = "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors border border-input bg-background hover:bg-accent hover:text-accent-foreground h-8 px-3";
-                    return (
-                      <div className="flex items-center gap-1 mb-2 mt-1">
-                        <button type="button" className={toolbarBtnClass} onMouseDown={(e) => { e.preventDefault(); document.execCommand('bold'); }} title="Gras">
-                          <Bold className="h-4 w-4" />
-                        </button>
-                        <button type="button" className={toolbarBtnClass} onMouseDown={(e) => { e.preventDefault(); document.execCommand('italic'); }} title="Italique">
-                          <Italic className="h-4 w-4" />
-                        </button>
-                        <button type="button" className={toolbarBtnClass} onMouseDown={(e) => { e.preventDefault(); document.execCommand('underline'); }} title="Souligné">
-                          <Underline className="h-4 w-4" />
-                        </button>
-                      </div>
-                    );
-                  })()}
-                  <div
-                    key={editingCell || ''}
-                    ref={editorRef}
-                    contentEditable
-                    suppressContentEditableWarning
-                    className="min-h-[80px] max-h-[200px] overflow-y-auto border rounded-md p-2 focus:outline-none focus:ring-2 focus:ring-ring text-sm"
-                    style={{
-                      fontFamily: cellEditData.fontFamily || 'Arial',
-                      color: cellEditData.color || '#000',
-                    }}
-                    dangerouslySetInnerHTML={{ __html: sanitizeHtml(cellEditData.content || '') }}
-                    onInput={(e) => setCellEditData(prev => ({ ...prev, content: (e.currentTarget as HTMLDivElement).innerHTML }))}
+                  <WysiwygEditor
+                    value={cellEditData.content || ''}
+                    onChange={(val) => setCellEditData(prev => ({ ...prev, content: val }))}
+                    placeholder="Écrivez votre contenu ici..."
+                    minHeight="120px"
+                    availableVariables={VARIABLES.flatMap(g => g.items.map(v => v.key))}
                   />
-                </div>
-
-                {/* Variables */}
-                <div>
-                  <Label className="mb-2 block">Variables disponibles</Label>
-                  <div className="max-h-48 overflow-y-auto border rounded p-2 space-y-3">
-                    {VARIABLES.map((group) => (
-                      <div key={group.group}>
-                        <p className="text-xs font-semibold text-gray-500 mb-1">{group.group}</p>
-                        <div className="flex flex-wrap gap-1">
-                          {group.items.map((v) => (
-                            <button
-                              key={v.key}
-                              type="button"
-                              className="text-xs px-2 py-1 bg-blue-50 text-blue-700 rounded hover:bg-blue-100 transition-colors"
-                              onMouseDown={(e) => {
-                                e.preventDefault();
-                                if (editorRef.current) {
-                                  document.execCommand('insertHTML', false, v.key);
-                                }
-                              }}
-                              title={v.label}
-                            >
-                              {v.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
                 </div>
               </>
             )}
