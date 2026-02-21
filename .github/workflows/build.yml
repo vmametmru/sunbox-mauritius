@@ -48,19 +48,14 @@ jobs:
         id: ts
         run: echo "stamp=$(date -u +'%y%m%d-%H%M%S')" >> "$GITHUB_OUTPUT"
 
-      - name: Zip dist and api
-        run: |
-          zip -r "dist-${{ steps.ts.outputs.stamp }}.zip" dist
-          zip -r "api-${{ steps.ts.outputs.stamp }}.zip" api
-
       - name: Upload dist artifact
         uses: actions/upload-artifact@v4
         with:
-          name: dist-${{ steps.ts.outputs.stamp }}.zip
-          path: dist-${{ steps.ts.outputs.stamp }}.zip
+          name: dist-${{ steps.ts.outputs.stamp }}
+          path: dist
 
       - name: Upload api artifact
         uses: actions/upload-artifact@v4
         with:
-          name: api-${{ steps.ts.outputs.stamp }}.zip
-          path: api-${{ steps.ts.outputs.stamp }}.zip
+          name: api-${{ steps.ts.outputs.stamp }}
+          path: api
