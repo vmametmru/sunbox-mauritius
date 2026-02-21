@@ -874,17 +874,22 @@ export default function PdfTemplateEditorPage() {
                 {/* Inline formatting toolbar */}
                 <div>
                   <Label>Contenu</Label>
-                  <div className="flex items-center gap-1 mb-2 mt-1">
-                    <Button type="button" size="sm" variant="outline" onClick={() => { document.execCommand('bold'); editorRef.current?.focus(); }} title="Gras">
-                      <Bold className="h-4 w-4" />
-                    </Button>
-                    <Button type="button" size="sm" variant="outline" onClick={() => { document.execCommand('italic'); editorRef.current?.focus(); }} title="Italique">
-                      <Italic className="h-4 w-4" />
-                    </Button>
-                    <Button type="button" size="sm" variant="outline" onClick={() => { document.execCommand('underline'); editorRef.current?.focus(); }} title="Souligné">
-                      <Underline className="h-4 w-4" />
-                    </Button>
-                  </div>
+                  {(() => {
+                    const toolbarBtnClass = "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors border border-input bg-background hover:bg-accent hover:text-accent-foreground h-8 px-3";
+                    return (
+                      <div className="flex items-center gap-1 mb-2 mt-1">
+                        <button type="button" className={toolbarBtnClass} onMouseDown={(e) => { e.preventDefault(); document.execCommand('bold'); }} title="Gras">
+                          <Bold className="h-4 w-4" />
+                        </button>
+                        <button type="button" className={toolbarBtnClass} onMouseDown={(e) => { e.preventDefault(); document.execCommand('italic'); }} title="Italique">
+                          <Italic className="h-4 w-4" />
+                        </button>
+                        <button type="button" className={toolbarBtnClass} onMouseDown={(e) => { e.preventDefault(); document.execCommand('underline'); }} title="Souligné">
+                          <Underline className="h-4 w-4" />
+                        </button>
+                      </div>
+                    );
+                  })()}
                   <div
                     key={editingCell || ''}
                     ref={editorRef}
@@ -896,7 +901,7 @@ export default function PdfTemplateEditorPage() {
                       color: cellEditData.color || '#000',
                     }}
                     dangerouslySetInnerHTML={{ __html: sanitizeHtml(cellEditData.content || '') }}
-                    onBlur={(e) => setCellEditData({ ...cellEditData, content: e.currentTarget.innerHTML })}
+                    onInput={(e) => setCellEditData(prev => ({ ...prev, content: (e.currentTarget as HTMLDivElement).innerHTML }))}
                   />
                 </div>
 
@@ -913,9 +918,9 @@ export default function PdfTemplateEditorPage() {
                               key={v.key}
                               type="button"
                               className="text-xs px-2 py-1 bg-blue-50 text-blue-700 rounded hover:bg-blue-100 transition-colors"
-                              onClick={() => {
+                              onMouseDown={(e) => {
+                                e.preventDefault();
                                 if (editorRef.current) {
-                                  editorRef.current.focus();
                                   document.execCommand('insertHTML', false, v.key);
                                 }
                               }}
