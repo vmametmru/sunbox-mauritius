@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import DOMPurify from 'dompurify';
 import {
   ArrowLeft,
   Save,
@@ -105,6 +106,14 @@ const FONT_FAMILIES = [
 ];
 
 const FONT_SIZES = [6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32];
+
+// Sanitize HTML content to prevent XSS while allowing formatting tags
+const sanitizeHtml = (html: string): string => {
+  return DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: ['b', 'strong', 'i', 'em', 'u', 'br', 'span', 'div', 'p', 'font'],
+    ALLOWED_ATTR: ['style', 'size'],
+  });
+};
 
 export default function PdfTemplateEditorPage() {
   const { id } = useParams<{ id: string }>();
@@ -343,7 +352,7 @@ export default function PdfTemplateEditorPage() {
   const handleSaveCellEdit = () => {
     if (!editingCell || !template) return;
     const existingCell = template.grid_data[editingCell] || {};
-    const htmlContent = editorRef.current?.innerHTML || cellEditData.content || '';
+    const htmlContent = sanitizeHtml(editorRef.current?.innerHTML || cellEditData.content || '');
     updateCell(editingCell, {
       ...cellEditData,
       content: htmlContent,
@@ -553,7 +562,7 @@ export default function PdfTemplateEditorPage() {
                       onDoubleClick={() => handleCellDoubleClick(r, c)}
                       title={displayContent || 'Double-clic pour éditer'}
                     >
-                      <div className="truncate text-xs" dangerouslySetInnerHTML={{ __html: displayContent }} />
+                      <div className="truncate text-xs" dangerouslySetInnerHTML={{ __html: sanitizeHtml(displayContent) }} />
                     </td>
                   );
                 })}
@@ -886,7 +895,7 @@ export default function PdfTemplateEditorPage() {
                       fontFamily: cellEditData.fontFamily || 'Arial',
                       color: cellEditData.color || '#000',
                     }}
-                    dangerouslySetInnerHTML={{ __html: cellEditData.content || '' }}
+                    dangerouslySetInnerHTML={{ __html: sanitizeHtml(cellEditData.content || '') }}
                     onBlur={(e) => setCellEditData({ ...cellEditData, content: e.currentTarget.innerHTML })}
                   />
                 </div>
