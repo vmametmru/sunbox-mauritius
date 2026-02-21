@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useLocation, Outlet, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -18,46 +18,111 @@ import {
   Waves,
   DollarSign,
   FileCode,
+  ShoppingCart,
+  BookUser,
+  ChevronDown,
+  ChevronRight,
+  LogOut,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
+interface MenuItem {
+  icon: React.ElementType;
+  label: string;
+  path: string;
+  disabled?: boolean;
+}
 
-const menuItems = [
+interface MenuGroup {
+  icon: React.ElementType;
+  label: string;
+  key: string;
+  children: MenuItem[];
+}
+
+type NavItem = MenuItem | MenuGroup;
+
+function isGroup(item: NavItem): item is MenuGroup {
+  return 'children' in item;
+}
+
+const navItems: NavItem[] = [
   { icon: LayoutDashboard, label: 'Dashboard', path: '/admin' },
-  { icon: FileText, label: 'Devis', path: '/admin/quotes' },
-  { icon: Package, label: 'Modèles', path: '/admin/models' },
-
-  // ✅ NEW: Gestion photos (modèles + plans)
-  { icon: ImageIcon, label: 'Photos', path: '/admin/media' },
-
-  // ✅ NEW: BOQ Management
-  { icon: Calculator, label: 'BOQ', path: '/admin/boq' },
-
-  // ✅ NEW: Pool BOQ Variables
-  { icon: Waves, label: 'Variables Piscine', path: '/admin/pool-variables' },
-
-  // ✅ NEW: Pool BOQ Price List
-  { icon: DollarSign, label: 'Prix Piscine', path: '/admin/pool-prices' },
-
-  // ✅ NEW: Pool BOQ Template Viewer
-  { icon: FileCode, label: 'Modèle Piscine', path: '/admin/pool-template' },
-
-  // ✅ NEW: Suppliers Management  
-  { icon: Building2, label: 'Fournisseurs', path: '/admin/suppliers' },
-
-  { icon: Users, label: 'Contacts', path: '/admin/contacts' },
-  { icon: Mail, label: 'Email', path: '/admin/email' },
-  { icon: Settings, label: 'Site', path: '/admin/site' },
+  {
+    icon: ShoppingCart,
+    label: 'Commerce',
+    key: 'commerce',
+    children: [
+      { icon: FileText, label: 'Devis', path: '/admin/quotes' },
+    ],
+  },
+  {
+    icon: BookUser,
+    label: 'Contacts',
+    key: 'contacts',
+    children: [
+      { icon: Users, label: 'Clients', path: '/admin/contacts' },
+      { icon: Building2, label: 'Fournisseurs', path: '/admin/suppliers' },
+    ],
+  },
+  {
+    icon: Settings,
+    label: 'Paramètres',
+    key: 'parametres',
+    children: [
+      { icon: Package, label: 'Modèles', path: '/admin/models' },
+      { icon: ImageIcon, label: 'Photos', path: '/admin/media' },
+      { icon: Calculator, label: 'BOQ', path: '/admin/boq' },
+      { icon: DollarSign, label: 'Prix Piscine', path: '/admin/pool-prices' },
+      { icon: Waves, label: 'Variables Piscine', path: '/admin/pool-variables' },
+      { icon: FileCode, label: 'Modèles Piscine', path: '/admin/pool-template' },
+      { icon: Mail, label: 'Email', path: '/admin/email' },
+      { icon: Settings, label: 'Site', path: '/admin/site' },
+    ],
+  },
   { icon: Lightbulb, label: 'Idées Dev', path: '/admin/dev-ideas' },
-  { icon: Activity, label: 'Activité', path: '/admin/activity' },
+  { icon: Activity, label: 'Activités', path: '/admin/activity', disabled: true },
 ];
+
+// All paths that belong to each group (for auto-expand)
+const groupPaths: Record<string, string[]> = {
+  commerce: ['/admin/quotes'],
+  contacts: ['/admin/contacts', '/admin/suppliers'],
+  parametres: ['/admin/models', '/admin/media', '/admin/boq', '/admin/pool-prices', '/admin/pool-variables', '/admin/pool-template', '/admin/email', '/admin/site'],
+};
 
 export default function AdminLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  // Determine which groups should be open by default based on current path
+  const getInitialOpenGroups = () => {
+    const open: Record<string, boolean> = {};
+    for (const [key, paths] of Object.entries(groupPaths)) {
+      if (paths.some((p) => location.pathname === p || location.pathname.startsWith(p + '/'))) {
+        open[key] = true;
+      }
+    }
+    return open;
+  };
+
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(getInitialOpenGroups);
+
+  // Auto-expand group when navigating to a child route
+  useEffect(() => {
+    for (const [key, paths] of Object.entries(groupPaths)) {
+      if (paths.some((p) => location.pathname === p || location.pathname.startsWith(p + '/'))) {
+        setOpenGroups((prev) => ({ ...prev, [key]: true }));
+      }
+    }
+  }, [location.pathname]);
+
+  const toggleGroup = (key: string) => {
+    setOpenGroups((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
 
   // Helper: active state also for subroutes (ex: /admin/media/123)
   // Special case for Dashboard (/admin): only exact match, not startsWith
@@ -67,6 +132,145 @@ export default function AdminLayout() {
     }
     return location.pathname === path || location.pathname.startsWith(path + '/');
   };
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth.php?action=logout', { method: 'POST', credentials: 'include' });
+    } catch {
+      // ignore network errors, redirect anyway
+    }
+    navigate('/admin-login');
+  };
+
+  // ── Shared render helpers ──────────────────────────────────────────────────
+
+  const renderNavLink = (item: MenuItem, indent = false, onClick?: () => void) => (
+    <Link
+      key={item.path}
+      to={item.disabled ? '#' : item.path}
+      onClick={item.disabled ? (e) => e.preventDefault() : onClick}
+      aria-disabled={item.disabled}
+      className={cn(
+        "flex items-center gap-3 px-4 py-2.5 rounded-lg transition-colors",
+        indent && sidebarOpen && "pl-8",
+        item.disabled
+          ? "opacity-40 cursor-not-allowed"
+          : isActive(item.path)
+          ? "bg-orange-500 text-white"
+          : "hover:bg-white/10"
+      )}
+    >
+      <item.icon className="h-5 w-5 flex-shrink-0" />
+      {sidebarOpen && <span>{item.label}</span>}
+    </Link>
+  );
+
+  const renderGroupHeader = (group: MenuGroup) => (
+    <button
+      key={group.key}
+      onClick={() => toggleGroup(group.key)}
+      className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg hover:bg-white/10 transition-colors"
+    >
+      <group.icon className="h-5 w-5 flex-shrink-0" />
+      {sidebarOpen && (
+        <>
+          <span className="flex-1 text-left">{group.label}</span>
+          {openGroups[group.key]
+            ? <ChevronDown className="h-4 w-4 opacity-60" />
+            : <ChevronRight className="h-4 w-4 opacity-60" />}
+        </>
+      )}
+    </button>
+  );
+
+  // ── Mobile flat list (all items expanded) ─────────────────────────────────
+
+  const renderMobileNav = () => (
+    <nav className="p-4 space-y-1">
+      {navItems.map((item) => {
+        if (isGroup(item)) {
+          return (
+            <React.Fragment key={item.key}>
+              <div className="flex items-center gap-3 px-4 py-2 text-xs uppercase tracking-wider opacity-50 mt-3">
+                <item.icon className="h-4 w-4" />
+                <span>{item.label}</span>
+              </div>
+              {item.children.map((child) => (
+                <Link
+                  key={child.path}
+                  to={child.disabled ? '#' : child.path}
+                  onClick={child.disabled ? (e) => e.preventDefault() : () => setMobileMenuOpen(false)}
+                  aria-disabled={child.disabled}
+                  className={cn(
+                    "flex items-center gap-3 pl-8 pr-4 py-2.5 rounded-lg transition-colors",
+                    child.disabled
+                      ? "opacity-40 cursor-not-allowed"
+                      : isActive(child.path)
+                      ? "bg-orange-500 text-white"
+                      : "hover:bg-white/10"
+                  )}
+                >
+                  <child.icon className="h-5 w-5" />
+                  <span>{child.label}</span>
+                </Link>
+              ))}
+            </React.Fragment>
+          );
+        }
+        return (
+          <Link
+            key={item.path}
+            to={item.disabled ? '#' : item.path}
+            onClick={item.disabled ? (e) => e.preventDefault() : () => setMobileMenuOpen(false)}
+            aria-disabled={item.disabled}
+            className={cn(
+              "flex items-center gap-3 px-4 py-2.5 rounded-lg transition-colors",
+              item.disabled
+                ? "opacity-40 cursor-not-allowed"
+                : isActive(item.path)
+                ? "bg-orange-500 text-white"
+                : "hover:bg-white/10"
+            )}
+          >
+            <item.icon className="h-5 w-5" />
+            <span>{item.label}</span>
+          </Link>
+        );
+      })}
+      <div className="border-t border-white/20 pt-3 mt-3 space-y-1">
+        <Link to="/" onClick={() => setMobileMenuOpen(false)} className="flex items-center gap-3 px-4 py-2.5 rounded-lg hover:bg-white/10">
+          <Home className="h-5 w-5" />
+          <span>Retour au site</span>
+        </Link>
+        <button onClick={handleLogout} className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg hover:bg-white/10 text-left">
+          <LogOut className="h-5 w-5" />
+          <span>Déconnexion</span>
+        </button>
+      </div>
+    </nav>
+  );
+
+  // ── Desktop nav ───────────────────────────────────────────────────────────
+
+  const renderDesktopNav = () => (
+    <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
+      {navItems.map((item) => {
+        if (isGroup(item)) {
+          return (
+            <React.Fragment key={item.key}>
+              {renderGroupHeader(item)}
+              {(openGroups[item.key] || !sidebarOpen) && (
+                <div className={cn("space-y-1", sidebarOpen && "ml-1")}>
+                  {item.children.map((child) => renderNavLink(child, true))}
+                </div>
+              )}
+            </React.Fragment>
+          );
+        }
+        return renderNavLink(item);
+      })}
+    </nav>
+  );
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -91,33 +295,7 @@ export default function AdminLayout() {
       {/* Mobile Menu */}
       {mobileMenuOpen && (
         <div className="lg:hidden bg-[#1A365D] text-white">
-          <nav className="p-4 space-y-2">
-            {menuItems.map((item) => (
-              <Link
-                key={item.path}
-                to={item.path}
-                onClick={() => setMobileMenuOpen(false)}
-                className={cn(
-                  "flex items-center gap-3 px-4 py-3 rounded-lg transition-colors",
-                  isActive(item.path)
-                    ? "bg-orange-500 text-white"
-                    : "hover:bg-white/10"
-                )}
-              >
-                <item.icon className="h-5 w-5" />
-                <span>{item.label}</span>
-              </Link>
-            ))}
-            <div className="border-t border-white/20 pt-4 mt-4">
-              <Link
-                to="/"
-                className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-white/10"
-              >
-                <Home className="h-5 w-5" />
-                <span>Retour au site</span>
-              </Link>
-            </div>
-          </nav>
+          {renderMobileNav()}
         </div>
       )}
 
@@ -147,40 +325,32 @@ export default function AdminLayout() {
           </div>
 
           {/* Navigation */}
-          <nav className="flex-1 p-4 space-y-2">
-            {menuItems.map((item) => (
-              <Link
-                key={item.path}
-                to={item.path}
-                className={cn(
-                  "flex items-center gap-3 px-4 py-3 rounded-lg transition-colors",
-                  isActive(item.path)
-                    ? "bg-orange-500 text-white"
-                    : "hover:bg-white/10"
-                )}
-              >
-                <item.icon className="h-5 w-5 flex-shrink-0" />
-                {sidebarOpen && <span>{item.label}</span>}
-              </Link>
-            ))}
-          </nav>
+          {renderDesktopNav()}
 
           {/* Footer */}
-          <div className="p-4 border-t border-white/10 space-y-2">
+          <div className="p-4 border-t border-white/10 space-y-1">
             <Link
               to="/"
-              className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-white/10 transition-colors"
+              className="flex items-center gap-3 px-4 py-2.5 rounded-lg hover:bg-white/10 transition-colors"
             >
               <Home className="h-5 w-5 flex-shrink-0" />
               {sidebarOpen && <span>Retour au site</span>}
             </Link>
             <Button
               variant="ghost"
-              className="w-full justify-start gap-3 px-4 py-3 text-white hover:bg-white/10"
+              className="w-full justify-start gap-3 px-4 py-2.5 text-white hover:bg-white/10"
               onClick={() => setSidebarOpen(!sidebarOpen)}
             >
               <Menu className="h-5 w-5 flex-shrink-0" />
               {sidebarOpen && <span>Réduire</span>}
+            </Button>
+            <Button
+              variant="ghost"
+              className="w-full justify-start gap-3 px-4 py-2.5 text-white hover:bg-white/10"
+              onClick={handleLogout}
+            >
+              <LogOut className="h-5 w-5 flex-shrink-0" />
+              {sidebarOpen && <span>Déconnexion</span>}
             </Button>
           </div>
         </aside>
