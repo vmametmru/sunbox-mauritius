@@ -51,6 +51,37 @@ try {
     $emailSettings = normalizeEmailSettings($emailSettings);
 
     switch ($action) {
+        case 'send_quote_pdf': {
+            validateRequired($body, ['to', 'subject', 'html', 'pdf_base64', 'filename']);
+
+            if (empty($emailSettings['smtp_host']) || empty($emailSettings['smtp_user'])) {
+                errorResponse('Email not configured. Please configure SMTP settings in admin panel.');
+            }
+            if (empty($emailSettings['smtp_password'])) {
+                errorResponse('SMTP password missing. Please set SMTP_PASS in .env on the server.');
+            }
+
+            $emailData = [
+                'to'         => $body['to'],
+                'subject'    => $body['subject'],
+                'html'       => $body['html'],
+                'text'       => strip_tags($body['html']),
+                'pdf_base64' => $body['pdf_base64'],
+                'filename'   => $body['filename'],
+            ];
+            if (isset($body['cc'])) $emailData['cc'] = $body['cc'];
+
+            $result = sendEmail($emailSettings, $emailData);
+            logEmail($db, $emailData, $result ? 'sent' : 'failed', 'quote_pdf');
+
+            if ($result) {
+                successResponse(null, 'Email with PDF sent successfully');
+            } else {
+                errorResponse('Failed to send email');
+            }
+            break;
+        }
+
         case 'send':
             validateRequired($body, ['to', 'subject']);
 
@@ -279,6 +310,14 @@ function sendWithPHPMailer($settings, $data)
         $mail->Subject = (string)($data['subject'] ?? '');
         $mail->Body    = (string)($data['html'] ?? $data['body'] ?? '');
         $mail->AltBody = (string)($data['text'] ?? strip_tags($mail->Body));
+
+        // Attach PDF if provided
+        if (!empty($data['pdf_base64']) && !empty($data['filename'])) {
+            $pdfContent = base64_decode($data['pdf_base64']);
+            if ($pdfContent !== false) {
+                $mail->addStringAttachment($pdfContent, $data['filename'], PHPMailer\PHPMailer\PHPMailer::ENCODING_BASE64, 'application/pdf');
+            }
+        }
 
         return $mail->send();
 

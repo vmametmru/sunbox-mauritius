@@ -18,6 +18,7 @@ import {
   Image,
   Upload,
   FileImage,
+  Check,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -31,6 +32,7 @@ import { Badge } from '@/components/ui/badge';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { WysiwygEditor } from '@/components/ui/wysiwyg-editor';
+import { TEMPLATE_NAMES, TEMPLATE_DESCRIPTIONS } from '@/components/QuotePdfTemplates';
 
 interface EmailSettings {
   smtp_host: string;
@@ -155,6 +157,9 @@ interface PdfSettings {
   pdf_show_vat: string;
   pdf_show_bank_details: string;
   pdf_show_terms: string;
+  pdf_template: string;
+  pdf_font: string;
+  pdf_logo_position: string;
 }
 
 const defaultPdfSettings: PdfSettings = {
@@ -168,6 +173,9 @@ const defaultPdfSettings: PdfSettings = {
   pdf_show_vat: 'true',
   pdf_show_bank_details: 'false',
   pdf_show_terms: 'true',
+  pdf_template: '1',
+  pdf_font: 'inter',
+  pdf_logo_position: 'left',
 };
 
 export default function EmailSettingsPage() {
@@ -1581,12 +1589,71 @@ export default function EmailSettingsPage() {
                 Modèle PDF des Devis
               </CardTitle>
               <CardDescription>
-                Personnalisez l'apparence et le contenu des documents PDF générés pour les devis
+                Choisissez un template et personnalisez l'apparence des documents PDF générés pour les devis
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-6">
-              {/* Colors */}
+            <CardContent className="space-y-8">
+
+              {/* ── Template picker ─────────────────────────────────────────── */}
+              <div className="space-y-3">
+                <Label className="text-base font-semibold">Template PDF</Label>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  {Object.entries(TEMPLATE_NAMES).map(([id, name]) => {
+                    const isSelected = (pdfSettings.pdf_template || '1') === id;
+                    const templateColors: Record<string, { h: string; a: string }> = {
+                      '1': { h: '#1A365D', a: '#f97316' },
+                      '2': { h: '#111827', a: '#f97316' },
+                      '3': { h: '#ea580c', a: '#1A365D' },
+                      '4': { h: '#0f172a', a: '#f97316' },
+                      '5': { h: '#1A365D', a: '#f97316' },
+                      '6': { h: '#0d9488', a: '#f97316' },
+                    };
+                    const tc = templateColors[id];
+                    return (
+                      <button
+                        key={id}
+                        onClick={() => setPdfSettings({ ...pdfSettings, pdf_template: id })}
+                        className={`relative rounded-xl border-2 overflow-hidden text-left transition-all hover:shadow-md ${
+                          isSelected ? 'border-orange-500 shadow-md' : 'border-gray-200 hover:border-gray-300'
+                        }`}
+                      >
+                        {/* Mini preview */}
+                        <div className="h-28 bg-white p-0 overflow-hidden">
+                          <div style={{ background: tc.h }} className="h-10 flex items-center justify-between px-2">
+                            <div className="w-6 h-4 bg-white/20 rounded" />
+                            <div className="text-right">
+                              <div style={{ background: tc.a }} className="inline-block text-white text-[6px] font-bold px-1 py-0.5 rounded mb-0.5">DEVIS</div>
+                              <div className="text-white text-[7px] opacity-80">Réf. XXXXX</div>
+                            </div>
+                          </div>
+                          <div className="p-2 space-y-1">
+                            <div className="flex gap-1">
+                              <div className="flex-1 bg-gray-100 rounded h-3" />
+                              <div className="flex-1 bg-gray-100 rounded h-3" />
+                            </div>
+                            <div className="bg-gray-100 rounded h-2 w-3/4" />
+                            <div className="bg-gray-100 rounded h-2 w-1/2" />
+                            <div style={{ background: tc.a }} className="rounded h-3 mt-2 w-full opacity-80" />
+                          </div>
+                        </div>
+                        <div className="px-3 py-2 border-t border-gray-100 bg-gray-50">
+                          <div className="font-semibold text-sm text-gray-800">{name}</div>
+                          <div className="text-xs text-gray-500 mt-0.5 leading-tight">{TEMPLATE_DESCRIPTIONS[id]}</div>
+                        </div>
+                        {isSelected && (
+                          <div className="absolute top-2 right-2 w-5 h-5 bg-orange-500 rounded-full flex items-center justify-center">
+                            <Check className="h-3 w-3 text-white" />
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* ── Customisation ──────────────────────────────────────────── */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Colors */}
                 <div className="space-y-2">
                   <Label>Couleur principale</Label>
                   <div className="flex items-center gap-3">
@@ -1603,7 +1670,7 @@ export default function EmailSettingsPage() {
                       className="flex-1"
                     />
                   </div>
-                  <p className="text-sm text-gray-500">Entête, titres de section</p>
+                  <p className="text-sm text-gray-500">En-tête, titres de section</p>
                 </div>
                 <div className="space-y-2">
                   <Label>Couleur accent</Label>
@@ -1622,6 +1689,44 @@ export default function EmailSettingsPage() {
                     />
                   </div>
                   <p className="text-sm text-gray-500">Bordures, totaux, mise en évidence</p>
+                </div>
+              </div>
+
+              {/* Font & Logo position */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <Label>Police de caractères</Label>
+                  <Select
+                    value={pdfSettings.pdf_font || 'inter'}
+                    onValueChange={(v) => setPdfSettings({ ...pdfSettings, pdf_font: v })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Choisir une police" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="inter">Inter (défaut)</SelectItem>
+                      <SelectItem value="roboto">Roboto</SelectItem>
+                      <SelectItem value="poppins">Poppins</SelectItem>
+                      <SelectItem value="lato">Lato</SelectItem>
+                      <SelectItem value="playfair">Playfair Display (serif)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Position du logo</Label>
+                  <Select
+                    value={pdfSettings.pdf_logo_position || 'left'}
+                    onValueChange={(v) => setPdfSettings({ ...pdfSettings, pdf_logo_position: v })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Position" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="left">Gauche</SelectItem>
+                      <SelectItem value="center">Centre</SelectItem>
+                      <SelectItem value="right">Droite</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
 
@@ -1699,7 +1804,7 @@ export default function EmailSettingsPage() {
 
               <div className="flex justify-end">
                 <Button onClick={savePdfSettings} disabled={savingPdf}>
-                  {savingPdf ? 'Enregistrement…' : 'Enregistrer le modèle PDF'}
+                  {savingPdf ? 'Enregistrement…' : 'Enregistrer les paramètres PDF'}
                 </Button>
               </div>
             </CardContent>

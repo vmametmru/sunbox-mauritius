@@ -19,6 +19,7 @@ import QuotePage from "./pages/QuotePage";
 import LegalPage from "./pages/LegalPage";
 import NotFound from "./pages/NotFound";
 import AdminLoginPage from "./pages/AdminLoginPage";
+import QuoteActionPage from "./pages/QuoteActionPage";
 
 // Admin Pages
 import AdminLayout from "./pages/admin/AdminLayout";
@@ -59,6 +60,7 @@ const App = () => (
               <Route path="/configure" element={<ConfigurePage />} />
               <Route path="/details" element={<DetailsPage />} />
               <Route path="/quote" element={<QuotePage />} />
+              <Route path="/quote-action/:quoteId" element={<QuoteActionPage />} />
               <Route path="/admin-login" element={<AdminLoginPage />} />
 
               {/* Admin */}

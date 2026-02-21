@@ -12,21 +12,32 @@ import {
   Settings,
   Trash2,
   ExternalLink,
-  RefreshCw
+  RefreshCw,
+  Download,
+  Send,
+  Loader2,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { useNavigate, useParams } from 'react-router-dom';
 import AdminConfigureModal from '@/components/AdminConfigureModal';
 import { useSiteSettings, calculateTTC } from '@/hooks/use-site-settings';
+import { downloadQuotePdf, getQuotePdfBase64, imageUrlToBase64 } from '@/components/QuotePdfGenerator';
+import type { QuotePdfData, PdfDisplaySettings, CompanyInfo } from '@/components/QuotePdfTemplates';
 
 export default function QuoteDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [quote, setQuote] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [generatingPdf, setGeneratingPdf] = useState(false);
+  const [sendingEmail, setSendingEmail] = useState(false);
+  const [emailRecipient, setEmailRecipient] = useState('');
+  const [showEmailInput, setShowEmailInput] = useState(false);
 
   // Admin Configure Modal state for editing model-based quotes
   const [showConfigureModal, setShowConfigureModal] = useState(false);
@@ -144,18 +155,127 @@ export default function QuoteDetailPage() {
     }).format(price) + ' Rs';
   };
 
+  const buildPdfOptions = async () => {
+    const [pdfSettingsRaw, emailSettingsRaw, siteSettingsRaw] = await Promise.all([
+      api.getSettings('pdf').catch(() => ({})),
+      api.getSettings('company').catch(() => ({})),
+      api.getSettings('site').catch(() => ({})),
+    ]);
+
+    const pdfSettings: PdfDisplaySettings = {
+      pdf_primary_color:    pdfSettingsRaw?.pdf_primary_color    || '#1A365D',
+      pdf_accent_color:     pdfSettingsRaw?.pdf_accent_color     || '#f97316',
+      pdf_footer_text:      pdfSettingsRaw?.pdf_footer_text      || 'Sunbox Ltd – Grand Baie, Mauritius | info@sunbox-mauritius.com',
+      pdf_terms:            pdfSettingsRaw?.pdf_terms            || '',
+      pdf_bank_details:     pdfSettingsRaw?.pdf_bank_details     || '',
+      pdf_validity_days:    pdfSettingsRaw?.pdf_validity_days    || '30',
+      pdf_show_logo:        pdfSettingsRaw?.pdf_show_logo        || 'true',
+      pdf_show_vat:         pdfSettingsRaw?.pdf_show_vat         || 'true',
+      pdf_show_bank_details:pdfSettingsRaw?.pdf_show_bank_details|| 'false',
+      pdf_show_terms:       pdfSettingsRaw?.pdf_show_terms       || 'true',
+      pdf_template:         pdfSettingsRaw?.pdf_template         || '1',
+      pdf_font:             pdfSettingsRaw?.pdf_font             || 'inter',
+      pdf_logo_position:    pdfSettingsRaw?.pdf_logo_position    || 'left',
+    };
+
+    const company: CompanyInfo = {
+      company_name:    emailSettingsRaw?.company_name    || 'Sunbox Mauritius',
+      company_email:   emailSettingsRaw?.company_email   || 'info@sunbox-mauritius.com',
+      company_phone:   emailSettingsRaw?.company_phone   || '',
+      company_address: emailSettingsRaw?.company_address || 'Grand Baie, Mauritius',
+    };
+
+    const logoUrl: string = siteSettingsRaw?.site_logo || '';
+    const logoBase64 = logoUrl ? await imageUrlToBase64(logoUrl) : '';
+
+    // Load full quote details
+    const fullQuote = await api.getQuoteWithDetails(quote.id);
+
+    const data: QuotePdfData = {
+      id:               fullQuote.id,
+      reference_number: fullQuote.reference_number,
+      created_at:       fullQuote.created_at,
+      valid_until:      fullQuote.valid_until,
+      status:           fullQuote.status,
+      customer_name:    fullQuote.customer_name,
+      customer_email:   fullQuote.customer_email,
+      customer_phone:   fullQuote.customer_phone,
+      customer_address: fullQuote.customer_address,
+      model_name:       fullQuote.model_name,
+      model_type:       fullQuote.model_type,
+      quote_title:      fullQuote.quote_title,
+      photo_url:        fullQuote.photo_url,
+      plan_url:         fullQuote.plan_url,
+      base_price:       Number(fullQuote.base_price),
+      options_total:    Number(fullQuote.options_total),
+      total_price:      Number(fullQuote.total_price),
+      vat_rate:         vatRate,
+      options:          fullQuote.options,
+      categories:       fullQuote.categories,
+      is_free_quote:    !!fullQuote.is_free_quote,
+    };
+
+    return { data, pdfSettings, company, logoBase64 };
+  };
+
+  const handleDownloadPdf = async () => {
+    setGeneratingPdf(true);
+    try {
+      const opts = await buildPdfOptions();
+      await downloadQuotePdf(opts);
+      toast({ title: 'PDF téléchargé', description: `Devis-${quote.reference_number}.pdf` });
+    } catch (err: any) {
+      toast({ title: 'Erreur PDF', description: err.message, variant: 'destructive' });
+    } finally {
+      setGeneratingPdf(false);
+    }
+  };
+
+  const handleSendPdfByEmail = async () => {
+    const to = emailRecipient.trim() || quote.customer_email;
+    if (!to) {
+      toast({ title: 'Erreur', description: 'Adresse email manquante', variant: 'destructive' });
+      return;
+    }
+    setSendingEmail(true);
+    try {
+      const opts = await buildPdfOptions();
+      const pdfBase64 = await getQuotePdfBase64(opts);
+      const modelTitle = quote.is_free_quote ? (quote.quote_title || 'Devis') : (quote.model_name || 'Devis');
+      await api.sendQuotePdf({
+        to,
+        subject: `Votre devis ${quote.reference_number} – ${modelTitle}`,
+        html: `<p>Bonjour ${quote.customer_name},</p>
+<p>Veuillez trouver ci-joint votre devis <strong>${quote.reference_number}</strong> pour <strong>${modelTitle}</strong>.</p>
+<p>Vous pouvez approuver, rejeter ou demander des modifications directement depuis le PDF.</p>
+<p>Cordialement,<br/>L'équipe Sunbox Mauritius</p>`,
+        pdf_base64: pdfBase64,
+        filename:   `Devis-${quote.reference_number}.pdf`,
+      });
+      toast({ title: 'Email envoyé', description: `PDF envoyé à ${to}` });
+      setShowEmailInput(false);
+      setEmailRecipient('');
+    } catch (err: any) {
+      toast({ title: 'Erreur envoi email', description: err.message, variant: 'destructive' });
+    } finally {
+      setSendingEmail(false);
+    }
+  };
+
   const getStatusBadge = (status: string) => {
     const styles: Record<string, string> = {
-      pending: 'bg-yellow-100 text-yellow-800',
-      approved: 'bg-green-100 text-green-800',
-      rejected: 'bg-red-100 text-red-800',
-      completed: 'bg-purple-100 text-purple-800',
+      pending:            'bg-yellow-100 text-yellow-800',
+      approved:           'bg-green-100 text-green-800',
+      rejected:           'bg-red-100 text-red-800',
+      completed:          'bg-purple-100 text-purple-800',
+      revision_requested: 'bg-blue-100 text-blue-800',
     };
     const labels: Record<string, string> = {
-      pending: 'En attente',
-      approved: 'Approuvé',
-      rejected: 'Rejeté',
-      completed: 'Terminé',
+      pending:            'En attente',
+      approved:           'Approuvé',
+      rejected:           'Rejeté',
+      completed:          'Terminé',
+      revision_requested: 'Modification demandée',
     };
     return <Badge className={styles[status] || 'bg-gray-100'}>{labels[status] || status}</Badge>;
   };
@@ -337,6 +457,57 @@ export default function QuoteDetailPage() {
         </p>
       )}
 
+      {/* PDF Actions */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <FileText className="h-5 w-5 text-orange-500" />
+            PDF du Devis
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap gap-3">
+            <Button
+              onClick={handleDownloadPdf}
+              disabled={generatingPdf || sendingEmail}
+              className="bg-orange-500 hover:bg-orange-600"
+            >
+              {generatingPdf ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
+              {generatingPdf ? 'Génération…' : 'Télécharger le PDF'}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setShowEmailInput(!showEmailInput)}
+              disabled={generatingPdf || sendingEmail}
+            >
+              <Send className="h-4 w-4 mr-2" />
+              Envoyer par email
+            </Button>
+          </div>
+          {showEmailInput && (
+            <div className="flex gap-2 items-end pt-1">
+              <div className="flex-1 space-y-1">
+                <Label className="text-xs text-gray-500">Destinataire (laisser vide pour envoyer au client)</Label>
+                <Input
+                  type="email"
+                  placeholder={quote.customer_email}
+                  value={emailRecipient}
+                  onChange={(e) => setEmailRecipient(e.target.value)}
+                />
+              </div>
+              <Button
+                onClick={handleSendPdfByEmail}
+                disabled={sendingEmail || generatingPdf}
+                className="bg-blue-600 hover:bg-blue-700"
+              >
+                {sendingEmail ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Mail className="h-4 w-4 mr-2" />}
+                {sendingEmail ? 'Envoi…' : 'Envoyer'}
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Actions */}
       <Card>
         <CardContent className="p-6">
@@ -370,7 +541,7 @@ export default function QuoteDetailPage() {
                 Marquer Terminé
               </Button>
             )}
-            {(quote.status === 'approved' || quote.status === 'rejected' || quote.status === 'completed') && (
+            {(quote.status === 'approved' || quote.status === 'rejected' || quote.status === 'completed' || quote.status === 'revision_requested') && (
               <Button 
                 variant="outline"
                 onClick={() => updateStatus('pending')}

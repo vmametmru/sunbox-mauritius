@@ -1029,6 +1029,12 @@ try {
                 // WCQ-yyyymm-xxxxxx (container) or WPQ-yyyymm-xxxxxx (pool)
                 $reference = sprintf('%s-%s-%06d', $prefix, $yearMonth, $quoteId);
                 $db->prepare("UPDATE quotes SET reference_number = ? WHERE id = ?")->execute([$reference, $quoteId]);
+
+                // Set approval token (graceful – column may not exist until migration is run)
+                try {
+                    $db->prepare("UPDATE quotes SET approval_token = ? WHERE id = ?")
+                       ->execute([bin2hex(random_bytes(32)), $quoteId]);
+                } catch (Exception $tokenEx) { /* migration not yet applied */ }
                 
                 // Insert selected options
                 if (!empty($body['selected_options']) && is_array($body['selected_options'])) {
@@ -1193,6 +1199,12 @@ try {
                 // Update reference with actual quote ID
                 $reference = sprintf('%s-%s-%06d', $prefix, $yearMonth, $quoteId);
                 $db->prepare("UPDATE quotes SET reference_number = ? WHERE id = ?")->execute([$reference, $quoteId]);
+
+                // Set approval token (graceful – column may not exist until migration is run)
+                try {
+                    $db->prepare("UPDATE quotes SET approval_token = ? WHERE id = ?")
+                       ->execute([bin2hex(random_bytes(32)), $quoteId]);
+                } catch (Exception $tokenEx) { /* migration not yet applied */ }
                 
                 // Insert selected options for model-based quotes
                 if (!$isFreeQuote && !empty($body['selected_options']) && is_array($body['selected_options'])) {
@@ -1457,6 +1469,12 @@ try {
                 // Update reference with actual ID
                 $reference = sprintf('%s-%s-%06d', $prefix, $yearMonth, $newQuoteId);
                 $db->prepare("UPDATE quotes SET reference_number = ? WHERE id = ?")->execute([$reference, $newQuoteId]);
+
+                // Set approval token (graceful – column may not exist until migration is run)
+                try {
+                    $db->prepare("UPDATE quotes SET approval_token = ? WHERE id = ?")
+                       ->execute([bin2hex(random_bytes(32)), $newQuoteId]);
+                } catch (Exception $tokenEx) { /* migration not yet applied */ }
                 
                 // Clone options
                 $db->prepare("
@@ -1588,6 +1606,70 @@ try {
             }
             
             ok($quote);
+            break;
+        }
+
+        case 'get_quote_by_token': {
+            validateRequired($body, ['token']);
+            $token = sanitize($body['token']);
+
+            $stmt = $db->prepare("
+                SELECT q.*, m.name as model_display_name, m.type as model_display_type
+                FROM quotes q
+                LEFT JOIN models m ON q.model_id = m.id
+                WHERE q.approval_token = ?
+            ");
+            $stmt->execute([$token]);
+            $quote = $stmt->fetch();
+            if (!$quote) fail('Devis non trouvé ou lien invalide', 404);
+
+            // Options
+            $optStmt = $db->prepare("SELECT option_id, option_name, option_price FROM quote_options WHERE quote_id = ?");
+            $optStmt->execute([$quote['id']]);
+            $quote['options'] = $optStmt->fetchAll();
+
+            // Categories for free quotes
+            if ($quote['is_free_quote']) {
+                $catStmt = $db->prepare("
+                    SELECT qc.*,
+                        COALESCE(SUM(ROUND(ql.quantity * ql.unit_cost_ht * (1 + ql.margin_percent / 100), 2)), 0) AS total_sale_price_ht
+                    FROM quote_categories qc
+                    LEFT JOIN quote_lines ql ON qc.id = ql.category_id
+                    WHERE qc.quote_id = ?
+                    GROUP BY qc.id ORDER BY qc.display_order ASC
+                ");
+                $catStmt->execute([$quote['id']]);
+                $categories = $catStmt->fetchAll();
+                foreach ($categories as &$cat) {
+                    $lineStmt = $db->prepare("
+                        SELECT ql.*,
+                            ROUND(ql.quantity * ql.unit_cost_ht * (1 + ql.margin_percent / 100), 2) AS sale_price_ht
+                        FROM quote_lines ql WHERE ql.category_id = ? ORDER BY ql.display_order ASC
+                    ");
+                    $lineStmt->execute([$cat['id']]);
+                    $cat['lines'] = $lineStmt->fetchAll();
+                }
+                $quote['categories'] = $categories;
+            }
+
+            ok($quote);
+            break;
+        }
+
+        case 'update_quote_status_by_token': {
+            validateRequired($body, ['token', 'status']);
+            $token = sanitize($body['token']);
+            $validStatuses = ['approved', 'rejected', 'revision_requested'];
+            if (!in_array($body['status'], $validStatuses)) fail('Statut invalide');
+
+            $stmt = $db->prepare("SELECT id, status FROM quotes WHERE approval_token = ?");
+            $stmt->execute([$token]);
+            $quote = $stmt->fetch();
+            if (!$quote) fail('Devis non trouvé ou lien invalide', 404);
+
+            $db->prepare("UPDATE quotes SET status = ?, updated_at = NOW() WHERE approval_token = ?")
+               ->execute([$body['status'], $token]);
+            ok(['id' => $quote['id'], 'status' => $body['status']]);
             break;
         }
 
