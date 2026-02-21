@@ -5,6 +5,7 @@
  *   - Pool dimensions: longueur, largeur, profondeur
  *   - Calculated variables: surface_m2, volume_m3, perimetre_m, etc.
  *   - Math functions: Math.ceil (via CEIL / ROUNDUP), Math.floor (via FLOOR / ROUNDDOWN), Math.round
+ *   - Conditional: IF(condition, value_if_true, value_if_false)
  *
  * Formulas are plain arithmetic expressions stored as strings.
  * Example: "(longueur + 1) * 2 + (largeur + 1) * 2"
@@ -86,7 +87,8 @@ export function evaluatePoolVariables(
  * Evaluate a single formula string using the provided variable context.
  * Uses a safe recursive descent parser — no eval() or Function().
  * Supports: +, -, *, /, parentheses, numeric literals, variable references.
- * Also supports CEIL(), FLOOR(), ROUND(), ROUNDUP(), ROUNDDOWN() functions.
+ * Also supports CEIL(), FLOOR(), ROUND(), ROUNDUP(), ROUNDDOWN() functions and
+ * IF(condition, value_if_true, value_if_false) with operators: <, >, <=, >=, ==, !=
  */
 export function evaluateFormula(
   formula: string,
@@ -194,15 +196,52 @@ function parseAtom(s: ParserState): number {
     }
     skipSpaces(s);
 
-    // Function call: CEIL(...), FLOOR(...), ROUND(...), ROUNDUP(...), ROUNDDOWN(...)
+    // Function call
     if (s.pos < s.input.length && s.input[s.pos] === '(') {
       s.pos++; // skip '('
+      const fn = name.toUpperCase();
+
+      // IF(condition, value_if_true, value_if_false)
+      if (fn === 'IF') {
+        const left = parseAddSub(s);
+        skipSpaces(s);
+        let condResult: boolean;
+        const ch = s.pos < s.input.length ? s.input[s.pos] : '';
+        if (ch === '<' || ch === '>' || ch === '=' || ch === '!') {
+          let op = s.input[s.pos]; s.pos++;
+          if (s.pos < s.input.length && s.input[s.pos] === '=') { op += '='; s.pos++; }
+          skipSpaces(s);
+          const right = parseAddSub(s);
+          skipSpaces(s);
+          if (op === '<') condResult = left < right;
+          else if (op === '>') condResult = left > right;
+          else if (op === '<=') condResult = left <= right;
+          else if (op === '>=') condResult = left >= right;
+          else if (op === '==' || op === '=') condResult = left === right;
+          else if (op === '!=') condResult = left !== right;
+          else condResult = left !== 0;
+        } else {
+          condResult = left !== 0;
+        }
+        skipSpaces(s);
+        if (s.pos < s.input.length && s.input[s.pos] === ',') s.pos++;
+        skipSpaces(s);
+        const valTrue = parseAddSub(s);
+        skipSpaces(s);
+        if (s.pos < s.input.length && s.input[s.pos] === ',') s.pos++;
+        skipSpaces(s);
+        const valFalse = parseAddSub(s);
+        skipSpaces(s);
+        if (s.pos < s.input.length && s.input[s.pos] === ')') s.pos++;
+        return condResult ? valTrue : valFalse;
+      }
+
+      // Single-arg math functions: CEIL, FLOOR, ROUND, ROUNDUP, ROUNDDOWN
       const arg = parseAddSub(s);
       skipSpaces(s);
       if (s.pos < s.input.length && s.input[s.pos] === ')') {
         s.pos++; // skip ')'
       }
-      const fn = name.toUpperCase();
       if (fn === 'CEIL' || fn === 'ROUNDUP') return Math.ceil(arg);
       if (fn === 'FLOOR' || fn === 'ROUNDDOWN') return Math.floor(arg);
       if (fn === 'ROUND') return Math.round(arg);

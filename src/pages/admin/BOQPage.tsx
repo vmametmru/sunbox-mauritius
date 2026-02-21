@@ -1880,7 +1880,7 @@ export default function BOQPage() {
                     className="font-mono text-sm"
                   />
                   <p className="text-xs text-gray-400 mt-1">
-                    Variables: longueur, largeur, profondeur, {poolVariables.map(v => v.name).join(', ')}. Fonctions: CEIL(), FLOOR(), ROUND()
+                    Variables: longueur, largeur, profondeur, {poolVariables.map(v => v.name).join(', ')}. Fonctions: CEIL(), FLOOR(), ROUND(), ROUNDUP(), ROUNDDOWN(), IF(condition, valeur_si_vrai, valeur_si_faux)
                   </p>
                   {editingLine.quantity_formula && Object.keys(poolVarContext).length > 0 && (
                     <p className="text-xs text-blue-600 mt-1">

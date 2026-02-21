@@ -556,7 +556,7 @@ export default function PoolBOQVariablesPage() {
                   rows={3}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Variables disponibles : {availableVarHint}
+                  Variables disponibles : {availableVarHint}. Fonctions : CEIL(), FLOOR(), ROUND(), ROUNDUP(), ROUNDDOWN(), IF(condition, vrai, faux)
                 </p>
               </div>
 

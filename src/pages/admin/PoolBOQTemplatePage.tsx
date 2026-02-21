@@ -630,7 +630,10 @@ const PoolBOQTemplatePage: React.FC = () => {
                 <code className="bg-blue-100 px-1 rounded">surface_interieur_m2</code>{' '}
                 — Fonctions : <code className="bg-blue-100 px-1 rounded">CEIL()</code>{' '}
                 <code className="bg-blue-100 px-1 rounded">FLOOR()</code>{' '}
-                <code className="bg-blue-100 px-1 rounded">ROUND()</code>
+                <code className="bg-blue-100 px-1 rounded">ROUND()</code>{' '}
+                <code className="bg-blue-100 px-1 rounded">ROUNDUP()</code>{' '}
+                <code className="bg-blue-100 px-1 rounded">ROUNDDOWN()</code>{' '}
+                <code className="bg-blue-100 px-1 rounded">IF(condition, vrai, faux)</code>
               </p>
             </div>
           </div>
