@@ -4,7 +4,8 @@
  * Evaluates mathematical formulas that reference:
  *   - Pool dimensions: longueur, largeur, profondeur
  *   - Calculated variables: surface_m2, volume_m3, perimetre_m, etc.
- *   - Math functions: Math.ceil (via CEIL / ROUNDUP), Math.floor, Math.round
+ *   - Math functions: Math.ceil (via CEIL / ROUNDUP), Math.floor (via FLOOR / ROUNDDOWN), Math.round
+ *   - Conditional: IF(condition, value_if_true, value_if_false)
  *
  * Formulas are plain arithmetic expressions stored as strings.
  * Example: "(longueur + 1) * 2 + (largeur + 1) * 2"
@@ -16,6 +17,20 @@ export interface PoolDimensions {
   longueur: number;
   largeur: number;
   profondeur: number;
+  // L-shape dimensions
+  longueur_la?: number;
+  largeur_la?: number;
+  profondeur_la?: number;
+  longueur_lb?: number;
+  largeur_lb?: number;
+  profondeur_lb?: number;
+  // T-shape dimensions
+  longueur_ta?: number;
+  largeur_ta?: number;
+  profondeur_ta?: number;
+  longueur_tb?: number;
+  largeur_tb?: number;
+  profondeur_tb?: number;
 }
 
 export interface PoolVariable {
@@ -41,6 +56,19 @@ export function evaluatePoolVariables(
     profondeur: dimensions.profondeur,
   };
 
+  // Inject optional L/T shape dimensions if provided
+  const optionalDims: (keyof PoolDimensions)[] = [
+    'longueur_la', 'largeur_la', 'profondeur_la',
+    'longueur_lb', 'largeur_lb', 'profondeur_lb',
+    'longueur_ta', 'largeur_ta', 'profondeur_ta',
+    'longueur_tb', 'largeur_tb', 'profondeur_tb',
+  ];
+  for (const dim of optionalDims) {
+    if (dimensions[dim] !== undefined) {
+      context[dim] = dimensions[dim] as number;
+    }
+  }
+
   // Sort by display_order to ensure dependency resolution
   const sorted = [...variables].sort((a, b) => a.display_order - b.display_order);
 
@@ -59,7 +87,8 @@ export function evaluatePoolVariables(
  * Evaluate a single formula string using the provided variable context.
  * Uses a safe recursive descent parser — no eval() or Function().
  * Supports: +, -, *, /, parentheses, numeric literals, variable references.
- * Also supports CEIL(), FLOOR(), ROUND(), ROUNDUP() functions.
+ * Also supports CEIL(), FLOOR(), ROUND(), ROUNDUP(), ROUNDDOWN() functions and
+ * IF(condition, value_if_true, value_if_false) with operators: <, >, <=, >=, ==, !=
  */
 export function evaluateFormula(
   formula: string,
@@ -73,6 +102,29 @@ export function evaluateFormula(
     return result;
   } catch {
     return 0;
+  }
+}
+
+/**
+ * Validate formula syntax without needing a real variable context.
+ * Uses a Proxy that accepts any variable name so only true syntax errors are reported.
+ */
+export function validateFormulaSyntax(formula: string): { valid: boolean; error?: string } {
+  if (!formula || !formula.trim()) return { valid: false, error: 'Formule vide' };
+  // Proxy context: every property lookup returns 1, so unknown variables don't throw
+  const context = new Proxy({} as Record<string, number>, {
+    get: () => 1,
+    has: () => true,
+  });
+  try {
+    const result = parseExpression(formula.trim(), context);
+    if (typeof result !== 'number' || !isFinite(result)) {
+      return { valid: false, error: 'Résultat invalide (ex: division par zéro)' };
+    }
+    return { valid: true };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Erreur de syntaxe';
+    return { valid: false, error: msg };
   }
 }
 
@@ -167,17 +219,54 @@ function parseAtom(s: ParserState): number {
     }
     skipSpaces(s);
 
-    // Function call: CEIL(...), FLOOR(...), ROUND(...), ROUNDUP(...)
+    // Function call
     if (s.pos < s.input.length && s.input[s.pos] === '(') {
       s.pos++; // skip '('
+      const fn = name.toUpperCase();
+
+      // IF(condition, value_if_true, value_if_false)
+      if (fn === 'IF') {
+        const left = parseAddSub(s);
+        skipSpaces(s);
+        let condResult: boolean;
+        const ch = s.pos < s.input.length ? s.input[s.pos] : '';
+        if (ch === '<' || ch === '>' || ch === '=' || ch === '!') {
+          let op = s.input[s.pos]; s.pos++;
+          if (s.pos < s.input.length && s.input[s.pos] === '=') { op += '='; s.pos++; }
+          skipSpaces(s);
+          const right = parseAddSub(s);
+          skipSpaces(s);
+          if (op === '<') condResult = left < right;
+          else if (op === '>') condResult = left > right;
+          else if (op === '<=') condResult = left <= right;
+          else if (op === '>=') condResult = left >= right;
+          else if (op === '==' || op === '=') condResult = left === right;
+          else if (op === '!=') condResult = left !== right;
+          else condResult = left !== 0;
+        } else {
+          condResult = left !== 0;
+        }
+        skipSpaces(s);
+        if (s.pos < s.input.length && s.input[s.pos] === ',') s.pos++;
+        skipSpaces(s);
+        const valTrue = parseAddSub(s);
+        skipSpaces(s);
+        if (s.pos < s.input.length && s.input[s.pos] === ',') s.pos++;
+        skipSpaces(s);
+        const valFalse = parseAddSub(s);
+        skipSpaces(s);
+        if (s.pos < s.input.length && s.input[s.pos] === ')') s.pos++;
+        return condResult ? valTrue : valFalse;
+      }
+
+      // Single-arg math functions: CEIL, FLOOR, ROUND, ROUNDUP, ROUNDDOWN
       const arg = parseAddSub(s);
       skipSpaces(s);
       if (s.pos < s.input.length && s.input[s.pos] === ')') {
         s.pos++; // skip ')'
       }
-      const fn = name.toUpperCase();
       if (fn === 'CEIL' || fn === 'ROUNDUP') return Math.ceil(arg);
-      if (fn === 'FLOOR') return Math.floor(arg);
+      if (fn === 'FLOOR' || fn === 'ROUNDDOWN') return Math.floor(arg);
       if (fn === 'ROUND') return Math.round(arg);
       throw new Error(`Unknown function: ${name}`);
     }
@@ -706,5 +795,144 @@ export async function saveTemplateToDB(
   savePoolBOQTemplate(base);
   savePoolBOQOptionsTemplate(options);
 
+  return recordId;
+}
+
+/* ======================================================
+   Shape-specific templates (L and T)
+====================================================== */
+
+export type PoolShape = 'Rectangulaire' | 'L' | 'T';
+
+/** DB record name used to identify per-shape templates. */
+const SHAPE_TEMPLATE_NAMES: Record<PoolShape, string> = {
+  Rectangulaire: 'Modèle par défaut',
+  L: 'Modèle Piscine en L',
+  T: 'Modèle Piscine en T',
+};
+
+/**
+ * Hardcoded base template for L-shaped pools.
+ * Uses longueur_la/lb, largeur_la/lb, profondeur_la/lb dimension variables.
+ */
+export function getHardcodedLShapeBaseTemplate(): PoolBOQTemplateCategory[] {
+  return [
+    {
+      name: '1/ Préparation du terrain',
+      is_option: false,
+      display_order: 1,
+      subcategories: [
+        {
+          name: '1A/ Fouille',
+          display_order: 1,
+          lines: [
+            { description: 'Location de JCB', quantity: 1, quantity_formula: '1', unit: 'jour', price_list_name: 'Location JCB (1 jour)' },
+            { description: "Main d'oeuvre", quantity: 1, quantity_formula: '0.125 * (longueur_la * largeur_la + longueur_lb * largeur_lb)', unit: 'jour', price_list_name: "Main d'oeuvre (1 jour)" },
+            { description: 'Transport de matériaux', quantity: 1, quantity_formula: 'CEIL((longueur_la * largeur_la + longueur_lb * largeur_lb) / 15) * 2', unit: 'unité', price_list_name: 'Transport Matériaux' },
+            { description: 'Transport évacuation de la terre', quantity: 1, quantity_formula: 'CEIL((longueur_la * largeur_la + longueur_lb * largeur_lb) / 15) * 3', unit: 'unité', price_list_name: 'Transport Matériaux' },
+          ],
+        },
+      ],
+    },
+  ];
+}
+
+/**
+ * Hardcoded base template for T-shaped pools.
+ * Uses longueur_ta/tb, largeur_ta/tb, profondeur_ta/tb dimension variables.
+ */
+export function getHardcodedTShapeBaseTemplate(): PoolBOQTemplateCategory[] {
+  return [
+    {
+      name: '1/ Préparation du terrain',
+      is_option: false,
+      display_order: 1,
+      subcategories: [
+        {
+          name: '1A/ Fouille',
+          display_order: 1,
+          lines: [
+            { description: 'Location de JCB', quantity: 1, quantity_formula: '1', unit: 'jour', price_list_name: 'Location JCB (1 jour)' },
+            { description: "Main d'oeuvre", quantity: 1, quantity_formula: '0.125 * (longueur_ta * largeur_ta + longueur_tb * largeur_tb)', unit: 'jour', price_list_name: "Main d'oeuvre (1 jour)" },
+            { description: 'Transport de matériaux', quantity: 1, quantity_formula: 'CEIL((longueur_ta * largeur_ta + longueur_tb * largeur_tb) / 15) * 2', unit: 'unité', price_list_name: 'Transport Matériaux' },
+            { description: 'Transport évacuation de la terre', quantity: 1, quantity_formula: 'CEIL((longueur_ta * largeur_ta + longueur_tb * largeur_tb) / 15) * 3', unit: 'unité', price_list_name: 'Transport Matériaux' },
+          ],
+        },
+      ],
+    },
+  ];
+}
+
+/**
+ * Return the default base template for a given pool shape.
+ */
+export function getHardcodedBaseTemplateByShape(shape: PoolShape): PoolBOQTemplateCategory[] {
+  if (shape === 'L') return getHardcodedLShapeBaseTemplate();
+  if (shape === 'T') return getHardcodedTShapeBaseTemplate();
+  return getHardcodedBaseTemplate();
+}
+
+/**
+ * Load a shape-specific template from the database.
+ * Falls back to the hardcoded defaults for that shape.
+ */
+export async function loadTemplateFromDBByShape(shape: PoolShape): Promise<{
+  record: PoolBOQTemplateRecord | null;
+  base: PoolBOQTemplateCategory[];
+  options: PoolBOQTemplateCategory[];
+}> {
+  const targetName = SHAPE_TEMPLATE_NAMES[shape];
+  try {
+    const templates: PoolBOQTemplateRecord[] = await api.getPoolBOQTemplates();
+    const record = templates.find(t => t.name === targetName) || null;
+    if (record && record.template_data) {
+      return {
+        record,
+        base: record.template_data.base || getHardcodedBaseTemplateByShape(shape),
+        options: record.template_data.options || getHardcodedOptionsTemplate(),
+      };
+    }
+    return {
+      record: record || null,
+      base: getHardcodedBaseTemplateByShape(shape),
+      options: getHardcodedOptionsTemplate(),
+    };
+  } catch {
+    return {
+      record: null,
+      base: getHardcodedBaseTemplateByShape(shape),
+      options: getHardcodedOptionsTemplate(),
+    };
+  }
+}
+
+/**
+ * Save a shape-specific template to the database.
+ * Creates a new record if none exists for this shape, otherwise updates it.
+ * Returns the database record ID.
+ */
+export async function saveTemplateToDBByShape(
+  shape: PoolShape,
+  base: PoolBOQTemplateCategory[],
+  options: PoolBOQTemplateCategory[],
+  existingRecordId?: number,
+): Promise<number> {
+  const templateData = { base, options };
+  const targetName = SHAPE_TEMPLATE_NAMES[shape];
+  const isDefault = shape === 'Rectangulaire';
+
+  let recordId: number;
+  if (existingRecordId) {
+    await api.updatePoolBOQTemplate({ id: existingRecordId, template_data: templateData });
+    recordId = existingRecordId;
+  } else {
+    const result = await api.createPoolBOQTemplate({
+      name: targetName,
+      description: `Modèle BOQ piscine ${shape === 'Rectangulaire' ? 'rectangulaire' : shape === 'L' ? 'en L' : 'en T'}`,
+      is_default: isDefault,
+      template_data: templateData,
+    });
+    recordId = result.id;
+  }
   return recordId;
 }
