@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useMemo } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { 
   Mail, 
   Server, 
@@ -204,6 +204,10 @@ export default function EmailSettingsPage() {
   const [pdfSettings, setPdfSettings] = useState<PdfSettings>(defaultPdfSettings);
   const [savingPdf, setSavingPdf] = useState(false);
   const [previewTemplateId, setPreviewTemplateId] = useState<string | null>(null);
+  const [previewQuotes, setPreviewQuotes] = useState<any[]>([]);
+  const [previewQuoteId, setPreviewQuoteId] = useState<number | null>(null);
+  const [previewQuoteData, setPreviewQuoteData] = useState<QuotePdfData | null>(null);
+  const [previewQuoteLoading, setPreviewQuoteLoading] = useState(false);
   const newPhotoInputRef = useRef<HTMLInputElement>(null);
   const editPhotoInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -211,6 +215,47 @@ export default function EmailSettingsPage() {
   useEffect(() => {
     loadData();
   }, []);
+
+  // Load quote list when preview opens
+  useEffect(() => {
+    if (!previewTemplateId) return;
+    api.getQuotes().then((list: any[]) => setPreviewQuotes(list || [])).catch(() => {});
+  }, [previewTemplateId]);
+
+  // Load full quote details when a quote is selected in the preview
+  useEffect(() => {
+    if (!previewQuoteId) { setPreviewQuoteData(null); return; }
+    setPreviewQuoteLoading(true);
+    api.getQuoteWithDetails(previewQuoteId)
+      .then((q: any) => {
+        const vatRate = Number(pdfSettings.pdf_show_vat) || 15;
+        setPreviewQuoteData({
+          id:               q.id,
+          reference_number: q.reference_number,
+          created_at:       q.created_at,
+          valid_until:      q.valid_until,
+          status:           q.status,
+          customer_name:    q.customer_name,
+          customer_email:   q.customer_email,
+          customer_phone:   q.customer_phone,
+          customer_address: q.customer_address || '',
+          model_name:       q.model_name || q.model_display_name,
+          model_type:       q.model_type || q.model_display_type,
+          quote_title:      q.quote_title,
+          photo_url:        q.photo_url || '',
+          plan_url:         q.plan_url  || '',
+          base_price:       Number(q.base_price),
+          options_total:    Number(q.options_total),
+          total_price:      Number(q.total_price),
+          vat_rate:         vatRate,
+          options:          q.options   || [],
+          categories:       q.categories || [],
+          is_free_quote:    !!q.is_free_quote,
+        });
+      })
+      .catch(() => setPreviewQuoteData(null))
+      .finally(() => setPreviewQuoteLoading(false));
+  }, [previewQuoteId]);
 
   const loadData = async () => {
     try {
@@ -1852,8 +1897,8 @@ export default function EmailSettingsPage() {
           company_address: 'Royal Road, Grand Baie, Mauritius',
         };
 
-        const sampleData: QuotePdfData = {
-          id:               1,
+        const fallbackData: QuotePdfData = {
+          id: 0,
           reference_number: 'WCQ-202602-000001',
           created_at:       new Date().toISOString(),
           valid_until:      new Date(Date.now() + 30 * 86400000).toISOString(),
@@ -1873,29 +1918,42 @@ export default function EmailSettingsPage() {
           vat_rate:         15,
           is_free_quote:    false,
           options: [
-            { option_name: 'Climatisation 3 pièces',    option_price: 120000 },
-            { option_name: 'Cuisine équipée',            option_price: 95000  },
-            { option_name: 'Panneaux solaires 5 kWc',   option_price: 135000 },
+            { option_name: 'Climatisation 3 pièces',  option_price: 120000 },
+            { option_name: 'Cuisine équipée',          option_price: 95000  },
+            { option_name: 'Panneaux solaires 5 kWc', option_price: 135000 },
           ],
           categories: [],
         };
 
+        const activeData = previewQuoteData || fallbackData;
+        const isRealQuote = !!previewQuoteData;
+
         const templateFn = TEMPLATES[previewTemplateId] || TEMPLATES['1'];
-        const html = templateFn(sampleData, previewSettings, sampleCompany, siteLogo || '');
+        const html = templateFn(activeData, previewSettings, sampleCompany, siteLogo || '');
+
+        const closePreview = () => {
+          setPreviewTemplateId(null);
+          setPreviewQuoteId(null);
+          setPreviewQuoteData(null);
+        };
 
         return (
-          <Dialog open onOpenChange={() => setPreviewTemplateId(null)}>
+          <Dialog open onOpenChange={closePreview}>
             <DialogContent className="max-w-5xl w-full p-0 overflow-hidden bg-gray-100">
-              {/* Dialog header */}
-              <div className="flex items-center justify-between px-5 py-3 bg-white border-b border-gray-200">
-                <div className="flex items-center gap-3">
-                  <FileImage className="h-5 w-5 text-orange-500" />
-                  <span className="font-semibold text-gray-800">
-                    Aperçu — Template {TEMPLATE_NAMES[previewTemplateId]}
-                  </span>
-                  <span className="text-xs text-gray-400">(données de démonstration)</span>
-                </div>
+
+              {/* ── Top bar: template switcher + close ── */}
+              <div className="flex items-center justify-between px-5 py-3 bg-white border-b border-gray-200 gap-3 flex-wrap">
                 <div className="flex items-center gap-2">
+                  <FileImage className="h-5 w-5 text-orange-500 flex-shrink-0" />
+                  <span className="font-semibold text-gray-800 whitespace-nowrap">
+                    Aperçu — {TEMPLATE_NAMES[previewTemplateId]}
+                  </span>
+                  {isRealQuote
+                    ? <span className="inline-flex items-center gap-1 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">● Devis réel</span>
+                    : <span className="inline-flex items-center gap-1 text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full">◌ Démonstration</span>
+                  }
+                </div>
+                <div className="flex items-center gap-1 flex-wrap">
                   {Object.keys(TEMPLATE_NAMES).map((tid) => (
                     <button
                       key={tid}
@@ -1909,21 +1967,56 @@ export default function EmailSettingsPage() {
                       {TEMPLATE_NAMES[tid]}
                     </button>
                   ))}
-                  <button
-                    onClick={() => setPreviewTemplateId(null)}
-                    className="ml-2 p-1.5 rounded hover:bg-gray-100 text-gray-500"
-                  >
+                  <button onClick={closePreview} className="ml-1 p-1.5 rounded hover:bg-gray-100 text-gray-500">
                     <X className="h-4 w-4" />
                   </button>
                 </div>
               </div>
 
-              {/* Scrollable A4 preview */}
-              <div className="overflow-auto max-h-[80vh] p-6 flex justify-center">
-                <div
-                  style={{ width: 794, minWidth: 794, transform: 'scale(0.85)', transformOrigin: 'top center', marginBottom: '-15%' }}
-                  dangerouslySetInnerHTML={{ __html: html }}
-                />
+              {/* ── Quote selector bar ── */}
+              <div className="flex items-center gap-3 px-5 py-2.5 bg-gray-50 border-b border-gray-200">
+                <label className="text-xs font-medium text-gray-500 whitespace-nowrap">Devis :</label>
+                <select
+                  value={previewQuoteId ?? ''}
+                  onChange={(e) => setPreviewQuoteId(e.target.value ? Number(e.target.value) : null)}
+                  className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-orange-400 max-w-md"
+                >
+                  <option value="">— Utiliser les données de démonstration —</option>
+                  {previewQuotes.map((q: any) => (
+                    <option key={q.id} value={q.id}>
+                      {q.reference_number} · {q.customer_name}
+                      {q.is_free_quote ? ` · ${q.quote_title || 'Devis libre'}` : q.model_name ? ` · ${q.model_name}` : ''}
+                    </option>
+                  ))}
+                </select>
+                {previewQuoteLoading && (
+                  <span className="text-xs text-gray-400 animate-pulse">Chargement…</span>
+                )}
+                {isRealQuote && (
+                  <button
+                    onClick={() => { setPreviewQuoteId(null); setPreviewQuoteData(null); }}
+                    className="text-xs text-gray-400 hover:text-red-500 transition-colors flex items-center gap-1"
+                  >
+                    <X className="h-3 w-3" /> Effacer
+                  </button>
+                )}
+              </div>
+
+              {/* ── Scrollable A4 preview ── */}
+              <div className="overflow-auto max-h-[76vh] p-6 flex justify-center">
+                {previewQuoteLoading ? (
+                  <div className="flex items-center justify-center h-64 text-gray-400">
+                    <div className="text-center">
+                      <div className="h-8 w-8 border-2 border-orange-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                      Chargement du devis…
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    style={{ width: 794, minWidth: 794, transform: 'scale(0.85)', transformOrigin: 'top center', marginBottom: '-15%' }}
+                    dangerouslySetInnerHTML={{ __html: html }}
+                  />
+                )}
               </div>
             </DialogContent>
           </Dialog>
