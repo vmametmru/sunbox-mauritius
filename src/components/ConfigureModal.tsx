@@ -756,6 +756,8 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                   )}
 
                   {/* L-shape pool */}
+                  {/* Note: longueur/largeur/profondeur base fields are kept in sync with LA (primary part)
+                      so existing BOQ formulas that reference these base names continue to work. */}
                   {poolShape === 'L' && (
                     <>
                       <p className="text-xs text-blue-600 mb-3">Veuillez saisir les 6 dimensions pour voir le prix estimé.</p>
@@ -811,6 +813,8 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                   )}
 
                   {/* T-shape pool */}
+                  {/* Note: longueur/largeur/profondeur base fields are kept in sync with TA (primary part)
+                      so existing BOQ formulas that reference these base names continue to work. */}
                   {poolShape === 'T' && (
                     <>
                       <p className="text-xs text-blue-600 mb-3">Veuillez saisir les 6 dimensions pour voir le prix estimé.</p>
@@ -1250,9 +1254,9 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                     <span className="text-gray-600">Dimensions</span>
                     <span className="font-medium">
                       {poolShape === 'L'
-                        ? `LA: ${poolDimensions.longueur_la}×${poolDimensions.largeur_la}×${poolDimensions.profondeur_la}m / LB: ${poolDimensions.longueur_lb}×${poolDimensions.largeur_lb}×${poolDimensions.profondeur_lb}m`
+                        ? `LA: ${poolDimensions.longueur_la ?? 0}×${poolDimensions.largeur_la ?? 0}×${poolDimensions.profondeur_la ?? 0}m / LB: ${poolDimensions.longueur_lb ?? 0}×${poolDimensions.largeur_lb ?? 0}×${poolDimensions.profondeur_lb ?? 0}m`
                         : poolShape === 'T'
-                        ? `TA: ${poolDimensions.longueur_ta}×${poolDimensions.largeur_ta}×${poolDimensions.profondeur_ta}m / TB: ${poolDimensions.longueur_tb}×${poolDimensions.largeur_tb}×${poolDimensions.profondeur_tb}m`
+                        ? `TA: ${poolDimensions.longueur_ta ?? 0}×${poolDimensions.largeur_ta ?? 0}×${poolDimensions.profondeur_ta ?? 0}m / TB: ${poolDimensions.longueur_tb ?? 0}×${poolDimensions.largeur_tb ?? 0}×${poolDimensions.profondeur_tb ?? 0}m`
                         : `${poolDimensions.longueur}m × ${poolDimensions.largeur}m × ${poolDimensions.profondeur}m`}
                     </span>
                   </div>
