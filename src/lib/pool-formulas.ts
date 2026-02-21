@@ -4,7 +4,7 @@
  * Evaluates mathematical formulas that reference:
  *   - Pool dimensions: longueur, largeur, profondeur
  *   - Calculated variables: surface_m2, volume_m3, perimetre_m, etc.
- *   - Math functions: Math.ceil (via CEIL / ROUNDUP), Math.floor, Math.round
+ *   - Math functions: Math.ceil (via CEIL / ROUNDUP), Math.floor (via FLOOR / ROUNDDOWN), Math.round
  *
  * Formulas are plain arithmetic expressions stored as strings.
  * Example: "(longueur + 1) * 2 + (largeur + 1) * 2"
@@ -86,7 +86,7 @@ export function evaluatePoolVariables(
  * Evaluate a single formula string using the provided variable context.
  * Uses a safe recursive descent parser — no eval() or Function().
  * Supports: +, -, *, /, parentheses, numeric literals, variable references.
- * Also supports CEIL(), FLOOR(), ROUND(), ROUNDUP() functions.
+ * Also supports CEIL(), FLOOR(), ROUND(), ROUNDUP(), ROUNDDOWN() functions.
  */
 export function evaluateFormula(
   formula: string,
@@ -194,7 +194,7 @@ function parseAtom(s: ParserState): number {
     }
     skipSpaces(s);
 
-    // Function call: CEIL(...), FLOOR(...), ROUND(...), ROUNDUP(...)
+    // Function call: CEIL(...), FLOOR(...), ROUND(...), ROUNDUP(...), ROUNDDOWN(...)
     if (s.pos < s.input.length && s.input[s.pos] === '(') {
       s.pos++; // skip '('
       const arg = parseAddSub(s);
@@ -204,7 +204,7 @@ function parseAtom(s: ParserState): number {
       }
       const fn = name.toUpperCase();
       if (fn === 'CEIL' || fn === 'ROUNDUP') return Math.ceil(arg);
-      if (fn === 'FLOOR') return Math.floor(arg);
+      if (fn === 'FLOOR' || fn === 'ROUNDDOWN') return Math.floor(arg);
       if (fn === 'ROUND') return Math.round(arg);
       throw new Error(`Unknown function: ${name}`);
     }
