@@ -2718,9 +2718,6 @@ try {
                     $content = $cell['content'] ?? '';
                     $styles = [];
 
-                    if (!empty($cell['bold'])) $styles[] = 'font-weight:bold';
-                    if (!empty($cell['italic'])) $styles[] = 'font-style:italic';
-                    if (!empty($cell['underline'])) $styles[] = 'text-decoration:underline';
                     if (!empty($cell['fontSize'])) $styles[] = 'font-size:' . $cell['fontSize'] . 'pt';
                     if (!empty($cell['fontFamily'])) $styles[] = 'font-family:' . htmlspecialchars($cell['fontFamily']);
                     if (!empty($cell['textAlign'])) $styles[] = 'text-align:' . $cell['textAlign'];
@@ -2731,9 +2728,8 @@ try {
                     $styles[] = 'overflow:hidden';
                     $styles[] = 'word-wrap:break-word';
 
-                    // Replace variables
+                    // Replace variables in content (content may contain inline HTML formatting)
                     $rendered = $content;
-                    // HTML variables should not be escaped
                     $htmlVars = ['{{base_categories_html}}', '{{option_categories_html}}', '{{base_categories}}', '{{option_categories}}'];
                     foreach ($vars as $vk => $vv) {
                         if (in_array($vk, $htmlVars)) {
@@ -3027,9 +3023,6 @@ try {
                     $rowspan = ($cell && !empty($cell['rowspan'])) ? (int)$cell['rowspan'] : 1;
                     $content = $cell['content'] ?? '';
                     $styles = [];
-                    if (!empty($cell['bold'])) $styles[] = 'font-weight:bold';
-                    if (!empty($cell['italic'])) $styles[] = 'font-style:italic';
-                    if (!empty($cell['underline'])) $styles[] = 'text-decoration:underline';
                     if (!empty($cell['fontSize'])) $styles[] = 'font-size:' . $cell['fontSize'] . 'pt';
                     if (!empty($cell['fontFamily'])) $styles[] = 'font-family:' . htmlspecialchars($cell['fontFamily']);
                     if (!empty($cell['textAlign'])) $styles[] = 'text-align:' . $cell['textAlign'];

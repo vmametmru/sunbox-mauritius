@@ -16,9 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
 import {
   Dialog,
   DialogContent,
@@ -34,9 +32,6 @@ interface CellData {
   content: string;
   type?: 'text' | 'variable' | 'image';
   imageUrl?: string;
-  bold?: boolean;
-  italic?: boolean;
-  underline?: boolean;
   fontSize?: number;
   fontFamily?: string;
   textAlign?: string;
@@ -128,9 +123,10 @@ export default function PdfTemplateEditorPage() {
   // Cell edit modal
   const [editingCell, setEditingCell] = useState<string | null>(null);
   const [cellEditData, setCellEditData] = useState<CellData>({
-    content: '', type: 'text', bold: false, italic: false, underline: false,
+    content: '', type: 'text',
     fontSize: 10, fontFamily: 'Arial', textAlign: 'left',
   });
+  const editorRef = React.useRef<HTMLDivElement>(null);
 
   // Preview
   const [showPreview, setShowPreview] = useState(false);
@@ -335,9 +331,6 @@ export default function PdfTemplateEditorPage() {
       content: cell?.content || '',
       type: cell?.type || 'text',
       imageUrl: cell?.imageUrl || '',
-      bold: cell?.bold || false,
-      italic: cell?.italic || false,
-      underline: cell?.underline || false,
       fontSize: cell?.fontSize || 10,
       fontFamily: cell?.fontFamily || 'Arial',
       textAlign: cell?.textAlign || 'left',
@@ -350,8 +343,10 @@ export default function PdfTemplateEditorPage() {
   const handleSaveCellEdit = () => {
     if (!editingCell || !template) return;
     const existingCell = template.grid_data[editingCell] || {};
+    const htmlContent = editorRef.current?.innerHTML || cellEditData.content || '';
     updateCell(editingCell, {
       ...cellEditData,
+      content: htmlContent,
       // Preserve merge info
       merged: existingCell.merged,
       colspan: existingCell.colspan,
@@ -526,9 +521,6 @@ export default function PdfTemplateEditorPage() {
                     minWidth: `${(col_widths[c] || 19) * 3}px`,
                     height: `${(row_heights[r] || 14) * 2.5}px`,
                     fontSize: cell?.fontSize ? `${cell.fontSize}px` : '10px',
-                    fontWeight: cell?.bold ? 'bold' : 'normal',
-                    fontStyle: cell?.italic ? 'italic' : 'normal',
-                    textDecoration: cell?.underline ? 'underline' : 'none',
                     fontFamily: cell?.fontFamily || 'Arial',
                     textAlign: (cell?.textAlign as any) || 'left',
                     backgroundColor: cell?.bgColor || (isSelected ? '#fef3c7' : 'transparent'),
@@ -561,7 +553,7 @@ export default function PdfTemplateEditorPage() {
                       onDoubleClick={() => handleCellDoubleClick(r, c)}
                       title={displayContent || 'Double-clic pour éditer'}
                     >
-                      <div className="truncate text-xs">{displayContent}</div>
+                      <div className="truncate text-xs" dangerouslySetInnerHTML={{ __html: displayContent }} />
                     </td>
                   );
                 })}
@@ -650,33 +642,6 @@ export default function PdfTemplateEditorPage() {
             {/* Quick formatting for selected cell */}
             {selectedCells.length === 1 && (
               <>
-                <Button
-                  size="sm"
-                  variant={selectedCell?.bold ? 'default' : 'outline'}
-                  onClick={() => updateCell(selectedCells[0], { bold: !selectedCell?.bold })}
-                  title="Gras"
-                >
-                  <Bold className="h-4 w-4" />
-                </Button>
-                <Button
-                  size="sm"
-                  variant={selectedCell?.italic ? 'default' : 'outline'}
-                  onClick={() => updateCell(selectedCells[0], { italic: !selectedCell?.italic })}
-                  title="Italique"
-                >
-                  <Italic className="h-4 w-4" />
-                </Button>
-                <Button
-                  size="sm"
-                  variant={selectedCell?.underline ? 'default' : 'outline'}
-                  onClick={() => updateCell(selectedCells[0], { underline: !selectedCell?.underline })}
-                  title="Souligné"
-                >
-                  <Underline className="h-4 w-4" />
-                </Button>
-
-                <div className="h-6 w-px bg-gray-300" />
-
                 <Select
                   value={String(selectedCell?.fontSize || 10)}
                   onValueChange={(v) => updateCell(selectedCells[0], { fontSize: parseInt(v) })}
@@ -897,14 +862,32 @@ export default function PdfTemplateEditorPage() {
               </div>
             ) : (
               <>
-                {/* Text content */}
+                {/* Inline formatting toolbar */}
                 <div>
                   <Label>Contenu</Label>
-                  <Textarea
-                    value={cellEditData.content || ''}
-                    onChange={(e) => setCellEditData({ ...cellEditData, content: e.target.value })}
-                    placeholder="Texte libre ou variables {{...}}"
-                    rows={3}
+                  <div className="flex items-center gap-1 mb-2 mt-1">
+                    <Button type="button" size="sm" variant="outline" onClick={() => { document.execCommand('bold'); editorRef.current?.focus(); }} title="Gras">
+                      <Bold className="h-4 w-4" />
+                    </Button>
+                    <Button type="button" size="sm" variant="outline" onClick={() => { document.execCommand('italic'); editorRef.current?.focus(); }} title="Italique">
+                      <Italic className="h-4 w-4" />
+                    </Button>
+                    <Button type="button" size="sm" variant="outline" onClick={() => { document.execCommand('underline'); editorRef.current?.focus(); }} title="Souligné">
+                      <Underline className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <div
+                    key={editingCell || ''}
+                    ref={editorRef}
+                    contentEditable
+                    suppressContentEditableWarning
+                    className="min-h-[80px] max-h-[200px] overflow-y-auto border rounded-md p-2 focus:outline-none focus:ring-2 focus:ring-ring text-sm"
+                    style={{
+                      fontFamily: cellEditData.fontFamily || 'Arial',
+                      color: cellEditData.color || '#000',
+                    }}
+                    dangerouslySetInnerHTML={{ __html: cellEditData.content || '' }}
+                    onBlur={(e) => setCellEditData({ ...cellEditData, content: e.currentTarget.innerHTML })}
                   />
                 </div>
 
@@ -921,12 +904,12 @@ export default function PdfTemplateEditorPage() {
                               key={v.key}
                               type="button"
                               className="text-xs px-2 py-1 bg-blue-50 text-blue-700 rounded hover:bg-blue-100 transition-colors"
-                              onClick={() =>
-                                setCellEditData({
-                                  ...cellEditData,
-                                  content: (cellEditData.content || '') + v.key,
-                                })
-                              }
+                              onClick={() => {
+                                if (editorRef.current) {
+                                  editorRef.current.focus();
+                                  document.execCommand('insertHTML', false, v.key);
+                                }
+                              }}
                               title={v.label}
                             >
                               {v.label}
@@ -943,31 +926,8 @@ export default function PdfTemplateEditorPage() {
             {/* Formatting */}
             <div className="border-t pt-4">
               <Label className="mb-2 block">Formatage</Label>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="flex items-center gap-2">
-                  <Switch
-                    checked={cellEditData.bold || false}
-                    onCheckedChange={(v) => setCellEditData({ ...cellEditData, bold: v })}
-                  />
-                  <span className="text-sm font-bold">Gras</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Switch
-                    checked={cellEditData.italic || false}
-                    onCheckedChange={(v) => setCellEditData({ ...cellEditData, italic: v })}
-                  />
-                  <span className="text-sm italic">Italique</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Switch
-                    checked={cellEditData.underline || false}
-                    onCheckedChange={(v) => setCellEditData({ ...cellEditData, underline: v })}
-                  />
-                  <span className="text-sm underline">Souligné</span>
-                </div>
-              </div>
 
-              <div className="grid grid-cols-2 gap-4 mt-4">
+              <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label>Taille</Label>
                   <Select
