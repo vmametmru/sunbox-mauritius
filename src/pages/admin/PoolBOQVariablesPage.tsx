@@ -13,6 +13,13 @@ import {
   DialogTitle
 } from '@/components/ui/dialog';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   Table,
   TableBody,
   TableCell,
@@ -22,7 +29,7 @@ import {
 } from '@/components/ui/table';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
-import { evaluatePoolVariables, PoolVariable } from '@/lib/pool-formulas';
+import { evaluatePoolVariables, PoolVariable, PoolDimensions } from '@/lib/pool-formulas';
 
 /* ======================================================
    TYPES
@@ -59,10 +66,25 @@ export default function PoolBOQVariablesPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // Simulator dimensions
+  // Simulator shape and dimensions
+  const [simulatorShape, setSimulatorShape] = useState<'Rectangulaire' | 'L' | 'T'>('Rectangulaire');
   const [longueur, setLongueur] = useState(8);
   const [largeur, setLargeur] = useState(4);
   const [profondeur, setProfondeur] = useState(1.5);
+  // L-shape
+  const [longueurLa, setLongueurLa] = useState(8);
+  const [largeurLa, setLargeurLa] = useState(4);
+  const [profondeurLa, setProfondeurLa] = useState(1.5);
+  const [longueurLb, setLongueurLb] = useState(3);
+  const [largeurLb, setLargeurLb] = useState(2);
+  const [profondeurLb, setProfondeurLb] = useState(1.5);
+  // T-shape
+  const [longueurTa, setLongueurTa] = useState(8);
+  const [largeurTa, setLargeurTa] = useState(4);
+  const [profondeurTa, setProfondeurTa] = useState(1.5);
+  const [longueurTb, setLongueurTb] = useState(4);
+  const [largeurTb, setLargeurTb] = useState(3);
+  const [profondeurTb, setProfondeurTb] = useState(1.5);
 
   /* ======================================================
      LOAD DATA
@@ -86,12 +108,44 @@ export default function PoolBOQVariablesPage() {
   /* ======================================================
      SIMULATOR
   ====================================================== */
+  const simulatorDimensions = useMemo((): PoolDimensions => {
+    if (simulatorShape === 'L') {
+      return {
+        longueur: longueurLa,
+        largeur: largeurLa,
+        profondeur: profondeurLa,
+        longueur_la: longueurLa,
+        largeur_la: largeurLa,
+        profondeur_la: profondeurLa,
+        longueur_lb: longueurLb,
+        largeur_lb: largeurLb,
+        profondeur_lb: profondeurLb,
+      };
+    }
+    if (simulatorShape === 'T') {
+      return {
+        longueur: longueurTa,
+        largeur: largeurTa,
+        profondeur: profondeurTa,
+        longueur_ta: longueurTa,
+        largeur_ta: largeurTa,
+        profondeur_ta: profondeurTa,
+        longueur_tb: longueurTb,
+        largeur_tb: largeurTb,
+        profondeur_tb: profondeurTb,
+      };
+    }
+    return { longueur, largeur, profondeur };
+  }, [
+    simulatorShape,
+    longueur, largeur, profondeur,
+    longueurLa, largeurLa, profondeurLa, longueurLb, largeurLb, profondeurLb,
+    longueurTa, largeurTa, profondeurTa, longueurTb, largeurTb, profondeurTb,
+  ]);
+
   const calculatedValues = useMemo(() => {
-    return evaluatePoolVariables(
-      { longueur, largeur, profondeur },
-      variables
-    );
-  }, [longueur, largeur, profondeur, variables]);
+    return evaluatePoolVariables(simulatorDimensions, variables);
+  }, [simulatorDimensions, variables]);
 
   /* ======================================================
      CRUD
@@ -114,7 +168,13 @@ export default function PoolBOQVariablesPage() {
     setIsDialogOpen(true);
   };
 
-  const RESERVED_NAMES = ['longueur', 'largeur', 'profondeur'];
+  const RESERVED_NAMES = [
+    'longueur', 'largeur', 'profondeur',
+    'longueur_la', 'largeur_la', 'profondeur_la',
+    'longueur_lb', 'largeur_lb', 'profondeur_lb',
+    'longueur_ta', 'largeur_ta', 'profondeur_ta',
+    'longueur_tb', 'largeur_tb', 'profondeur_tb',
+  ];
 
   const saveVariable = async () => {
     if (!editing) return;
@@ -183,8 +243,10 @@ export default function PoolBOQVariablesPage() {
 
   const availableVarHint = useMemo(() => {
     const dims = ['longueur', 'largeur', 'profondeur'];
+    const lDims = ['longueur_la', 'largeur_la', 'profondeur_la', 'longueur_lb', 'largeur_lb', 'profondeur_lb'];
+    const tDims = ['longueur_ta', 'largeur_ta', 'profondeur_ta', 'longueur_tb', 'largeur_tb', 'profondeur_tb'];
     const varNames = sortedVariables.map(v => v.name);
-    return [...dims, ...varNames].join(', ');
+    return [...dims, ...lDims, ...tDims, ...varNames].join(', ');
   }, [sortedVariables]);
 
   const formatValue = (val: number | undefined) => {
@@ -217,38 +279,140 @@ export default function PoolBOQVariablesPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-3 gap-4">
-            <div className="space-y-2">
-              <Label>Longueur (m)</Label>
-              <Input
-                type="number"
-                step="0.1"
-                min="0"
-                value={longueur}
-                onChange={e => setLongueur(parseFloat(e.target.value) || 0)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Largeur (m)</Label>
-              <Input
-                type="number"
-                step="0.1"
-                min="0"
-                value={largeur}
-                onChange={e => setLargeur(parseFloat(e.target.value) || 0)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Profondeur (m)</Label>
-              <Input
-                type="number"
-                step="0.1"
-                min="0"
-                value={profondeur}
-                onChange={e => setProfondeur(parseFloat(e.target.value) || 0)}
-              />
-            </div>
+          {/* Shape selector */}
+          <div className="space-y-2">
+            <Label>Forme de piscine</Label>
+            <Select value={simulatorShape} onValueChange={(v) => setSimulatorShape(v as 'Rectangulaire' | 'L' | 'T')}>
+              <SelectTrigger className="w-48">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Rectangulaire">Rectangulaire</SelectItem>
+                <SelectItem value="L">En L</SelectItem>
+                <SelectItem value="T">En T</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
+
+          {/* Rectangular dimensions */}
+          {simulatorShape === 'Rectangulaire' && (
+            <div className="grid grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label>Longueur (m)</Label>
+                <Input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={longueur}
+                  onChange={e => setLongueur(parseFloat(e.target.value) || 0)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Largeur (m)</Label>
+                <Input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={largeur}
+                  onChange={e => setLargeur(parseFloat(e.target.value) || 0)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Profondeur (m)</Label>
+                <Input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={profondeur}
+                  onChange={e => setProfondeur(parseFloat(e.target.value) || 0)}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* L-shape dimensions */}
+          {simulatorShape === 'L' && (
+            <div className="space-y-3">
+              <p className="text-xs text-muted-foreground font-medium">Partie LA (piscine principale)</p>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label>Longueur LA (m)</Label>
+                  <Input type="number" step="0.1" min="0" value={longueurLa}
+                    onChange={e => setLongueurLa(parseFloat(e.target.value) || 0)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Largeur LA (m)</Label>
+                  <Input type="number" step="0.1" min="0" value={largeurLa}
+                    onChange={e => setLargeurLa(parseFloat(e.target.value) || 0)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Profondeur LA (m)</Label>
+                  <Input type="number" step="0.1" min="0" value={profondeurLa}
+                    onChange={e => setProfondeurLa(parseFloat(e.target.value) || 0)} />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground font-medium">Partie LB (bout qui dépasse)</p>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label>Longueur LB (m)</Label>
+                  <Input type="number" step="0.1" min="0" value={longueurLb}
+                    onChange={e => setLongueurLb(parseFloat(e.target.value) || 0)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Largeur LB (m)</Label>
+                  <Input type="number" step="0.1" min="0" value={largeurLb}
+                    onChange={e => setLargeurLb(parseFloat(e.target.value) || 0)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Profondeur LB (m)</Label>
+                  <Input type="number" step="0.1" min="0" value={profondeurLb}
+                    onChange={e => setProfondeurLb(parseFloat(e.target.value) || 0)} />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* T-shape dimensions */}
+          {simulatorShape === 'T' && (
+            <div className="space-y-3">
+              <p className="text-xs text-muted-foreground font-medium">Partie TA (piscine 1)</p>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label>Longueur TA (m)</Label>
+                  <Input type="number" step="0.1" min="0" value={longueurTa}
+                    onChange={e => setLongueurTa(parseFloat(e.target.value) || 0)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Largeur TA (m)</Label>
+                  <Input type="number" step="0.1" min="0" value={largeurTa}
+                    onChange={e => setLargeurTa(parseFloat(e.target.value) || 0)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Profondeur TA (m)</Label>
+                  <Input type="number" step="0.1" min="0" value={profondeurTa}
+                    onChange={e => setProfondeurTa(parseFloat(e.target.value) || 0)} />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground font-medium">Partie TB (piscine 2)</p>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label>Longueur TB (m)</Label>
+                  <Input type="number" step="0.1" min="0" value={longueurTb}
+                    onChange={e => setLongueurTb(parseFloat(e.target.value) || 0)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Largeur TB (m)</Label>
+                  <Input type="number" step="0.1" min="0" value={largeurTb}
+                    onChange={e => setLargeurTb(parseFloat(e.target.value) || 0)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Profondeur TB (m)</Label>
+                  <Input type="number" step="0.1" min="0" value={profondeurTb}
+                    onChange={e => setProfondeurTb(parseFloat(e.target.value) || 0)} />
+                </div>
+              </div>
+            </div>
+          )}
 
           {sortedVariables.length > 0 && (
             <Table>

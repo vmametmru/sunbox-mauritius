@@ -16,6 +16,20 @@ export interface PoolDimensions {
   longueur: number;
   largeur: number;
   profondeur: number;
+  // L-shape dimensions
+  longueur_la?: number;
+  largeur_la?: number;
+  profondeur_la?: number;
+  longueur_lb?: number;
+  largeur_lb?: number;
+  profondeur_lb?: number;
+  // T-shape dimensions
+  longueur_ta?: number;
+  largeur_ta?: number;
+  profondeur_ta?: number;
+  longueur_tb?: number;
+  largeur_tb?: number;
+  profondeur_tb?: number;
 }
 
 export interface PoolVariable {
@@ -40,6 +54,19 @@ export function evaluatePoolVariables(
     largeur: dimensions.largeur,
     profondeur: dimensions.profondeur,
   };
+
+  // Inject optional L/T shape dimensions if provided
+  const optionalDims: (keyof PoolDimensions)[] = [
+    'longueur_la', 'largeur_la', 'profondeur_la',
+    'longueur_lb', 'largeur_lb', 'profondeur_lb',
+    'longueur_ta', 'largeur_ta', 'profondeur_ta',
+    'longueur_tb', 'largeur_tb', 'profondeur_tb',
+  ];
+  for (const dim of optionalDims) {
+    if (dimensions[dim] !== undefined) {
+      context[dim] = dimensions[dim] as number;
+    }
+  }
 
   // Sort by display_order to ensure dependency resolution
   const sorted = [...variables].sort((a, b) => a.display_order - b.display_order);

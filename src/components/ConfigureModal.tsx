@@ -114,12 +114,30 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
 
   const model = quoteData.model;
   const isPoolModel = model?.type === 'pool';
+  const poolShape = model?.pool_shape || 'Rectangulaire';
 
-  // All 3 dimensions must be filled before we show prices / options
-  const poolDimensionsReady = isPoolModel
-    && poolDimensions.longueur > 0
-    && poolDimensions.largeur > 0
-    && poolDimensions.profondeur > 0;
+  // All required dimensions must be filled before we show prices / options
+  const poolDimensionsReady = isPoolModel && (() => {
+    if (poolShape === 'L') {
+      return (poolDimensions.longueur_la ?? 0) > 0
+        && (poolDimensions.largeur_la ?? 0) > 0
+        && (poolDimensions.profondeur_la ?? 0) > 0
+        && (poolDimensions.longueur_lb ?? 0) > 0
+        && (poolDimensions.largeur_lb ?? 0) > 0
+        && (poolDimensions.profondeur_lb ?? 0) > 0;
+    }
+    if (poolShape === 'T') {
+      return (poolDimensions.longueur_ta ?? 0) > 0
+        && (poolDimensions.largeur_ta ?? 0) > 0
+        && (poolDimensions.profondeur_ta ?? 0) > 0
+        && (poolDimensions.longueur_tb ?? 0) > 0
+        && (poolDimensions.largeur_tb ?? 0) > 0
+        && (poolDimensions.profondeur_tb ?? 0) > 0;
+    }
+    return poolDimensions.longueur > 0
+      && poolDimensions.largeur > 0
+      && poolDimensions.profondeur > 0;
+  })();
 
   // True while we have dimensions but BOQ data hasn't loaded yet
   const isCalculatingPrice = isPoolModel && poolDimensionsReady && isLoadingPoolData;
@@ -330,6 +348,22 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
           pool_longueur: poolDimensions.longueur,
           pool_largeur: poolDimensions.largeur,
           pool_profondeur: poolDimensions.profondeur,
+          ...(poolShape === 'L' ? {
+            pool_longueur_la: poolDimensions.longueur_la,
+            pool_largeur_la: poolDimensions.largeur_la,
+            pool_profondeur_la: poolDimensions.profondeur_la,
+            pool_longueur_lb: poolDimensions.longueur_lb,
+            pool_largeur_lb: poolDimensions.largeur_lb,
+            pool_profondeur_lb: poolDimensions.profondeur_lb,
+          } : {}),
+          ...(poolShape === 'T' ? {
+            pool_longueur_ta: poolDimensions.longueur_ta,
+            pool_largeur_ta: poolDimensions.largeur_ta,
+            pool_profondeur_ta: poolDimensions.profondeur_ta,
+            pool_longueur_tb: poolDimensions.longueur_tb,
+            pool_largeur_tb: poolDimensions.largeur_tb,
+            pool_profondeur_tb: poolDimensions.profondeur_tb,
+          } : {}),
         } : {}),
       });
       
@@ -657,67 +691,178 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                     <Ruler className="w-4 h-4" />
                     Dimensions de votre piscine
                   </h3>
-                  <p className="text-xs text-blue-600 mb-3">Veuillez saisir les 3 dimensions pour voir le prix estimé.</p>
-                  <div className="grid grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-xs font-medium text-blue-700 mb-1">Longueur (m)</label>
-                      <Input
-                        type="number"
-                        step="0.5"
-                        min="2"
-                        max="20"
-                        value={poolDimensions.longueur || ''}
-                        placeholder="ex: 8"
-                        onChange={(e) => {
-                          const v = Number(e.target.value);
-                          setPoolDimensions(prev => ({ ...prev, longueur: v >= 0 ? v : 0 }));
-                        }}
-                        className="h-9 text-sm bg-white"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-blue-700 mb-1">Largeur (m)</label>
-                      <Input
-                        type="number"
-                        step="0.5"
-                        min="1"
-                        max="15"
-                        value={poolDimensions.largeur || ''}
-                        placeholder="ex: 4"
-                        onChange={(e) => {
-                          const v = Number(e.target.value);
-                          setPoolDimensions(prev => ({ ...prev, largeur: v >= 0 ? v : 0 }));
-                        }}
-                        className="h-9 text-sm bg-white"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-blue-700 mb-1">Profondeur (m)</label>
-                      <Input
-                        type="number"
-                        step="0.1"
-                        min="0.5"
-                        max="3"
-                        value={poolDimensions.profondeur || ''}
-                        placeholder="ex: 1.5"
-                        onChange={(e) => {
-                          const v = Number(e.target.value);
-                          setPoolDimensions(prev => ({ ...prev, profondeur: v >= 0 ? v : 0 }));
-                        }}
-                        className="h-9 text-sm bg-white"
-                      />
-                    </div>
-                  </div>
-                  {poolDimensionsReady && (
-                    (() => {
-                      const surface = poolDimensions.longueur * poolDimensions.largeur;
-                      return (
+
+                  {/* Rectangular pool */}
+                  {poolShape === 'Rectangulaire' && (
+                    <>
+                      <p className="text-xs text-blue-600 mb-3">Veuillez saisir les 3 dimensions pour voir le prix estimé.</p>
+                      <div className="grid grid-cols-3 gap-4">
+                        <div>
+                          <label className="block text-xs font-medium text-blue-700 mb-1">Longueur (m)</label>
+                          <Input
+                            type="number"
+                            step="0.5"
+                            min="2"
+                            max="20"
+                            value={poolDimensions.longueur || ''}
+                            placeholder="ex: 8"
+                            onChange={(e) => {
+                              const v = Number(e.target.value);
+                              setPoolDimensions(prev => ({ ...prev, longueur: v >= 0 ? v : 0 }));
+                            }}
+                            className="h-9 text-sm bg-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-blue-700 mb-1">Largeur (m)</label>
+                          <Input
+                            type="number"
+                            step="0.5"
+                            min="1"
+                            max="15"
+                            value={poolDimensions.largeur || ''}
+                            placeholder="ex: 4"
+                            onChange={(e) => {
+                              const v = Number(e.target.value);
+                              setPoolDimensions(prev => ({ ...prev, largeur: v >= 0 ? v : 0 }));
+                            }}
+                            className="h-9 text-sm bg-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-blue-700 mb-1">Profondeur (m)</label>
+                          <Input
+                            type="number"
+                            step="0.1"
+                            min="0.5"
+                            max="3"
+                            value={poolDimensions.profondeur || ''}
+                            placeholder="ex: 1.5"
+                            onChange={(e) => {
+                              const v = Number(e.target.value);
+                              setPoolDimensions(prev => ({ ...prev, profondeur: v >= 0 ? v : 0 }));
+                            }}
+                            className="h-9 text-sm bg-white"
+                          />
+                        </div>
+                      </div>
+                      {poolDimensionsReady && (
                         <p className="text-xs text-blue-600 mt-2">
-                          Surface : {surface.toFixed(1)} m² • 
-                          Volume : {(surface * poolDimensions.profondeur).toFixed(1)} m³
+                          Surface : {(poolDimensions.longueur * poolDimensions.largeur).toFixed(1)} m² •
+                          Volume : {(poolDimensions.longueur * poolDimensions.largeur * poolDimensions.profondeur).toFixed(1)} m³
                         </p>
-                      );
-                    })()
+                      )}
+                    </>
+                  )}
+
+                  {/* L-shape pool */}
+                  {poolShape === 'L' && (
+                    <>
+                      <p className="text-xs text-blue-600 mb-3">Veuillez saisir les 6 dimensions pour voir le prix estimé.</p>
+                      <p className="text-xs font-semibold text-blue-700 mb-2">Partie LA (piscine principale)</p>
+                      <div className="grid grid-cols-3 gap-4 mb-3">
+                        <div>
+                          <label className="block text-xs font-medium text-blue-700 mb-1">Longueur LA (m)</label>
+                          <Input type="number" step="0.5" min="2" max="20"
+                            value={poolDimensions.longueur_la || ''} placeholder="ex: 8"
+                            onChange={(e) => { const v = Number(e.target.value); setPoolDimensions(prev => ({ ...prev, longueur_la: v >= 0 ? v : 0, longueur: v >= 0 ? v : 0 })); }}
+                            className="h-9 text-sm bg-white" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-blue-700 mb-1">Largeur LA (m)</label>
+                          <Input type="number" step="0.5" min="1" max="15"
+                            value={poolDimensions.largeur_la || ''} placeholder="ex: 4"
+                            onChange={(e) => { const v = Number(e.target.value); setPoolDimensions(prev => ({ ...prev, largeur_la: v >= 0 ? v : 0, largeur: v >= 0 ? v : 0 })); }}
+                            className="h-9 text-sm bg-white" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-blue-700 mb-1">Profondeur LA (m)</label>
+                          <Input type="number" step="0.1" min="0.5" max="3"
+                            value={poolDimensions.profondeur_la || ''} placeholder="ex: 1.5"
+                            onChange={(e) => { const v = Number(e.target.value); setPoolDimensions(prev => ({ ...prev, profondeur_la: v >= 0 ? v : 0, profondeur: v >= 0 ? v : 0 })); }}
+                            className="h-9 text-sm bg-white" />
+                        </div>
+                      </div>
+                      <p className="text-xs font-semibold text-blue-700 mb-2">Partie LB (bout qui dépasse)</p>
+                      <div className="grid grid-cols-3 gap-4">
+                        <div>
+                          <label className="block text-xs font-medium text-blue-700 mb-1">Longueur LB (m)</label>
+                          <Input type="number" step="0.5" min="1" max="20"
+                            value={poolDimensions.longueur_lb || ''} placeholder="ex: 3"
+                            onChange={(e) => { const v = Number(e.target.value); setPoolDimensions(prev => ({ ...prev, longueur_lb: v >= 0 ? v : 0 })); }}
+                            className="h-9 text-sm bg-white" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-blue-700 mb-1">Largeur LB (m)</label>
+                          <Input type="number" step="0.5" min="1" max="15"
+                            value={poolDimensions.largeur_lb || ''} placeholder="ex: 2"
+                            onChange={(e) => { const v = Number(e.target.value); setPoolDimensions(prev => ({ ...prev, largeur_lb: v >= 0 ? v : 0 })); }}
+                            className="h-9 text-sm bg-white" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-blue-700 mb-1">Profondeur LB (m)</label>
+                          <Input type="number" step="0.1" min="0.5" max="3"
+                            value={poolDimensions.profondeur_lb || ''} placeholder="ex: 1.5"
+                            onChange={(e) => { const v = Number(e.target.value); setPoolDimensions(prev => ({ ...prev, profondeur_lb: v >= 0 ? v : 0 })); }}
+                            className="h-9 text-sm bg-white" />
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  {/* T-shape pool */}
+                  {poolShape === 'T' && (
+                    <>
+                      <p className="text-xs text-blue-600 mb-3">Veuillez saisir les 6 dimensions pour voir le prix estimé.</p>
+                      <p className="text-xs font-semibold text-blue-700 mb-2">Partie TA (piscine 1)</p>
+                      <div className="grid grid-cols-3 gap-4 mb-3">
+                        <div>
+                          <label className="block text-xs font-medium text-blue-700 mb-1">Longueur TA (m)</label>
+                          <Input type="number" step="0.5" min="2" max="20"
+                            value={poolDimensions.longueur_ta || ''} placeholder="ex: 8"
+                            onChange={(e) => { const v = Number(e.target.value); setPoolDimensions(prev => ({ ...prev, longueur_ta: v >= 0 ? v : 0, longueur: v >= 0 ? v : 0 })); }}
+                            className="h-9 text-sm bg-white" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-blue-700 mb-1">Largeur TA (m)</label>
+                          <Input type="number" step="0.5" min="1" max="15"
+                            value={poolDimensions.largeur_ta || ''} placeholder="ex: 4"
+                            onChange={(e) => { const v = Number(e.target.value); setPoolDimensions(prev => ({ ...prev, largeur_ta: v >= 0 ? v : 0, largeur: v >= 0 ? v : 0 })); }}
+                            className="h-9 text-sm bg-white" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-blue-700 mb-1">Profondeur TA (m)</label>
+                          <Input type="number" step="0.1" min="0.5" max="3"
+                            value={poolDimensions.profondeur_ta || ''} placeholder="ex: 1.5"
+                            onChange={(e) => { const v = Number(e.target.value); setPoolDimensions(prev => ({ ...prev, profondeur_ta: v >= 0 ? v : 0, profondeur: v >= 0 ? v : 0 })); }}
+                            className="h-9 text-sm bg-white" />
+                        </div>
+                      </div>
+                      <p className="text-xs font-semibold text-blue-700 mb-2">Partie TB (piscine 2)</p>
+                      <div className="grid grid-cols-3 gap-4">
+                        <div>
+                          <label className="block text-xs font-medium text-blue-700 mb-1">Longueur TB (m)</label>
+                          <Input type="number" step="0.5" min="1" max="20"
+                            value={poolDimensions.longueur_tb || ''} placeholder="ex: 4"
+                            onChange={(e) => { const v = Number(e.target.value); setPoolDimensions(prev => ({ ...prev, longueur_tb: v >= 0 ? v : 0 })); }}
+                            className="h-9 text-sm bg-white" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-blue-700 mb-1">Largeur TB (m)</label>
+                          <Input type="number" step="0.5" min="1" max="15"
+                            value={poolDimensions.largeur_tb || ''} placeholder="ex: 3"
+                            onChange={(e) => { const v = Number(e.target.value); setPoolDimensions(prev => ({ ...prev, largeur_tb: v >= 0 ? v : 0 })); }}
+                            className="h-9 text-sm bg-white" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-blue-700 mb-1">Profondeur TB (m)</label>
+                          <Input type="number" step="0.1" min="0.5" max="3"
+                            value={poolDimensions.profondeur_tb || ''} placeholder="ex: 1.5"
+                            onChange={(e) => { const v = Number(e.target.value); setPoolDimensions(prev => ({ ...prev, profondeur_tb: v >= 0 ? v : 0 })); }}
+                            className="h-9 text-sm bg-white" />
+                        </div>
+                      </div>
+                    </>
                   )}
                 </div>
               )}
@@ -726,7 +871,9 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
               {isPoolModel && !poolDimensionsReady && (
                 <div className="bg-yellow-50 border border-yellow-200 p-4 rounded text-center">
                   <p className="text-sm text-yellow-700">
-                    Renseignez les 3 dimensions ci-dessus pour voir le prix estimé et les options disponibles.
+                    {poolShape === 'L' || poolShape === 'T'
+                      ? 'Renseignez les 6 dimensions ci-dessus pour voir le prix estimé et les options disponibles.'
+                      : 'Renseignez les 3 dimensions ci-dessus pour voir le prix estimé et les options disponibles.'}
                   </p>
                 </div>
               )}
@@ -1101,7 +1248,13 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                 {isPoolModel && (
                   <div className="flex justify-between items-center text-sm">
                     <span className="text-gray-600">Dimensions</span>
-                    <span className="font-medium">{poolDimensions.longueur}m × {poolDimensions.largeur}m × {poolDimensions.profondeur}m</span>
+                    <span className="font-medium">
+                      {poolShape === 'L'
+                        ? `LA: ${poolDimensions.longueur_la}×${poolDimensions.largeur_la}×${poolDimensions.profondeur_la}m / LB: ${poolDimensions.longueur_lb}×${poolDimensions.largeur_lb}×${poolDimensions.profondeur_lb}m`
+                        : poolShape === 'T'
+                        ? `TA: ${poolDimensions.longueur_ta}×${poolDimensions.largeur_ta}×${poolDimensions.profondeur_ta}m / TB: ${poolDimensions.longueur_tb}×${poolDimensions.largeur_tb}×${poolDimensions.profondeur_tb}m`
+                        : `${poolDimensions.longueur}m × ${poolDimensions.largeur}m × ${poolDimensions.profondeur}m`}
+                    </span>
                   </div>
                 )}
                 <div className="flex justify-between items-center text-sm">
