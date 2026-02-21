@@ -44,14 +44,23 @@ jobs:
           NODE_OPTIONS: "--max-old-space-size=4096"
         run: npm run build
 
+      - name: Generate timestamp
+        id: ts
+        run: echo "stamp=$(date -u +'%y%m%d-%H%M%S')" >> "$GITHUB_OUTPUT"
+
+      - name: Zip dist and api
+        run: |
+          zip -r "dist-${{ steps.ts.outputs.stamp }}.zip" dist
+          zip -r "api-${{ steps.ts.outputs.stamp }}.zip" api
+
       - name: Upload dist artifact
         uses: actions/upload-artifact@v4
         with:
-          name: dist
-          path: dist
+          name: dist-${{ steps.ts.outputs.stamp }}.zip
+          path: dist-${{ steps.ts.outputs.stamp }}.zip
 
       - name: Upload api artifact
         uses: actions/upload-artifact@v4
         with:
-          name: api
-          path: api
+          name: api-${{ steps.ts.outputs.stamp }}.zip
+          path: api-${{ steps.ts.outputs.stamp }}.zip
