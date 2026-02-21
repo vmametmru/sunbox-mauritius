@@ -20,18 +20,15 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import {
-  getDefaultPoolBOQTemplate,
-  getDefaultPoolBOQOptionsTemplate,
-  savePoolBOQTemplate,
-  savePoolBOQOptionsTemplate,
   clearSavedPoolBOQTemplates,
-  loadTemplateFromDB,
-  saveTemplateToDB,
-  getHardcodedBaseTemplate,
+  getHardcodedBaseTemplateByShape,
   getHardcodedOptionsTemplate,
+  loadTemplateFromDBByShape,
+  saveTemplateToDBByShape,
   PoolBOQTemplateCategory,
   PoolBOQTemplateSubcategory,
-  PoolBOQTemplateLine
+  PoolBOQTemplateLine,
+  PoolShape,
 } from '@/lib/pool-formulas';
 
 /**
@@ -44,10 +41,20 @@ import {
  * Templates are persisted in the database and used by the BOQ generator.
  */
 
+const SHAPES: PoolShape[] = ['Rectangulaire', 'L', 'T'];
+const SHAPE_LABELS: Record<PoolShape, string> = {
+  Rectangulaire: 'Rectangulaire',
+  L: 'En L',
+  T: 'En T',
+};
+
 const PoolBOQTemplatePage: React.FC = () => {
   const { toast } = useToast();
-  
-  // Load templates
+
+  // Active shape tab
+  const [activeShape, setActiveShape] = useState<PoolShape>('Rectangulaire');
+
+  // Per-shape state: base template, options template, DB record id, loading, changes
   const [baseTemplate, setBaseTemplate] = useState<PoolBOQTemplateCategory[]>([]);
   const [optionsTemplate, setOptionsTemplate] = useState<PoolBOQTemplateCategory[]>([]);
   const [expandedCategories, setExpandedCategories] = useState<number[]>([]);
@@ -56,10 +63,10 @@ const PoolBOQTemplatePage: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Database record tracking
+  // Database record tracking (per shape)
   const [dbRecordId, setDbRecordId] = useState<number | undefined>(undefined);
 
-  // Editing state: tracks which line is currently being edited
+  // Editing state
   const [editingLine, setEditingLine] = useState<{
     type: 'base' | 'options';
     catIndex: number;
@@ -69,31 +76,29 @@ const PoolBOQTemplatePage: React.FC = () => {
   const [editForm, setEditForm] = useState<Partial<PoolBOQTemplateLine>>({});
 
   useEffect(() => {
-    loadTemplates();
-  }, []);
+    loadTemplates(activeShape);
+  }, [activeShape]);
 
-  const loadTemplates = async () => {
+  const loadTemplates = async (shape: PoolShape) => {
     setIsLoading(true);
+    setExpandedCategories([]);
+    setExpandedSubcategories([]);
+    setEditingLine(null);
+    setEditForm({});
     try {
-      const { record, base, options } = await loadTemplateFromDB();
+      const { record, base, options } = await loadTemplateFromDBByShape(shape);
       setBaseTemplate(base);
       setOptionsTemplate(options);
       setDbRecordId(record?.id);
       setHasChanges(false);
     } catch (err: any) {
-      // Fallback to localStorage/hardcoded
+      // Fallback to hardcoded defaults
       try {
-        const base = getDefaultPoolBOQTemplate();
-        const options = getDefaultPoolBOQOptionsTemplate();
-        setBaseTemplate(base);
-        setOptionsTemplate(options);
+        setBaseTemplate(getHardcodedBaseTemplateByShape(shape));
+        setOptionsTemplate(getHardcodedOptionsTemplate());
         setHasChanges(false);
       } catch (fallbackErr: any) {
-        toast({
-          title: 'Erreur',
-          description: fallbackErr.message,
-          variant: 'destructive',
-        });
+        toast({ title: 'Erreur', description: fallbackErr.message, variant: 'destructive' });
       }
     } finally {
       setIsLoading(false);
@@ -122,7 +127,7 @@ const PoolBOQTemplatePage: React.FC = () => {
   const saveTemplates = useCallback(async () => {
     setIsSaving(true);
     try {
-      const recordId = await saveTemplateToDB(baseTemplate, optionsTemplate, dbRecordId);
+      const recordId = await saveTemplateToDBByShape(activeShape, baseTemplate, optionsTemplate, dbRecordId);
       if (!dbRecordId) {
         setDbRecordId(recordId);
       }
@@ -132,58 +137,40 @@ const PoolBOQTemplatePage: React.FC = () => {
         description: 'Les modifications du modèle ont été enregistrées dans la base de données.',
       });
     } catch (err: any) {
-      // Fallback to localStorage if DB save fails
-      try {
-        savePoolBOQTemplate(baseTemplate);
-        savePoolBOQOptionsTemplate(optionsTemplate);
-        setHasChanges(false);
-        toast({
-          title: 'Sauvegardé localement',
-          description: 'La base de données est indisponible. Les modifications ont été enregistrées localement.',
-          variant: 'destructive',
-        });
-      } catch (fallbackErr: any) {
-        toast({
-          title: 'Erreur',
-          description: fallbackErr.message,
-          variant: 'destructive',
-        });
-      }
+      toast({
+        title: 'Erreur',
+        description: err.message,
+        variant: 'destructive',
+      });
     } finally {
       setIsSaving(false);
     }
-  }, [baseTemplate, optionsTemplate, dbRecordId, toast]);
+  }, [activeShape, baseTemplate, optionsTemplate, dbRecordId, toast]);
 
   const resetToDefaults = useCallback(async () => {
     if (!confirm('Réinitialiser le modèle aux valeurs par défaut ?\nToutes les modifications seront perdues.')) return;
     setIsSaving(true);
     try {
-      const base = getHardcodedBaseTemplate();
+      const base = getHardcodedBaseTemplateByShape(activeShape);
       const options = getHardcodedOptionsTemplate();
-      // Save defaults to database
-      await saveTemplateToDB(base, options, dbRecordId);
-      clearSavedPoolBOQTemplates();
+      await saveTemplateToDBByShape(activeShape, base, options, dbRecordId);
+      if (activeShape === 'Rectangulaire') clearSavedPoolBOQTemplates();
       setBaseTemplate(base);
       setOptionsTemplate(options);
       setHasChanges(false);
-      toast({
-        title: 'Modèle réinitialisé',
-        description: 'Le modèle a été réinitialisé aux valeurs par défaut.',
-      });
+      toast({ title: 'Modèle réinitialisé', description: 'Le modèle a été réinitialisé aux valeurs par défaut.' });
     } catch {
-      // Fallback: just reset locally
-      clearSavedPoolBOQTemplates();
-      setBaseTemplate(getHardcodedBaseTemplate());
-      setOptionsTemplate(getHardcodedOptionsTemplate());
+      const base = getHardcodedBaseTemplateByShape(activeShape);
+      const options = getHardcodedOptionsTemplate();
+      if (activeShape === 'Rectangulaire') clearSavedPoolBOQTemplates();
+      setBaseTemplate(base);
+      setOptionsTemplate(options);
       setHasChanges(false);
-      toast({
-        title: 'Modèle réinitialisé localement',
-        description: 'La base de données est indisponible. Réinitialisation locale effectuée.',
-      });
+      toast({ title: 'Modèle réinitialisé localement', description: 'La base de données est indisponible. Réinitialisation locale effectuée.' });
     } finally {
       setIsSaving(false);
     }
-  }, [dbRecordId, toast]);
+  }, [activeShape, dbRecordId, toast]);
 
   /* ======================================================
      LINE EDITING
@@ -540,17 +527,6 @@ const PoolBOQTemplatePage: React.FC = () => {
     sum + cat.subcategories.reduce((s, sub) => s + sub.lines.length, 0), 0
   );
 
-  if (isLoading) {
-    return (
-      <div className="p-6 max-w-7xl mx-auto flex items-center justify-center min-h-[400px]">
-        <div className="text-center">
-          <Loader2 className="h-8 w-8 animate-spin text-blue-500 mx-auto mb-4" />
-          <p className="text-gray-600">Chargement du modèle...</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <div className="mb-6">
@@ -590,24 +566,64 @@ const PoolBOQTemplatePage: React.FC = () => {
         </div>
       </div>
 
+      {/* Shape Tabs */}
+      <div className="flex gap-2 mb-6">
+        {SHAPES.map(shape => (
+          <button
+            key={shape}
+            onClick={() => setActiveShape(shape)}
+            className={`px-5 py-2 rounded-lg font-medium text-sm transition-colors border ${
+              activeShape === shape
+                ? 'bg-blue-600 text-white border-blue-600'
+                : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+            }`}
+          >
+            {SHAPE_LABELS[shape]}
+          </button>
+        ))}
+      </div>
+
       {/* Info Banner */}
       <Card className="mb-6 border-blue-200 bg-blue-50">
         <CardContent className="p-4">
           <div className="flex gap-3">
             <AlertCircle className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
             <div className="text-sm text-blue-900">
-              <p className="font-semibold mb-1">À propos de ce modèle</p>
+              <p className="font-semibold mb-1">À propos de ce modèle — Piscine {SHAPE_LABELS[activeShape]}</p>
               <p>
                 Ce modèle définit la structure complète d'un BOQ piscine : catégories, sous-catégories, 
                 et lignes avec leurs formules de calcul. Cliquez sur l'icône <Edit className="inline h-3 w-3" /> 
-                pour modifier une ligne. Les modifications sont sauvegardées dans la base de données et utilisées lors de la 
-                génération de nouveaux BOQ.
+                pour modifier une ligne.
               </p>
               <p className="mt-2">
                 <strong>Variables disponibles :</strong>{' '}
-                <code className="bg-blue-100 px-1 rounded">longueur</code>{' '}
-                <code className="bg-blue-100 px-1 rounded">largeur</code>{' '}
-                <code className="bg-blue-100 px-1 rounded">profondeur</code>{' '}
+                {activeShape === 'Rectangulaire' && (
+                  <>
+                    <code className="bg-blue-100 px-1 rounded">longueur</code>{' '}
+                    <code className="bg-blue-100 px-1 rounded">largeur</code>{' '}
+                    <code className="bg-blue-100 px-1 rounded">profondeur</code>{' '}
+                  </>
+                )}
+                {activeShape === 'L' && (
+                  <>
+                    <code className="bg-blue-100 px-1 rounded">longueur_la</code>{' '}
+                    <code className="bg-blue-100 px-1 rounded">largeur_la</code>{' '}
+                    <code className="bg-blue-100 px-1 rounded">profondeur_la</code>{' '}
+                    <code className="bg-blue-100 px-1 rounded">longueur_lb</code>{' '}
+                    <code className="bg-blue-100 px-1 rounded">largeur_lb</code>{' '}
+                    <code className="bg-blue-100 px-1 rounded">profondeur_lb</code>{' '}
+                  </>
+                )}
+                {activeShape === 'T' && (
+                  <>
+                    <code className="bg-blue-100 px-1 rounded">longueur_ta</code>{' '}
+                    <code className="bg-blue-100 px-1 rounded">largeur_ta</code>{' '}
+                    <code className="bg-blue-100 px-1 rounded">profondeur_ta</code>{' '}
+                    <code className="bg-blue-100 px-1 rounded">longueur_tb</code>{' '}
+                    <code className="bg-blue-100 px-1 rounded">largeur_tb</code>{' '}
+                    <code className="bg-blue-100 px-1 rounded">profondeur_tb</code>{' '}
+                  </>
+                )}
                 <code className="bg-blue-100 px-1 rounded">surface_m2</code>{' '}
                 <code className="bg-blue-100 px-1 rounded">volume_m3</code>{' '}
                 <code className="bg-blue-100 px-1 rounded">perimetre_m</code>{' '}
@@ -639,6 +655,15 @@ const PoolBOQTemplatePage: React.FC = () => {
         </Card>
       )}
 
+      {isLoading ? (
+        <div className="flex items-center justify-center min-h-[200px]">
+          <div className="text-center">
+            <Loader2 className="h-8 w-8 animate-spin text-blue-500 mx-auto mb-4" />
+            <p className="text-gray-600">Chargement du modèle...</p>
+          </div>
+        </div>
+      ) : (
+        <>
       {/* Statistics */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         <Card>
@@ -711,6 +736,8 @@ const PoolBOQTemplatePage: React.FC = () => {
           )}
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 };

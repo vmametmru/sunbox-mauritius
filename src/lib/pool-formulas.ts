@@ -735,3 +735,142 @@ export async function saveTemplateToDB(
 
   return recordId;
 }
+
+/* ======================================================
+   Shape-specific templates (L and T)
+====================================================== */
+
+export type PoolShape = 'Rectangulaire' | 'L' | 'T';
+
+/** DB record name used to identify per-shape templates. */
+const SHAPE_TEMPLATE_NAMES: Record<PoolShape, string> = {
+  Rectangulaire: 'Modèle par défaut',
+  L: 'Modèle Piscine en L',
+  T: 'Modèle Piscine en T',
+};
+
+/**
+ * Hardcoded base template for L-shaped pools.
+ * Uses longueur_la/lb, largeur_la/lb, profondeur_la/lb dimension variables.
+ */
+export function getHardcodedLShapeBaseTemplate(): PoolBOQTemplateCategory[] {
+  return [
+    {
+      name: '1/ Préparation du terrain',
+      is_option: false,
+      display_order: 1,
+      subcategories: [
+        {
+          name: '1A/ Fouille',
+          display_order: 1,
+          lines: [
+            { description: 'Location de JCB', quantity: 1, quantity_formula: '1', unit: 'jour', price_list_name: 'Location JCB (1 jour)' },
+            { description: "Main d'oeuvre", quantity: 1, quantity_formula: '0.125 * (longueur_la * largeur_la + longueur_lb * largeur_lb)', unit: 'jour', price_list_name: "Main d'oeuvre (1 jour)" },
+            { description: 'Transport de matériaux', quantity: 1, quantity_formula: 'CEIL((longueur_la * largeur_la + longueur_lb * largeur_lb) / 15) * 2', unit: 'unité', price_list_name: 'Transport Matériaux' },
+            { description: 'Transport évacuation de la terre', quantity: 1, quantity_formula: 'CEIL((longueur_la * largeur_la + longueur_lb * largeur_lb) / 15) * 3', unit: 'unité', price_list_name: 'Transport Matériaux' },
+          ],
+        },
+      ],
+    },
+  ];
+}
+
+/**
+ * Hardcoded base template for T-shaped pools.
+ * Uses longueur_ta/tb, largeur_ta/tb, profondeur_ta/tb dimension variables.
+ */
+export function getHardcodedTShapeBaseTemplate(): PoolBOQTemplateCategory[] {
+  return [
+    {
+      name: '1/ Préparation du terrain',
+      is_option: false,
+      display_order: 1,
+      subcategories: [
+        {
+          name: '1A/ Fouille',
+          display_order: 1,
+          lines: [
+            { description: 'Location de JCB', quantity: 1, quantity_formula: '1', unit: 'jour', price_list_name: 'Location JCB (1 jour)' },
+            { description: "Main d'oeuvre", quantity: 1, quantity_formula: '0.125 * (longueur_ta * largeur_ta + longueur_tb * largeur_tb)', unit: 'jour', price_list_name: "Main d'oeuvre (1 jour)" },
+            { description: 'Transport de matériaux', quantity: 1, quantity_formula: 'CEIL((longueur_ta * largeur_ta + longueur_tb * largeur_tb) / 15) * 2', unit: 'unité', price_list_name: 'Transport Matériaux' },
+            { description: 'Transport évacuation de la terre', quantity: 1, quantity_formula: 'CEIL((longueur_ta * largeur_ta + longueur_tb * largeur_tb) / 15) * 3', unit: 'unité', price_list_name: 'Transport Matériaux' },
+          ],
+        },
+      ],
+    },
+  ];
+}
+
+/**
+ * Return the default base template for a given pool shape.
+ */
+export function getHardcodedBaseTemplateByShape(shape: PoolShape): PoolBOQTemplateCategory[] {
+  if (shape === 'L') return getHardcodedLShapeBaseTemplate();
+  if (shape === 'T') return getHardcodedTShapeBaseTemplate();
+  return getHardcodedBaseTemplate();
+}
+
+/**
+ * Load a shape-specific template from the database.
+ * Falls back to the hardcoded defaults for that shape.
+ */
+export async function loadTemplateFromDBByShape(shape: PoolShape): Promise<{
+  record: PoolBOQTemplateRecord | null;
+  base: PoolBOQTemplateCategory[];
+  options: PoolBOQTemplateCategory[];
+}> {
+  const targetName = SHAPE_TEMPLATE_NAMES[shape];
+  try {
+    const templates: PoolBOQTemplateRecord[] = await api.getPoolBOQTemplates();
+    const record = templates.find(t => t.name === targetName) || null;
+    if (record && record.template_data) {
+      return {
+        record,
+        base: record.template_data.base || getHardcodedBaseTemplateByShape(shape),
+        options: record.template_data.options || getHardcodedOptionsTemplate(),
+      };
+    }
+    return {
+      record: record || null,
+      base: getHardcodedBaseTemplateByShape(shape),
+      options: getHardcodedOptionsTemplate(),
+    };
+  } catch {
+    return {
+      record: null,
+      base: getHardcodedBaseTemplateByShape(shape),
+      options: getHardcodedOptionsTemplate(),
+    };
+  }
+}
+
+/**
+ * Save a shape-specific template to the database.
+ * Creates a new record if none exists for this shape, otherwise updates it.
+ * Returns the database record ID.
+ */
+export async function saveTemplateToDBByShape(
+  shape: PoolShape,
+  base: PoolBOQTemplateCategory[],
+  options: PoolBOQTemplateCategory[],
+  existingRecordId?: number,
+): Promise<number> {
+  const templateData = { base, options };
+  const targetName = SHAPE_TEMPLATE_NAMES[shape];
+  const isDefault = shape === 'Rectangulaire';
+
+  let recordId: number;
+  if (existingRecordId) {
+    await api.updatePoolBOQTemplate({ id: existingRecordId, template_data: templateData });
+    recordId = existingRecordId;
+  } else {
+    const result = await api.createPoolBOQTemplate({
+      name: targetName,
+      description: `Modèle BOQ piscine ${shape === 'Rectangulaire' ? 'rectangulaire' : shape === 'L' ? 'en L' : 'en T'}`,
+      is_default: isDefault,
+      template_data: templateData,
+    });
+    recordId = result.id;
+  }
+  return recordId;
+}
