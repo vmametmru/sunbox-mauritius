@@ -215,7 +215,7 @@ export default function QuoteDetailPage() {
       is_free_quote:    !!fullQuote.is_free_quote,
     };
 
-    return { data, pdfSettings, company, logoBase64 };
+    return { data, settings: pdfSettings, company, logoBase64 };
   };
 
   const handleDownloadPdf = async () => {

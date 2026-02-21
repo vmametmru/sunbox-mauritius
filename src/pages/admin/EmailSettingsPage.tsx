@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { 
   Mail, 
   Server, 
@@ -19,6 +19,8 @@ import {
   Upload,
   FileImage,
   Check,
+  X,
+  ZoomIn,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -29,10 +31,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { WysiwygEditor } from '@/components/ui/wysiwyg-editor';
-import { TEMPLATE_NAMES, TEMPLATE_DESCRIPTIONS } from '@/components/QuotePdfTemplates';
+import { TEMPLATE_NAMES, TEMPLATE_DESCRIPTIONS, TEMPLATES, type PdfDisplaySettings, type CompanyInfo } from '@/components/QuotePdfTemplates';
+import type { QuotePdfData } from '@/components/QuotePdfTemplates';
 
 interface EmailSettings {
   smtp_host: string;
@@ -199,6 +203,7 @@ export default function EmailSettingsPage() {
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [pdfSettings, setPdfSettings] = useState<PdfSettings>(defaultPdfSettings);
   const [savingPdf, setSavingPdf] = useState(false);
+  const [previewTemplateId, setPreviewTemplateId] = useState<string | null>(null);
   const newPhotoInputRef = useRef<HTMLInputElement>(null);
   const editPhotoInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -1645,6 +1650,16 @@ export default function EmailSettingsPage() {
                             <Check className="h-3 w-3 text-white" />
                           </div>
                         )}
+                        {/* Preview button */}
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); setPreviewTemplateId(id); }}
+                          className="absolute bottom-10 right-2 flex items-center gap-1 bg-white/90 hover:bg-white border border-gray-200 shadow-sm text-gray-600 hover:text-orange-600 text-[10px] font-medium px-2 py-1 rounded transition-colors"
+                          title="Aperçu complet"
+                        >
+                          <ZoomIn className="h-3 w-3" />
+                          Aperçu
+                        </button>
                       </button>
                     );
                   })}
@@ -1811,6 +1826,109 @@ export default function EmailSettingsPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* ── PDF Template Preview Dialog ────────────────────────────────────── */}
+      {previewTemplateId && (() => {
+        const previewSettings: PdfDisplaySettings = {
+          pdf_primary_color:     pdfSettings.pdf_primary_color,
+          pdf_accent_color:      pdfSettings.pdf_accent_color,
+          pdf_footer_text:       pdfSettings.pdf_footer_text || 'Sunbox Ltd – Grand Baie, Mauritius | info@sunbox-mauritius.com',
+          pdf_terms:             pdfSettings.pdf_terms || 'Ce devis est valable pour la durée indiquée.',
+          pdf_bank_details:      pdfSettings.pdf_bank_details || '',
+          pdf_validity_days:     pdfSettings.pdf_validity_days || '30',
+          pdf_show_logo:         pdfSettings.pdf_show_logo,
+          pdf_show_vat:          pdfSettings.pdf_show_vat,
+          pdf_show_bank_details: pdfSettings.pdf_show_bank_details,
+          pdf_show_terms:        pdfSettings.pdf_show_terms,
+          pdf_template:          previewTemplateId,
+          pdf_font:              pdfSettings.pdf_font || 'inter',
+          pdf_logo_position:     pdfSettings.pdf_logo_position || 'left',
+        };
+
+        const sampleCompany: CompanyInfo = {
+          company_name:    'Sunbox Mauritius',
+          company_email:   'info@sunbox-mauritius.com',
+          company_phone:   '+230 5250 1234',
+          company_address: 'Royal Road, Grand Baie, Mauritius',
+        };
+
+        const sampleData: QuotePdfData = {
+          id:               1,
+          reference_number: 'WCQ-202602-000001',
+          created_at:       new Date().toISOString(),
+          valid_until:      new Date(Date.now() + 30 * 86400000).toISOString(),
+          status:           'pending',
+          customer_name:    'Jean Dupont',
+          customer_email:   'jean.dupont@example.com',
+          customer_phone:   '+230 5999 0000',
+          customer_address: 'Quatre Bornes, Mauritius',
+          model_name:       'Sunbox Classic 40ft',
+          model_type:       'container',
+          quote_title:      undefined,
+          photo_url:        '',
+          plan_url:         '',
+          base_price:       2800000,
+          options_total:    350000,
+          total_price:      3150000,
+          vat_rate:         15,
+          is_free_quote:    false,
+          options: [
+            { option_name: 'Climatisation 3 pièces',    option_price: 120000 },
+            { option_name: 'Cuisine équipée',            option_price: 95000  },
+            { option_name: 'Panneaux solaires 5 kWc',   option_price: 135000 },
+          ],
+          categories: [],
+        };
+
+        const templateFn = TEMPLATES[previewTemplateId] || TEMPLATES['1'];
+        const html = templateFn(sampleData, previewSettings, sampleCompany, siteLogo || '');
+
+        return (
+          <Dialog open onOpenChange={() => setPreviewTemplateId(null)}>
+            <DialogContent className="max-w-5xl w-full p-0 overflow-hidden bg-gray-100">
+              {/* Dialog header */}
+              <div className="flex items-center justify-between px-5 py-3 bg-white border-b border-gray-200">
+                <div className="flex items-center gap-3">
+                  <FileImage className="h-5 w-5 text-orange-500" />
+                  <span className="font-semibold text-gray-800">
+                    Aperçu — Template {TEMPLATE_NAMES[previewTemplateId]}
+                  </span>
+                  <span className="text-xs text-gray-400">(données de démonstration)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {Object.keys(TEMPLATE_NAMES).map((tid) => (
+                    <button
+                      key={tid}
+                      onClick={() => setPreviewTemplateId(tid)}
+                      className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                        tid === previewTemplateId
+                          ? 'bg-orange-500 text-white'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      {TEMPLATE_NAMES[tid]}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => setPreviewTemplateId(null)}
+                    className="ml-2 p-1.5 rounded hover:bg-gray-100 text-gray-500"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Scrollable A4 preview */}
+              <div className="overflow-auto max-h-[80vh] p-6 flex justify-center">
+                <div
+                  style={{ width: 794, minWidth: 794, transform: 'scale(0.85)', transformOrigin: 'top center', marginBottom: '-15%' }}
+                  dangerouslySetInnerHTML={{ __html: html }}
+                />
+              </div>
+            </DialogContent>
+          </Dialog>
+        );
+      })()}
     </div>
   );
 }
