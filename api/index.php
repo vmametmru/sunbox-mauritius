@@ -1565,6 +1565,7 @@ try {
             $quote = $stmt->fetch();
             
             if (!$quote) fail('Devis non trouvé', 404);
+            $quote['is_free_quote'] = (bool)$quote['is_free_quote'];
             
             // Get quote options (for model-based quotes)
             $optStmt = $db->prepare("
@@ -1609,6 +1610,96 @@ try {
                     $cat['lines'] = $lineStmt->fetchAll();
                 }
                 $quote['categories'] = $categories;
+            } elseif (!empty($quote['model_id'])) {
+                // For model-based quotes, fetch the BOQ base price breakdown (top-level categories with subcategories)
+                $modelId = (int)$quote['model_id'];
+
+                // Helper: cast a raw boq_lines row to the PDF line shape
+                $castBoqLine = function(array $ln): array {
+                    return [
+                        'description'    => $ln['description'],
+                        'quantity'       => (float)$ln['quantity'],
+                        'unit'           => $ln['unit'],
+                        'unit_cost_ht'   => (float)$ln['unit_cost_ht'],
+                        'margin_percent' => (float)$ln['margin_percent'],
+                        'sale_price_ht'  => (float)$ln['sale_price_ht'],
+                    ];
+                };
+
+                // Helper: sum sale_price_ht for a set of raw lines
+                $sumLines = function(array $lines): float {
+                    return round(array_sum(array_map(fn($ln) => (float)$ln['sale_price_ht'], $lines)), 2);
+                };
+
+                // Fetch top-level base categories (not options, no parent)
+                $topCatStmt = $db->prepare("
+                    SELECT bc.id, bc.name, bc.display_order
+                    FROM boq_categories bc
+                    WHERE bc.model_id = ? AND bc.is_option = FALSE AND bc.parent_id IS NULL
+                    ORDER BY bc.display_order ASC, bc.name ASC
+                ");
+                $topCatStmt->execute([$modelId]);
+                $topCats = $topCatStmt->fetchAll();
+
+                $subCatStmt = $db->prepare("
+                    SELECT bc.id, bc.name, bc.display_order
+                    FROM boq_categories bc
+                    WHERE bc.model_id = ? AND bc.is_option = FALSE AND bc.parent_id = ?
+                    ORDER BY bc.display_order ASC, bc.name ASC
+                ");
+
+                $boqLineStmt = $db->prepare("
+                    SELECT bl.description, bl.quantity, bl.unit,
+                           COALESCE(pl.unit_price, bl.unit_cost_ht) AS unit_cost_ht,
+                           bl.margin_percent,
+                           ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2) AS sale_price_ht
+                    FROM boq_lines bl
+                    LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
+                    WHERE bl.category_id = ?
+                    ORDER BY bl.display_order ASC, bl.id ASC
+                ");
+
+                $baseCategories = [];
+                foreach ($topCats as $topCat) {
+                    $topId = (int)$topCat['id'];
+
+                    $subCatStmt->execute([$modelId, $topId]);
+                    $subCats = $subCatStmt->fetchAll();
+
+                    if (!empty($subCats)) {
+                        $subcategories = [];
+                        $catTotal = 0.0;
+                        foreach ($subCats as $subCat) {
+                            $boqLineStmt->execute([(int)$subCat['id']]);
+                            $rawLines = $boqLineStmt->fetchAll();
+                            $subTotal = $sumLines($rawLines);
+                            $catTotal += $subTotal;
+                            $subcategories[] = [
+                                'name'                => $subCat['name'],
+                                'total_sale_price_ht' => $subTotal,
+                                'lines'               => array_map($castBoqLine, $rawLines),
+                            ];
+                        }
+                        $baseCategories[] = [
+                            'name'                => $topCat['name'],
+                            'total_sale_price_ht' => round($catTotal, 2),
+                            'subcategories'       => $subcategories,
+                            'lines'               => [],
+                        ];
+                    } else {
+                        // No subcategories – attach lines directly to the top category
+                        $boqLineStmt->execute([$topId]);
+                        $rawLines = $boqLineStmt->fetchAll();
+                        $baseCategories[] = [
+                            'name'                => $topCat['name'],
+                            'total_sale_price_ht' => $sumLines($rawLines),
+                            'subcategories'       => [],
+                            'lines'               => array_map($castBoqLine, $rawLines),
+                        ];
+                    }
+                }
+
+                $quote['base_categories'] = $baseCategories;
             }
             
             ok($quote);
@@ -1628,6 +1719,7 @@ try {
             $stmt->execute([$token]);
             $quote = $stmt->fetch();
             if (!$quote) fail('Devis non trouvé ou lien invalide', 404);
+            $quote['is_free_quote'] = (bool)$quote['is_free_quote'];
 
             // Options
             $optStmt = $db->prepare("
