@@ -208,6 +208,7 @@ export default function EmailSettingsPage() {
   const [previewQuoteId, setPreviewQuoteId] = useState<number | null>(null);
   const [previewQuoteData, setPreviewQuoteData] = useState<QuotePdfData | null>(null);
   const [previewQuoteLoading, setPreviewQuoteLoading] = useState(false);
+  const [siteVatRate, setSiteVatRate] = useState(15);
   const newPhotoInputRef = useRef<HTMLInputElement>(null);
   const editPhotoInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -228,7 +229,6 @@ export default function EmailSettingsPage() {
     setPreviewQuoteLoading(true);
     api.getQuoteWithDetails(previewQuoteId)
       .then((q: any) => {
-        const vatRate = Number(pdfSettings.pdf_show_vat) || 15;
         setPreviewQuoteData({
           id:               q.id,
           reference_number: q.reference_number,
@@ -247,7 +247,7 @@ export default function EmailSettingsPage() {
           base_price:       Number(q.base_price),
           options_total:    Number(q.options_total),
           total_price:      Number(q.total_price),
-          vat_rate:         vatRate,
+          vat_rate:         siteVatRate,
           options:          q.options          || [],
           base_categories:  q.base_categories  || [],
           categories:       q.categories       || [],
@@ -273,6 +273,9 @@ export default function EmailSettingsPage() {
         const siteSettingsResult = await api.getSettings('site');
         if (siteSettingsResult && siteSettingsResult.site_logo) {
           setSiteLogo(siteSettingsResult.site_logo);
+        }
+        if (siteSettingsResult?.vat_rate) {
+          setSiteVatRate(Number(siteSettingsResult.vat_rate) || 15);
         }
       } catch (e) {
         console.log('Site settings not available');
@@ -1916,7 +1919,7 @@ export default function EmailSettingsPage() {
           base_price:       2800000,
           options_total:    350000,
           total_price:      3150000,
-          vat_rate:         15,
+          vat_rate:         siteVatRate,
           is_free_quote:    false,
           options: [
             { option_name: 'Climatisation 3 pièces',  option_price: 120000 },
@@ -1949,34 +1952,19 @@ export default function EmailSettingsPage() {
             },
             {
               name: 'Électricité',
-              total_sale_price_ht: 850000,
-              subcategories: [
-                {
-                  name: 'Tableau électrique',
-                  total_sale_price_ht: 280000,
-                  lines: [
-                    { description: 'Tableau divisionnaire 63A', quantity: 1, unit: 'unité', unit_cost_ht: 120000, margin_percent: 30, sale_price_ht: 156000 },
-                    { description: 'Disjoncteurs différentiels 30mA', quantity: 8, unit: 'unité', unit_cost_ht: 12000, margin_percent: 30, sale_price_ht: 124800 },
-                  ],
-                },
-                {
-                  name: 'Câblage & prises',
-                  total_sale_price_ht: 570000,
-                  lines: [
-                    { description: 'Câble NYM 2.5mm² sous conduit', quantity: 150, unit: 'ml', unit_cost_ht: 1800, margin_percent: 30, sale_price_ht: 351000 },
-                    { description: 'Prises doubles 16A avec terre', quantity: 12, unit: 'unité', unit_cost_ht: 9500, margin_percent: 30, sale_price_ht: 148200 },
-                  ],
-                },
+              total_sale_price_ht: 507000,
+              subcategories: [],
+              lines: [
+                { description: 'Tableau divisionnaire 63A', quantity: 1, unit: 'unité', unit_cost_ht: 120000, margin_percent: 30, sale_price_ht: 156000 },
+                { description: 'Câble NYM 2.5mm² sous conduit', quantity: 150, unit: 'ml', unit_cost_ht: 1800, margin_percent: 30, sale_price_ht: 351000 },
               ],
-              lines: [],
             },
             {
               name: 'Plomberie',
-              total_sale_price_ht: 750000,
+              total_sale_price_ht: 235300,
               subcategories: [],
               lines: [
                 { description: 'Alimentation eau froide PER 16mm', quantity: 30, unit: 'ml', unit_cost_ht: 3200, margin_percent: 30, sale_price_ht: 124800 },
-                { description: 'Évacuation PVC DN100', quantity: 20, unit: 'ml', unit_cost_ht: 2800, margin_percent: 30, sale_price_ht: 72800 },
                 { description: 'Chauffe-eau solaire 150L', quantity: 1, unit: 'unité', unit_cost_ht: 85000, margin_percent: 30, sale_price_ht: 110500 },
               ],
             },

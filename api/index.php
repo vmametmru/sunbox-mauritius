@@ -1565,6 +1565,7 @@ try {
             $quote = $stmt->fetch();
             
             if (!$quote) fail('Devis non trouvé', 404);
+            $quote['is_free_quote'] = (bool)$quote['is_free_quote'];
             
             // Get quote options (for model-based quotes)
             $optStmt = $db->prepare("
@@ -1718,6 +1719,7 @@ try {
             $stmt->execute([$token]);
             $quote = $stmt->fetch();
             if (!$quote) fail('Devis non trouvé ou lien invalide', 404);
+            $quote['is_free_quote'] = (bool)$quote['is_free_quote'];
 
             // Options
             $optStmt = $db->prepare("
