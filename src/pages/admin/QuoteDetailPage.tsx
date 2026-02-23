@@ -210,6 +210,7 @@ export default function QuoteDetailPage() {
       options_total:    Number(fullQuote.options_total),
       total_price:      Number(fullQuote.total_price),
       vat_rate:         vatRate,
+      notes:            fullQuote.notes,
       options:          fullQuote.options,
       base_categories:  fullQuote.base_categories,
       categories:       fullQuote.categories,

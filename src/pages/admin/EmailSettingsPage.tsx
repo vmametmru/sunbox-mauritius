@@ -248,6 +248,7 @@ export default function EmailSettingsPage() {
           options_total:    Number(q.options_total),
           total_price:      Number(q.total_price),
           vat_rate:         siteVatRate,
+          notes:            q.notes || '',
           options:          q.options          || [],
           base_categories:  q.base_categories  || [],
           categories:       q.categories       || [],
@@ -1920,6 +1921,7 @@ export default function EmailSettingsPage() {
           options_total:    350000,
           total_price:      3150000,
           vat_rate:         siteVatRate,
+          notes:            'Modalités : 60% à la commande, 30% sur avancement, solde à la remise des clés.',
           is_free_quote:    false,
           options: [
             { option_name: 'Climatisation 3 pièces',  option_price: 120000 },
