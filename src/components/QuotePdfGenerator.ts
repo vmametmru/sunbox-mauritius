@@ -143,9 +143,12 @@ export async function generateQuotePdf(opts: GeneratePdfOptions): Promise<jsPDF>
 
   const safeData: QuotePdfData = { ...data, photo_url: safePhoto, plan_url: safePlan };
 
+  // Build action URL for the HTML template (embed it visually in the signature box)
+  const actionUrl = data.id > 0 ? `${actionBaseUrl}/#/quote-action/${data.id}` : undefined;
+
   // Build HTML from the selected template
   const templateFn = getTemplate(settings.pdf_template || '1');
-  const htmlContent = templateFn(safeData, settings, company, logoBase64);
+  const htmlContent = templateFn(safeData, settings, company, logoBase64, actionUrl);
 
   // Mount in a hidden container (794 px wide – standard A4 screen width)
   const container = document.createElement('div');
@@ -203,10 +206,17 @@ export async function generateQuotePdf(opts: GeneratePdfOptions): Promise<jsPDF>
 
     pdf.addImage(imgData, 'JPEG', 0, 0, pdfW, contentHeightMM);
     lastContentHeightMM = contentHeightMM;
+
+    // Page numbers at bottom-left (shown for all pages when there are multiple)
+    if (totalPages > 1) {
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(8);
+      pdf.setTextColor(150, 150, 150);
+      pdf.text(`page ${i + 1} / ${totalPages}`, 10, pdfH - 5);
+    }
   }
 
-  // Action bar (62 mm tall). Add on last page if enough room, else new page.
-  // Action bar height in mm — must match the height drawn by drawActionBar()
+  // Clickable action bar (jsPDF level) – provides interactive approve/reject/changes links
   const ACTION_BAR_H = 62;
   const remaining = pdfH - lastContentHeightMM;
   if (remaining < ACTION_BAR_H + 5) {

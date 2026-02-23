@@ -50,7 +50,7 @@ export interface QuotePdfData {
   vat_rate: number;
   notes?: string;
   // Options (model-based quotes) – simple name+price list
-  options?: Array<{ option_name: string; option_price: number }>;
+  options?: Array<{ option_name: string; option_price: number; option_details?: string }>;
   // Base price breakdown (model-based quotes) – categories with optional subcategories
   base_categories?: QuotePdfCategory[];
   // Categories (free quotes) – categories with optional subcategories
@@ -104,6 +104,10 @@ function fmtDate(dateStr?: string): string {
   } catch { return dateStr; }
 }
 
+function esc(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 function logoAlign(pos: string): string {
   if (pos === 'center') return 'center';
   if (pos === 'right') return 'flex-end';
@@ -137,11 +141,12 @@ function pdfCatBlock(cats: QuotePdfCategory[] | undefined): string {
   return html;
 }
 
-/** Render options in PDF-model style: bold option name */
+/** Render options in PDF-model style: bold name + comma-separated detail items */
 function pdfOptBlock(opts: QuotePdfData['options']): string {
   if (!opts?.length) return '';
-  return opts.map(o => `<div style="margin-bottom:6px;">
-    <div style="font-size:12px;font-weight:700;color:#111827;">${o.option_name}</div>
+  return opts.map(o => `<div style="margin-bottom:8px;">
+    <div style="font-size:12px;font-weight:700;color:#111827;">${esc(o.option_name)}</div>
+    ${o.option_details ? `<div style="font-size:11px;color:#4b5563;margin-top:2px;">${esc(o.option_details)}</div>` : ''}
   </div>`).join('');
 }
 
@@ -181,17 +186,24 @@ function pdfTotals(data: QuotePdfData, accentColor: string, showVat: boolean): s
   `;
 }
 
-/** Signature + bank details bottom box */
-function pdfSignatureBox(settings: PdfDisplaySettings): string {
+/** Signature + bank details + action button bottom box */
+function pdfSignatureBox(settings: PdfDisplaySettings, actionUrl?: string): string {
   const showBank = settings.pdf_show_bank_details === 'true';
   const bankDetails = settings.pdf_bank_details || '';
+  const hasBank = showBank && !!bankDetails;
   return `<div style="display:flex;border:1px solid #d1d5db;min-height:64px;">
-    <div style="flex:1.5;padding:10px 14px;border-right:1px solid #d1d5db;">
+    <div style="flex:1.5;padding:10px 14px;${hasBank || actionUrl ? 'border-right:1px solid #d1d5db;' : ''}">
       <div style="font-size:11px;color:#6b7280;">Bon pour accord : (Signature et date)</div>
     </div>
-    <div style="flex:1;padding:10px 14px;">
-      ${showBank && bankDetails ? `<div style="font-size:11px;"><strong style="color:#374151;">Coordonnées bancaires :</strong><br/><span style="color:#6b7280;white-space:pre-line;">${bankDetails}</span></div>` : ''}
-    </div>
+    ${hasBank ? `<div style="flex:1;padding:10px 14px;${actionUrl ? 'border-right:1px solid #d1d5db;' : ''}">
+      <div style="font-size:11px;"><strong style="color:#374151;">Coordonnées bancaires :</strong><br/><span style="color:#6b7280;white-space:pre-line;">${bankDetails}</span></div>
+    </div>` : ''}
+    ${actionUrl ? `<div style="flex:1;padding:10px 14px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;">
+      <div style="background:#1A365D;color:#fff;font-size:10px;font-weight:700;padding:7px 12px;border-radius:4px;margin-bottom:5px;line-height:1.4;">
+        Approuver, Rejeter ou<br/>Modifier En Ligne
+      </div>
+      <div style="font-size:8px;color:#6b7280;word-break:break-all;">${esc(actionUrl)}</div>
+    </div>` : ''}
   </div>`;
 }
 
@@ -213,6 +225,7 @@ function buildTemplate(
   company: CompanyInfo,
   logoBase64: string,
   theme: TemplateTheme,
+  actionUrl?: string,
 ): string {
   const font = getFont(settings);
   const showVat = settings.pdf_show_vat === 'true';
@@ -315,7 +328,7 @@ function buildTemplate(
 
     <!-- SIGNATURE + BANK DETAILS -->
     <div style="margin:0 40px 12px;">
-      ${pdfSignatureBox(settings)}
+      ${pdfSignatureBox(settings, actionUrl)}
     </div>
 
     <!-- FOOTER / TERMS -->
@@ -334,7 +347,7 @@ function buildTemplate(
 // ─────────────────────────────────────────────
 // TEMPLATE 1 – ÉLÉGANT (Navy + Orange)
 // ─────────────────────────────────────────────
-export function template1(data: QuotePdfData, settings: PdfDisplaySettings, company: CompanyInfo, logoBase64: string): string {
+export function template1(data: QuotePdfData, settings: PdfDisplaySettings, company: CompanyInfo, logoBase64: string, actionUrl?: string): string {
   const primary = settings.pdf_primary_color || '#1A365D';
   const accent  = settings.pdf_accent_color  || '#f97316';
   return buildTemplate(data, settings, company, logoBase64, {
@@ -345,13 +358,13 @@ export function template1(data: QuotePdfData, settings: PdfDisplaySettings, comp
     titleStyle:        `font-size:38px;font-weight:800;color:${primary};`,
     divider:           '#d1d5db',
     sectionLabelColor: '#111827',
-  });
+  }, actionUrl);
 }
 
 // ─────────────────────────────────────────────
 // TEMPLATE 2 – MINIMALISTE (Black + thin lines)
 // ─────────────────────────────────────────────
-export function template2(data: QuotePdfData, settings: PdfDisplaySettings, company: CompanyInfo, logoBase64: string): string {
+export function template2(data: QuotePdfData, settings: PdfDisplaySettings, company: CompanyInfo, logoBase64: string, actionUrl?: string): string {
   const primary = settings.pdf_primary_color || '#111827';
   const accent  = settings.pdf_accent_color  || '#374151';
   return buildTemplate(data, settings, company, logoBase64, {
@@ -362,13 +375,13 @@ export function template2(data: QuotePdfData, settings: PdfDisplaySettings, comp
     titleStyle:        `font-size:44px;font-weight:800;color:${primary};letter-spacing:-1px;`,
     divider:           '#e5e7eb',
     sectionLabelColor: '#111827',
-  });
+  }, actionUrl);
 }
 
 // ─────────────────────────────────────────────
 // TEMPLATE 3 – SOLAIRE (Orange + Navy)
 // ─────────────────────────────────────────────
-export function template3(data: QuotePdfData, settings: PdfDisplaySettings, company: CompanyInfo, logoBase64: string): string {
+export function template3(data: QuotePdfData, settings: PdfDisplaySettings, company: CompanyInfo, logoBase64: string, actionUrl?: string): string {
   const primary = settings.pdf_primary_color || '#ea580c';
   const accent  = settings.pdf_accent_color  || '#ea580c';
   return buildTemplate(data, settings, company, logoBase64, {
@@ -379,13 +392,13 @@ export function template3(data: QuotePdfData, settings: PdfDisplaySettings, comp
     titleStyle:        `font-size:38px;font-weight:800;color:${primary};`,
     divider:           '#fed7aa',
     sectionLabelColor: '#9a3412',
-  });
+  }, actionUrl);
 }
 
 // ─────────────────────────────────────────────
 // TEMPLATE 4 – NUIT (Dark Slate + Orange)
 // ─────────────────────────────────────────────
-export function template4(data: QuotePdfData, settings: PdfDisplaySettings, company: CompanyInfo, logoBase64: string): string {
+export function template4(data: QuotePdfData, settings: PdfDisplaySettings, company: CompanyInfo, logoBase64: string, actionUrl?: string): string {
   const primary = settings.pdf_primary_color || '#0f172a';
   const accent  = settings.pdf_accent_color  || '#f97316';
   return buildTemplate(data, settings, company, logoBase64, {
@@ -396,13 +409,13 @@ export function template4(data: QuotePdfData, settings: PdfDisplaySettings, comp
     titleStyle:        `font-size:38px;font-weight:800;color:${primary};`,
     divider:           '#cbd5e1',
     sectionLabelColor: '#1e293b',
-  });
+  }, actionUrl);
 }
 
 // ─────────────────────────────────────────────
 // TEMPLATE 5 – MODERNE (Blue + Orange)
 // ─────────────────────────────────────────────
-export function template5(data: QuotePdfData, settings: PdfDisplaySettings, company: CompanyInfo, logoBase64: string): string {
+export function template5(data: QuotePdfData, settings: PdfDisplaySettings, company: CompanyInfo, logoBase64: string, actionUrl?: string): string {
   const primary = settings.pdf_primary_color || '#0369a1';
   const accent  = settings.pdf_accent_color  || '#f97316';
   return buildTemplate(data, settings, company, logoBase64, {
@@ -413,13 +426,13 @@ export function template5(data: QuotePdfData, settings: PdfDisplaySettings, comp
     titleStyle:        `font-size:38px;font-weight:800;color:${primary};`,
     divider:           '#bae6fd',
     sectionLabelColor: primary,
-  });
+  }, actionUrl);
 }
 
 // ─────────────────────────────────────────────
 // TEMPLATE 6 – AQUA (Teal + Orange)
 // ─────────────────────────────────────────────
-export function template6(data: QuotePdfData, settings: PdfDisplaySettings, company: CompanyInfo, logoBase64: string): string {
+export function template6(data: QuotePdfData, settings: PdfDisplaySettings, company: CompanyInfo, logoBase64: string, actionUrl?: string): string {
   const primary = settings.pdf_primary_color || '#0d9488';
   const accent  = settings.pdf_accent_color  || '#f97316';
   return buildTemplate(data, settings, company, logoBase64, {
@@ -430,10 +443,10 @@ export function template6(data: QuotePdfData, settings: PdfDisplaySettings, comp
     titleStyle:        `font-size:38px;font-weight:800;color:${primary};`,
     divider:           '#99f6e4',
     sectionLabelColor: primary,
-  });
+  }, actionUrl);
 }
 
-export const TEMPLATES: Record<string, (data: QuotePdfData, settings: PdfDisplaySettings, company: CompanyInfo, logo: string) => string> = {
+export const TEMPLATES: Record<string, (data: QuotePdfData, settings: PdfDisplaySettings, company: CompanyInfo, logo: string, actionUrl?: string) => string> = {
   '1': template1,
   '2': template2,
   '3': template3,

@@ -1566,20 +1566,41 @@ try {
             
             if (!$quote) fail('Devis non trouvé', 404);
             $quote['is_free_quote'] = (bool)$quote['is_free_quote'];
-            
-            // Get quote options (for model-based quotes)
+
+            // Fallback: use model's primary photo/plan when quote has none
+            if (empty($quote['photo_url']) && !empty($quote['model_id'])) {
+                $photoStmt = $db->prepare("SELECT file_path FROM model_images WHERE model_id = ? AND media_type = 'photo' ORDER BY is_primary DESC, id DESC LIMIT 1");
+                $photoStmt->execute([(int)$quote['model_id']]);
+                $row = $photoStmt->fetch();
+                if ($row) $quote['photo_url'] = '/' . ltrim($row['file_path'], '/');
+            }
+            if (empty($quote['plan_url']) && !empty($quote['model_id'])) {
+                $planStmt = $db->prepare("SELECT file_path FROM model_images WHERE model_id = ? AND media_type = 'plan' ORDER BY is_primary DESC, id DESC LIMIT 1");
+                $planStmt->execute([(int)$quote['model_id']]);
+                $row = $planStmt->fetch();
+                if ($row) $quote['plan_url'] = '/' . ltrim($row['file_path'], '/');
+            }
+
+            // Get quote options with BOQ detail lines
+            $modelId = (int)($quote['model_id'] ?? 0);
             $optStmt = $db->prepare("
                 SELECT qo.option_id, qo.option_name, qo.option_price,
                        COALESCE(oc.name, 'Options') as category_name,
                        COALESCE(oc.display_order, 0) as category_order,
-                       COALESCE(mo.display_order, 0) as option_order
+                       COALESCE(mo.display_order, 0) as option_order,
+                       COALESCE(GROUP_CONCAT(bl.description ORDER BY bl.display_order ASC, bl.id ASC SEPARATOR ', '), '') AS option_details
                 FROM quote_options qo
                 LEFT JOIN model_options mo ON qo.option_id = mo.id
                 LEFT JOIN option_categories oc ON mo.category_id = oc.id
+                LEFT JOIN boq_categories bc ON bc.name = qo.option_name
+                    AND bc.model_id = ?
+                    AND bc.is_option = TRUE
+                LEFT JOIN boq_lines bl ON bl.category_id = bc.id
                 WHERE qo.quote_id = ?
+                GROUP BY qo.id, qo.option_id, qo.option_name, qo.option_price, oc.name, oc.display_order, mo.display_order
                 ORDER BY category_order ASC, option_order ASC
             ");
-            $optStmt->execute([$id]);
+            $optStmt->execute([$modelId, $id]);
             $quote['options'] = $optStmt->fetchAll();
             
             // Get categories and lines (for free quotes)
@@ -1721,19 +1742,40 @@ try {
             if (!$quote) fail('Devis non trouvé ou lien invalide', 404);
             $quote['is_free_quote'] = (bool)$quote['is_free_quote'];
 
-            // Options
+            // Fallback: use model's primary photo/plan when quote has none
+            if (empty($quote['photo_url']) && !empty($quote['model_id'])) {
+                $photoStmt = $db->prepare("SELECT file_path FROM model_images WHERE model_id = ? AND media_type = 'photo' ORDER BY is_primary DESC, id DESC LIMIT 1");
+                $photoStmt->execute([(int)$quote['model_id']]);
+                $row = $photoStmt->fetch();
+                if ($row) $quote['photo_url'] = '/' . ltrim($row['file_path'], '/');
+            }
+            if (empty($quote['plan_url']) && !empty($quote['model_id'])) {
+                $planStmt = $db->prepare("SELECT file_path FROM model_images WHERE model_id = ? AND media_type = 'plan' ORDER BY is_primary DESC, id DESC LIMIT 1");
+                $planStmt->execute([(int)$quote['model_id']]);
+                $row = $planStmt->fetch();
+                if ($row) $quote['plan_url'] = '/' . ltrim($row['file_path'], '/');
+            }
+
+            // Options with BOQ detail lines
+            $modelId = (int)($quote['model_id'] ?? 0);
             $optStmt = $db->prepare("
                 SELECT qo.option_id, qo.option_name, qo.option_price,
                        COALESCE(oc.name, 'Options') as category_name,
                        COALESCE(oc.display_order, 0) as category_order,
-                       COALESCE(mo.display_order, 0) as option_order
+                       COALESCE(mo.display_order, 0) as option_order,
+                       COALESCE(GROUP_CONCAT(bl.description ORDER BY bl.display_order ASC, bl.id ASC SEPARATOR ', '), '') AS option_details
                 FROM quote_options qo
                 LEFT JOIN model_options mo ON qo.option_id = mo.id
                 LEFT JOIN option_categories oc ON mo.category_id = oc.id
+                LEFT JOIN boq_categories bc ON bc.name = qo.option_name
+                    AND bc.model_id = ?
+                    AND bc.is_option = TRUE
+                LEFT JOIN boq_lines bl ON bl.category_id = bc.id
                 WHERE qo.quote_id = ?
+                GROUP BY qo.id, qo.option_id, qo.option_name, qo.option_price, oc.name, oc.display_order, mo.display_order
                 ORDER BY category_order ASC, option_order ASC
             ");
-            $optStmt->execute([$quote['id']]);
+            $optStmt->execute([$modelId, $quote['id']]);
             $quote['options'] = $optStmt->fetchAll();
 
             // Categories for free quotes
