@@ -131,9 +131,6 @@ export default function ModelsPage() {
     return true;
   });
 
-  const formatPrice = (price: number) =>
-    `Rs ${Number(price).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
-
   return (
     <PublicLayout>
       <div className="max-w-6xl mx-auto px-4 py-12">
@@ -178,7 +175,7 @@ export default function ModelsPage() {
                   {model.type === 'pool' ? 'Piscine en blocs BAB et béton armé' : `${model.surface_m2} m²`}
                 </p>
                 <p className="text-orange-600 font-semibold">
-                  {model.type === 'pool' ? 'Cliquez sur configurer' : `${formatPrice(getDisplayPriceTTC(model))} TTC`}
+                  {model.type === 'pool' ? 'Cliquez sur configurer' : `A partir de ${Number(getDisplayPriceTTC(model)).toLocaleString(undefined, { maximumFractionDigits: 0 })} Rs TTC`}
                 </p>
 
                 <div className="pt-3">
