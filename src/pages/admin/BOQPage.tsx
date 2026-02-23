@@ -57,8 +57,10 @@ import {
   getDefaultPoolBOQTemplate,
   getDefaultPoolBOQOptionsTemplate,
   loadTemplateFromDB,
+  loadTemplateFromDBByShape,
   type PoolVariable,
   type PoolDimensions,
+  type PoolShape,
 } from '@/lib/pool-formulas';
 
 const DEFAULT_MARGIN_PERCENT = 30;
@@ -532,8 +534,8 @@ export default function BOQPage() {
     if (!confirm(confirmMessage)) return;
     try {
       setSaving(true);
-      // Load template from database (falls back to localStorage/hardcoded)
-      const { base: baseTemplate, options: optionsTemplate } = await loadTemplateFromDB();
+      // Load shape-specific template from database (falls back to hardcoded defaults for this shape)
+      const { base: baseTemplate, options: optionsTemplate } = await loadTemplateFromDBByShape(poolShape as PoolShape);
       const allTemplates = [...baseTemplate, ...optionsTemplate];
 
       // Build a lookup map: price_list_name -> price_list_item
