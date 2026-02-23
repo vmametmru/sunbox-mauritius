@@ -202,7 +202,7 @@ export default function BOQPage() {
   // Unforeseen cost percent (editable, synced with model)
   const [unforeseenPercent, setUnforeseenPercent] = useState<number>(10);
 
-  const selectedModel = models.find(m => m.id === selectedModelId);
+  const selectedModel = models.find(m => Number(m.id) === Number(selectedModelId));
   const isPoolModel = selectedModel?.type === 'pool';
   const poolShape = selectedModel?.pool_shape || 'Rectangulaire';
 
@@ -297,12 +297,12 @@ export default function BOQPage() {
       // Check for model param in URL, otherwise use first model
       const modelParam = searchParams.get('model');
       const modelIdFromUrl = modelParam ? parseInt(modelParam, 10) : null;
-      const validModelFromUrl = modelIdFromUrl && modelsData.some((m: Model) => m.id === modelIdFromUrl);
+      const validModelFromUrl = modelIdFromUrl && modelsData.some((m: Model) => Number(m.id) === modelIdFromUrl);
       
       if (validModelFromUrl) {
         setSelectedModelId(modelIdFromUrl);
       } else if (modelsData.length > 0) {
-        setSelectedModelId(modelsData[0].id);
+        setSelectedModelId(Number(modelsData[0].id));
       }
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
@@ -720,7 +720,7 @@ export default function BOQPage() {
     try {
       await api.updateModel({ id: selectedModelId, unforeseen_cost_percent: value });
       // Update local models state
-      setModels(prev => prev.map(m => m.id === selectedModelId ? { ...m, unforeseen_cost_percent: value } : m));
+      setModels(prev => prev.map(m => Number(m.id) === Number(selectedModelId) ? { ...m, unforeseen_cost_percent: value } : m));
       toast({ title: 'Succès', description: 'Coût inconnu mis à jour' });
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
@@ -1016,7 +1016,7 @@ export default function BOQPage() {
 
         <div className="flex flex-wrap gap-2 items-center">
           <Select
-            value={selectedModelId?.toString()}
+            value={selectedModelId !== null ? String(selectedModelId) : ''}
             onValueChange={(v) => setSelectedModelId(Number(v))}
           >
             <SelectTrigger className="w-56">
@@ -2078,7 +2078,7 @@ export default function BOQPage() {
             <div>
               <Label>Modèle source</Label>
               <Select
-                value={cloneSourceModelId ? cloneSourceModelId.toString() : undefined}
+                value={cloneSourceModelId !== null ? String(cloneSourceModelId) : undefined}
                 onValueChange={(v) => setCloneSourceModelId(v ? Number(v) : null)}
               >
                 <SelectTrigger>
@@ -2086,7 +2086,7 @@ export default function BOQPage() {
                 </SelectTrigger>
                 <SelectContent>
                   {models
-                    .filter(m => m.id !== selectedModelId)
+                    .filter(m => Number(m.id) !== Number(selectedModelId))
                     .map(m => (
                       <SelectItem key={m.id} value={String(m.id)}>
                         {m.name} ({m.type})
