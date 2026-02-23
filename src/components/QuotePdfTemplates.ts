@@ -4,6 +4,28 @@
  * Styled with inline CSS only (html2canvas compatible).
  */
 
+export interface QuotePdfLine {
+  description: string;
+  quantity: number;
+  unit: string;
+  unit_cost_ht: number;
+  margin_percent: number;
+  sale_price_ht: number;
+}
+
+export interface QuotePdfSubcategory {
+  name: string;
+  total_sale_price_ht: number;
+  lines: QuotePdfLine[];
+}
+
+export interface QuotePdfCategory {
+  name: string;
+  total_sale_price_ht: number;
+  subcategories?: QuotePdfSubcategory[];
+  lines: QuotePdfLine[];
+}
+
 export interface QuotePdfData {
   id: number;
   reference_number: string;
@@ -26,21 +48,12 @@ export interface QuotePdfData {
   options_total: number;
   total_price: number;
   vat_rate: number;
-  // Options (model-based quotes)
+  // Options (model-based quotes) – simple name+price list
   options?: Array<{ option_name: string; option_price: number }>;
-  // Categories (free quotes)
-  categories?: Array<{
-    name: string;
-    total_sale_price_ht: number;
-    lines: Array<{
-      description: string;
-      quantity: number;
-      unit: string;
-      unit_cost_ht: number;
-      margin_percent: number;
-      sale_price_ht: number;
-    }>;
-  }>;
+  // Base price breakdown (model-based quotes) – categories with optional subcategories
+  base_categories?: QuotePdfCategory[];
+  // Categories (free quotes) – categories with optional subcategories
+  categories?: QuotePdfCategory[];
   is_free_quote?: boolean;
 }
 
@@ -123,81 +136,67 @@ function imagesBlock(photo?: string, plan?: string): string {
   </div>`;
 }
 
-function linesTable(categories: QuotePdfData['categories'], accentColor: string): string {
+function linesTable(categories: QuotePdfCategory[] | undefined, accentColor: string, totalTtc: number, showVat: boolean): string {
   if (!categories?.length) return '';
   let html = '';
   for (const cat of categories) {
-    html += `<div style="margin-bottom:16px;">
-      <div style="font-size:13px;font-weight:700;color:${accentColor};padding:6px 0;border-bottom:2px solid ${accentColor};margin-bottom:8px;">${cat.name}</div>
-      <table style="width:100%;border-collapse:collapse;font-size:12px;">
-        <thead>
-          <tr style="background:#f3f4f6;">
-            <th style="text-align:left;padding:6px 8px;color:#6b7280;font-weight:600;">Description</th>
-            <th style="text-align:center;padding:6px 8px;color:#6b7280;font-weight:600;width:60px;">Qté</th>
-            <th style="text-align:center;padding:6px 8px;color:#6b7280;font-weight:600;width:50px;">Unité</th>
-            <th style="text-align:right;padding:6px 8px;color:#6b7280;font-weight:600;width:100px;">Prix HT</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${cat.lines.map((l, i) => `
-          <tr style="border-bottom:1px solid #e5e7eb;${i % 2 === 1 ? 'background:#fafafa;' : ''}">
-            <td style="padding:6px 8px;">${l.description}</td>
-            <td style="text-align:center;padding:6px 8px;">${l.quantity}</td>
-            <td style="text-align:center;padding:6px 8px;">${l.unit}</td>
-            <td style="text-align:right;padding:6px 8px;font-weight:600;">${fmt(l.sale_price_ht)}</td>
-          </tr>`).join('')}
-          <tr style="background:#f9fafb;font-weight:700;">
-            <td colspan="3" style="padding:8px;text-align:right;color:#374151;">Sous-total</td>
-            <td style="padding:8px;text-align:right;color:${accentColor};">${fmt(cat.total_sale_price_ht)}</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>`;
+    html += `<div style="margin-bottom:10px;">
+      <div style="font-size:13px;font-weight:700;color:${accentColor};padding:5px 0;border-bottom:1px solid ${accentColor};margin-bottom:4px;">${cat.name}</div>`;
+    if (cat.subcategories?.length) {
+      for (const sub of cat.subcategories) {
+        html += `<div style="padding-left:12px;margin-bottom:4px;">
+          <div style="font-size:12px;font-weight:600;color:#374151;padding:3px 0 3px 6px;border-left:2px solid ${accentColor};">${sub.name}</div>
+          ${sub.lines.map(l => `<div style="font-size:11px;color:#6b7280;padding:2px 0 2px 16px;">• ${l.description}</div>`).join('')}
+        </div>`;
+      }
+    } else {
+      html += cat.lines.map(l => `<div style="font-size:11px;color:#6b7280;padding:2px 0 2px 8px;">• ${l.description}</div>`).join('');
+    }
+    html += '</div>';
+  }
+  if (showVat) {
+    html += `<div style="text-align:right;padding:8px 0;border-top:2px solid ${accentColor};margin-top:8px;font-size:13px;font-weight:700;color:${accentColor};">Total base TTC : ${fmt(totalTtc)}</div>`;
   }
   return html;
 }
 
-function optionsTable(options: QuotePdfData['options'], accentColor: string): string {
+function optionsTable(options: QuotePdfData['options'], accentColor: string, totalTtc: number, showVat: boolean): string {
   if (!options?.length) return '';
-  const total = options.reduce((s, o) => s + Number(o.option_price), 0);
-  return `<div style="margin-bottom:16px;">
-    <table style="width:100%;border-collapse:collapse;font-size:12px;">
-      <thead>
-        <tr style="background:#f3f4f6;">
-          <th style="text-align:left;padding:6px 8px;color:#6b7280;font-weight:600;">Option</th>
-          <th style="text-align:right;padding:6px 8px;color:#6b7280;font-weight:600;width:120px;">Prix HT</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${options.map((o, i) => `
-        <tr style="border-bottom:1px solid #e5e7eb;${i % 2 === 1 ? 'background:#fafafa;' : ''}">
-          <td style="padding:6px 8px;">${o.option_name}</td>
-          <td style="text-align:right;padding:6px 8px;font-weight:600;">${fmt(Number(o.option_price))}</td>
-        </tr>`).join('')}
-        <tr style="background:#f9fafb;font-weight:700;">
-          <td style="padding:8px;text-align:right;color:#374151;">Total Options HT</td>
-          <td style="padding:8px;text-align:right;color:${accentColor};">${fmt(total)}</td>
-        </tr>
-      </tbody>
-    </table>
-  </div>`;
+  let html = options.map(o => `<div style="font-size:12px;color:#374151;padding:5px 0;border-bottom:1px solid #f3f4f6;">• ${o.option_name}</div>`).join('');
+  if (showVat) {
+    html += `<div style="text-align:right;padding:8px 0;border-top:2px solid ${accentColor};margin-top:8px;font-size:13px;font-weight:700;color:${accentColor};">Total options TTC : ${fmt(totalTtc)}</div>`;
+  }
+  return html;
 }
 
 function totalsBlock(data: QuotePdfData, primaryColor: string, accentColor: string, showVat: boolean): string {
-  const vat = data.total_price * (data.vat_rate / 100);
-  const ttc = data.total_price + vat;
+  const vatRate = data.vat_rate / 100;
+  const baseTtc = Number(data.base_price) * (1 + vatRate);
+  const optionsTtc = Number(data.options_total) * (1 + vatRate);
+  const grandTotalHt = Number(data.total_price);
+  const vat = grandTotalHt * vatRate;
+  const grandTtc = grandTotalHt + vat;
+  const hasOptions = Number(data.options_total) > 0;
   return `<table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:8px;">
     <tr style="border-bottom:1px solid #e5e7eb;">
-      <td style="padding:8px 12px;color:#6b7280;">Total Base HT</td>
+      <td style="padding:8px 12px;color:#6b7280;">Prix de base HT</td>
       <td style="padding:8px 12px;text-align:right;font-weight:600;">${fmt(Number(data.base_price))}</td>
     </tr>
-    ${Number(data.options_total) > 0 ? `<tr style="border-bottom:1px solid #e5e7eb;">
+    ${showVat ? `<tr style="border-bottom:1px solid #e5e7eb;">
+      <td style="padding:8px 12px;font-weight:600;color:${accentColor};">Prix de base TTC</td>
+      <td style="padding:8px 12px;text-align:right;font-weight:700;color:${accentColor};">${fmt(baseTtc)}</td>
+    </tr>` : ''}
+    ${hasOptions ? `<tr style="border-bottom:1px solid #e5e7eb;">
       <td style="padding:8px 12px;color:#6b7280;">Total Options HT</td>
       <td style="padding:8px 12px;text-align:right;font-weight:600;">${fmt(Number(data.options_total))}</td>
     </tr>` : ''}
+    ${hasOptions && showVat ? `<tr style="border-bottom:1px solid #e5e7eb;">
+      <td style="padding:8px 12px;font-weight:600;color:${accentColor};">Total Options TTC</td>
+      <td style="padding:8px 12px;text-align:right;font-weight:700;color:${accentColor};">${fmt(optionsTtc)}</td>
+    </tr>` : ''}
     <tr style="border-bottom:2px solid ${accentColor};">
       <td style="padding:8px 12px;font-weight:700;color:${primaryColor};">Grand Total HT</td>
-      <td style="padding:8px 12px;text-align:right;font-weight:700;font-size:15px;color:${primaryColor};">${fmt(Number(data.total_price))}</td>
+      <td style="padding:8px 12px;text-align:right;font-weight:700;font-size:15px;color:${primaryColor};">${fmt(grandTotalHt)}</td>
     </tr>
     ${showVat ? `<tr style="border-bottom:1px solid #e5e7eb;">
       <td style="padding:8px 12px;color:#6b7280;">TVA (${data.vat_rate}%)</td>
@@ -205,7 +204,7 @@ function totalsBlock(data: QuotePdfData, primaryColor: string, accentColor: stri
     </tr>
     <tr style="background:${accentColor};">
       <td style="padding:12px;font-weight:700;color:#fff;font-size:15px;">Grand Total TTC</td>
-      <td style="padding:12px;text-align:right;font-weight:700;font-size:18px;color:#fff;">${fmt(ttc)}</td>
+      <td style="padding:12px;text-align:right;font-weight:700;font-size:18px;color:#fff;">${fmt(grandTtc)}</td>
     </tr>` : ''}
   </table>`;
 }
@@ -272,6 +271,8 @@ export function template1(data: QuotePdfData, settings: PdfDisplaySettings, comp
   const font = getFont(settings);
   const showVat = settings.pdf_show_vat === 'true';
   const modelTitle = data.is_free_quote ? (data.quote_title || 'Devis') : (data.model_name || 'Devis');
+  const baseTtc = Number(data.base_price) * (1 + data.vat_rate / 100);
+  const optionsTtc = Number(data.options_total) * (1 + data.vat_rate / 100);
 
   return `<div style="font-family:${font};width:794px;background:#fff;padding:0;color:#1f2937;">
     <!-- HEADER -->
@@ -313,10 +314,13 @@ export function template1(data: QuotePdfData, settings: PdfDisplaySettings, comp
       <div style="margin-bottom:24px;">${validityBlock(data, settings, accent)}</div>
       <!-- Lines / Options -->
       ${data.is_free_quote && data.categories?.length
-        ? `<div style="margin-bottom:24px;">${sectionTitle('Descriptif', primary)}${linesTable(data.categories, accent)}</div>`
+        ? `<div style="margin-bottom:24px;">${sectionTitle('Descriptif', primary)}${linesTable(data.categories, accent, baseTtc, showVat)}</div>`
+        : ''}
+      ${!data.is_free_quote && data.base_categories?.length
+        ? `<div style="margin-bottom:24px;">${sectionTitle('Descriptif du prix de base', primary)}${linesTable(data.base_categories, accent, baseTtc, showVat)}</div>`
         : ''}
       ${!data.is_free_quote && data.options?.length
-        ? `<div style="margin-bottom:24px;">${sectionTitle('Options sélectionnées', primary)}${optionsTable(data.options, accent)}</div>`
+        ? `<div style="margin-bottom:24px;">${sectionTitle('Options sélectionnées', primary)}${optionsTable(data.options, accent, optionsTtc, showVat)}</div>`
         : ''}
       <!-- Totals -->
       <div style="background:#f8fafc;border-radius:8px;padding:18px;margin-bottom:24px;">
@@ -340,6 +344,8 @@ export function template2(data: QuotePdfData, settings: PdfDisplaySettings, comp
   const font = getFont(settings);
   const showVat = settings.pdf_show_vat === 'true';
   const modelTitle = data.is_free_quote ? (data.quote_title || 'Devis') : (data.model_name || 'Devis');
+  const baseTtc = Number(data.base_price) * (1 + data.vat_rate / 100);
+  const optionsTtc = Number(data.options_total) * (1 + data.vat_rate / 100);
 
   return `<div style="font-family:${font};width:794px;background:#fff;padding:48px;color:#1f2937;">
     <!-- HEADER -->
@@ -376,10 +382,13 @@ export function template2(data: QuotePdfData, settings: PdfDisplaySettings, comp
     </div>
     <div style="margin-bottom:24px;">${validityBlock(data, settings, accent)}</div>
     ${data.is_free_quote && data.categories?.length
-      ? `<div style="margin-bottom:24px;"><div style="font-size:11px;font-weight:700;letter-spacing:1px;color:#9ca3af;margin-bottom:12px;text-transform:uppercase;">Descriptif</div>${linesTable(data.categories, accent)}</div>`
+      ? `<div style="margin-bottom:24px;"><div style="font-size:11px;font-weight:700;letter-spacing:1px;color:#9ca3af;margin-bottom:12px;text-transform:uppercase;">Descriptif</div>${linesTable(data.categories, accent, baseTtc, showVat)}</div>`
+      : ''}
+    ${!data.is_free_quote && data.base_categories?.length
+      ? `<div style="margin-bottom:24px;"><div style="font-size:11px;font-weight:700;letter-spacing:1px;color:#9ca3af;margin-bottom:12px;text-transform:uppercase;">Descriptif du prix de base</div>${linesTable(data.base_categories, accent, baseTtc, showVat)}</div>`
       : ''}
     ${!data.is_free_quote && data.options?.length
-      ? `<div style="margin-bottom:24px;"><div style="font-size:11px;font-weight:700;letter-spacing:1px;color:#9ca3af;margin-bottom:12px;text-transform:uppercase;">Options</div>${optionsTable(data.options, accent)}</div>`
+      ? `<div style="margin-bottom:24px;"><div style="font-size:11px;font-weight:700;letter-spacing:1px;color:#9ca3af;margin-bottom:12px;text-transform:uppercase;">Options</div>${optionsTable(data.options, accent, optionsTtc, showVat)}</div>`
       : ''}
     <div style="border:1px solid #e5e7eb;border-radius:6px;padding:20px;margin-bottom:24px;">
       <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:#9ca3af;margin-bottom:12px;text-transform:uppercase;">Récapitulatif</div>
@@ -399,6 +408,8 @@ export function template3(data: QuotePdfData, settings: PdfDisplaySettings, comp
   const font = getFont(settings);
   const showVat = settings.pdf_show_vat === 'true';
   const modelTitle = data.is_free_quote ? (data.quote_title || 'Devis') : (data.model_name || 'Devis');
+  const baseTtc = Number(data.base_price) * (1 + data.vat_rate / 100);
+  const optionsTtc = Number(data.options_total) * (1 + data.vat_rate / 100);
 
   return `<div style="font-family:${font};width:794px;background:#fff;color:#1f2937;">
     <!-- ORANGE HEADER -->
@@ -438,10 +449,13 @@ export function template3(data: QuotePdfData, settings: PdfDisplaySettings, comp
       </div>
       <div style="margin-bottom:24px;">${validityBlock(data, settings, primary)}</div>
       ${data.is_free_quote && data.categories?.length
-        ? `<div style="margin-bottom:24px;"><div style="font-size:12px;font-weight:700;color:${primary};text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Descriptif</div>${linesTable(data.categories, primary)}</div>`
+        ? `<div style="margin-bottom:24px;"><div style="font-size:12px;font-weight:700;color:${primary};text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Descriptif</div>${linesTable(data.categories, primary, baseTtc, showVat)}</div>`
+        : ''}
+      ${!data.is_free_quote && data.base_categories?.length
+        ? `<div style="margin-bottom:24px;"><div style="font-size:12px;font-weight:700;color:${primary};text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Descriptif du prix de base</div>${linesTable(data.base_categories, primary, baseTtc, showVat)}</div>`
         : ''}
       ${!data.is_free_quote && data.options?.length
-        ? `<div style="margin-bottom:24px;"><div style="font-size:12px;font-weight:700;color:${primary};text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Options</div>${optionsTable(data.options, primary)}</div>`
+        ? `<div style="margin-bottom:24px;"><div style="font-size:12px;font-weight:700;color:${primary};text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Options</div>${optionsTable(data.options, primary, optionsTtc, showVat)}</div>`
         : ''}
       <div style="background:#fff7ed;border-radius:10px;padding:20px;margin-bottom:24px;">
         <div style="font-size:12px;font-weight:700;color:${primary};text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Récapitulatif</div>
@@ -462,6 +476,8 @@ export function template4(data: QuotePdfData, settings: PdfDisplaySettings, comp
   const font = getFont(settings);
   const showVat = settings.pdf_show_vat === 'true';
   const modelTitle = data.is_free_quote ? (data.quote_title || 'Devis') : (data.model_name || 'Devis');
+  const baseTtc = Number(data.base_price) * (1 + data.vat_rate / 100);
+  const optionsTtc = Number(data.options_total) * (1 + data.vat_rate / 100);
 
   return `<div style="font-family:${font};width:794px;background:#f8fafc;color:#1f2937;">
     <!-- DARK HEADER -->
@@ -497,10 +513,13 @@ export function template4(data: QuotePdfData, settings: PdfDisplaySettings, comp
       </div>
       <div style="margin-bottom:24px;">${validityBlock(data, settings, accent)}</div>
       ${data.is_free_quote && data.categories?.length
-        ? `<div style="background:#fff;border-radius:8px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:24px;"><div style="font-size:11px;font-weight:700;color:${accent};text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Descriptif</div>${linesTable(data.categories, accent)}</div>`
+        ? `<div style="background:#fff;border-radius:8px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:24px;"><div style="font-size:11px;font-weight:700;color:${accent};text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Descriptif</div>${linesTable(data.categories, accent, baseTtc, showVat)}</div>`
+        : ''}
+      ${!data.is_free_quote && data.base_categories?.length
+        ? `<div style="background:#fff;border-radius:8px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:24px;"><div style="font-size:11px;font-weight:700;color:${accent};text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Descriptif du prix de base</div>${linesTable(data.base_categories, accent, baseTtc, showVat)}</div>`
         : ''}
       ${!data.is_free_quote && data.options?.length
-        ? `<div style="background:#fff;border-radius:8px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:24px;"><div style="font-size:11px;font-weight:700;color:${accent};text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Options</div>${optionsTable(data.options, accent)}</div>`
+        ? `<div style="background:#fff;border-radius:8px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:24px;"><div style="font-size:11px;font-weight:700;color:${accent};text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Options</div>${optionsTable(data.options, accent, optionsTtc, showVat)}</div>`
         : ''}
       <div style="background:#fff;border-radius:8px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:24px;">
         <div style="font-size:11px;font-weight:700;color:${accent};text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Récapitulatif</div>
@@ -521,6 +540,8 @@ export function template5(data: QuotePdfData, settings: PdfDisplaySettings, comp
   const font = getFont(settings);
   const showVat = settings.pdf_show_vat === 'true';
   const modelTitle = data.is_free_quote ? (data.quote_title || 'Devis') : (data.model_name || 'Devis');
+  const baseTtc = Number(data.base_price) * (1 + data.vat_rate / 100);
+  const optionsTtc = Number(data.options_total) * (1 + data.vat_rate / 100);
   const vat = Number(data.total_price) * (data.vat_rate / 100);
   const ttc = Number(data.total_price) + vat;
 
@@ -570,10 +591,13 @@ export function template5(data: QuotePdfData, settings: PdfDisplaySettings, comp
         ⏱ ${data.valid_until ? `Valable jusqu'au ${fmtDate(data.valid_until)}` : `Valable ${settings.pdf_validity_days || 30} jours`}
       </div>
       ${data.is_free_quote && data.categories?.length
-        ? `<div style="margin-bottom:20px;"><div style="font-size:11px;font-weight:700;color:${primary};text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;border-bottom:2px solid ${primary};padding-bottom:6px;">Descriptif</div>${linesTable(data.categories, accent)}</div>`
+        ? `<div style="margin-bottom:20px;"><div style="font-size:11px;font-weight:700;color:${primary};text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;border-bottom:2px solid ${primary};padding-bottom:6px;">Descriptif</div>${linesTable(data.categories, accent, baseTtc, showVat)}</div>`
+        : ''}
+      ${!data.is_free_quote && data.base_categories?.length
+        ? `<div style="margin-bottom:20px;"><div style="font-size:11px;font-weight:700;color:${primary};text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;border-bottom:2px solid ${primary};padding-bottom:6px;">Descriptif du prix de base</div>${linesTable(data.base_categories, accent, baseTtc, showVat)}</div>`
         : ''}
       ${!data.is_free_quote && data.options?.length
-        ? `<div style="margin-bottom:20px;"><div style="font-size:11px;font-weight:700;color:${primary};text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;border-bottom:2px solid ${primary};padding-bottom:6px;">Options</div>${optionsTable(data.options, accent)}</div>`
+        ? `<div style="margin-bottom:20px;"><div style="font-size:11px;font-weight:700;color:${primary};text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;border-bottom:2px solid ${primary};padding-bottom:6px;">Options</div>${optionsTable(data.options, accent, optionsTtc, showVat)}</div>`
         : ''}
       ${settings.pdf_show_terms === 'true' ? `<div style="margin-bottom:12px;">${termsBlock(settings.pdf_terms, settings.pdf_bank_details, settings.pdf_show_bank_details === 'true')}</div>` : ''}
       <div style="border-top:1px solid #e5e7eb;margin-top:16px;padding-top:10px;font-size:10px;color:#9ca3af;">${settings.pdf_footer_text}</div>
@@ -590,6 +614,8 @@ export function template6(data: QuotePdfData, settings: PdfDisplaySettings, comp
   const font = getFont(settings);
   const showVat = settings.pdf_show_vat === 'true';
   const modelTitle = data.is_free_quote ? (data.quote_title || 'Devis') : (data.model_name || 'Devis');
+  const baseTtc = Number(data.base_price) * (1 + data.vat_rate / 100);
+  const optionsTtc = Number(data.options_total) * (1 + data.vat_rate / 100);
 
   return `<div style="font-family:${font};width:794px;background:#fff;color:#1f2937;">
     <!-- TEAL HEADER -->
@@ -631,10 +657,13 @@ export function template6(data: QuotePdfData, settings: PdfDisplaySettings, comp
       </div>
       <div style="margin-bottom:24px;">${validityBlock(data, settings, primary)}</div>
       ${data.is_free_quote && data.categories?.length
-        ? `<div style="margin-bottom:24px;"><div style="font-size:11px;font-weight:700;color:${primary};text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;border-bottom:2px solid ${primary};padding-bottom:6px;">Descriptif</div>${linesTable(data.categories, primary)}</div>`
+        ? `<div style="margin-bottom:24px;"><div style="font-size:11px;font-weight:700;color:${primary};text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;border-bottom:2px solid ${primary};padding-bottom:6px;">Descriptif</div>${linesTable(data.categories, primary, baseTtc, showVat)}</div>`
+        : ''}
+      ${!data.is_free_quote && data.base_categories?.length
+        ? `<div style="margin-bottom:24px;"><div style="font-size:11px;font-weight:700;color:${primary};text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;border-bottom:2px solid ${primary};padding-bottom:6px;">Descriptif du prix de base</div>${linesTable(data.base_categories, primary, baseTtc, showVat)}</div>`
         : ''}
       ${!data.is_free_quote && data.options?.length
-        ? `<div style="margin-bottom:24px;"><div style="font-size:11px;font-weight:700;color:${primary};text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;border-bottom:2px solid ${primary};padding-bottom:6px;">Options</div>${optionsTable(data.options, primary)}</div>`
+        ? `<div style="margin-bottom:24px;"><div style="font-size:11px;font-weight:700;color:${primary};text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;border-bottom:2px solid ${primary};padding-bottom:6px;">Options</div>${optionsTable(data.options, primary, optionsTtc, showVat)}</div>`
         : ''}
       <div style="background:#f0fdfa;border:2px solid #99f6e4;border-radius:10px;padding:20px;margin-bottom:24px;">
         <div style="font-size:11px;font-weight:700;color:${primary};text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Récapitulatif</div>
