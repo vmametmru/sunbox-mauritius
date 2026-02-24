@@ -32,6 +32,7 @@ import AdminModelsPage from "./pages/admin/ModelsPage";
 import EmailSettingsPage from "./pages/admin/EmailSettingsPage";
 import RequireAdmin from "./components/RequireAdmin";
 import SiteSettingsPage from "./pages/admin/SiteSettingsPage";
+import PaymentsPage from "./pages/admin/PaymentsPage";
 import MediaPage from "./pages/admin/MediaPage";
 import SuppliersPage from "./pages/admin/SuppliersPage";
 import BOQPage from "./pages/admin/BOQPage";
@@ -79,6 +80,7 @@ const App = () => (
                   <Route path="pool-template" element={<PoolBOQTemplatePage />} />
                   <Route path="suppliers" element={<SuppliersPage />} />
                   <Route path="email" element={<EmailSettingsPage />} />
+                  <Route path="payments" element={<PaymentsPage />} />
                   <Route path="site" element={<SiteSettingsPage />} />
                   <Route path="dev-ideas" element={<DevIdeasPage />} />
                 </Route>
