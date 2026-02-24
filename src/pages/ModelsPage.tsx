@@ -108,28 +108,30 @@ export default function ModelsPage() {
     setShowConfigurator(true);
   };
 
-  const filtered = models.filter((m) => {
-    if (filterType !== 'all' && m.type !== filterType) return false;
+  const filtered = models
+    .filter((m) => {
+      if (filterType !== 'all' && m.type !== filterType) return false;
 
-    if (filterType === 'container') {
-      if (filters.bedrooms && m.bedrooms !== Number(filters.bedrooms)) return false;
-      if (filters.container20 && m.container_20ft_count !== Number(filters.container20)) return false;
-      if (filters.container40 && m.container_40ft_count !== Number(filters.container40)) return false;
-    }
+      if (filterType === 'container') {
+        if (filters.bedrooms && m.bedrooms !== Number(filters.bedrooms)) return false;
+        if (filters.container20 && m.container_20ft_count !== Number(filters.container20)) return false;
+        if (filters.container40 && m.container_40ft_count !== Number(filters.container40)) return false;
+      }
 
-    if (filterType === 'pool') {
-      if (filters.poolShape && m.pool_shape !== filters.poolShape) return false;
-      if (filters.hasOverflow && String(m.has_overflow) !== filters.hasOverflow) return false;
-    }
+      if (filterType === 'pool') {
+        if (filters.poolShape && m.pool_shape !== filters.poolShape) return false;
+        if (filters.hasOverflow && String(m.has_overflow) !== filters.hasOverflow) return false;
+      }
 
-    if (m.surface_m2 < filters.surfaceMin || m.surface_m2 > filters.surfaceMax) return false;
-    
-    // Use calculated price for filtering
-    const modelPrice = getDisplayPriceHT(m);
-    if (modelPrice < filters.priceMin || modelPrice > filters.priceMax) return false;
+      if (m.surface_m2 < filters.surfaceMin || m.surface_m2 > filters.surfaceMax) return false;
 
-    return true;
-  });
+      // Use calculated price for filtering
+      const modelPrice = getDisplayPriceHT(m);
+      if (modelPrice < filters.priceMin || modelPrice > filters.priceMax) return false;
+
+      return true;
+    })
+    .sort((a, b) => getDisplayPriceHT(a) - getDisplayPriceHT(b));
 
   return (
     <PublicLayout>
@@ -147,6 +149,35 @@ export default function ModelsPage() {
             Piscines
           </Button>
         </div>
+
+        {/* Price range filter */}
+        {rangeLimits.price[0] < rangeLimits.price[1] && (
+          <div className="flex justify-end mb-4">
+            <div className="w-full max-w-sm">
+              <div className="flex justify-between text-sm text-gray-600 mb-1">
+                <span>Prix</span>
+                <span>
+                  {Number(filters.priceMin).toLocaleString(undefined, { maximumFractionDigits: 0 })} Rs
+                  {' – '}
+                  {Number(filters.priceMax).toLocaleString(undefined, { maximumFractionDigits: 0 })} Rs
+                </span>
+              </div>
+              <Slider
+                min={rangeLimits.price[0]}
+                max={rangeLimits.price[1]}
+                step={1000}
+                value={[filters.priceMin, filters.priceMax]}
+                onValueChange={([min, max]) =>
+                  setFilters(f => ({ ...f, priceMin: min, priceMax: max }))
+                }
+              />
+              <div className="flex justify-between text-xs text-gray-400 mt-1">
+                <span>{Number(rangeLimits.price[0]).toLocaleString(undefined, { maximumFractionDigits: 0 })} Rs</span>
+                <span>{Number(rangeLimits.price[1]).toLocaleString(undefined, { maximumFractionDigits: 0 })} Rs</span>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Grille modèles */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
