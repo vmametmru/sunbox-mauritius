@@ -17,6 +17,7 @@ import {
   Lightbulb,
   Waves,
   DollarSign,
+  CreditCard,
   FileCode,
   ShoppingCart,
   BookUser,
@@ -78,6 +79,7 @@ const navItems: NavItem[] = [
       { icon: Waves, label: 'Variables Piscine', path: '/admin/pool-variables' },
       { icon: FileCode, label: 'Modèles Piscine', path: '/admin/pool-template' },
       { icon: Mail, label: 'Email', path: '/admin/email' },
+      { icon: CreditCard, label: 'Paiements', path: '/admin/payments' },
       { icon: Settings, label: 'Site', path: '/admin/site' },
     ],
   },
@@ -89,7 +91,7 @@ const navItems: NavItem[] = [
 const groupPaths: Record<string, string[]> = {
   commerce: ['/admin/quotes'],
   contacts: ['/admin/contacts', '/admin/suppliers'],
-  parametres: ['/admin/models', '/admin/media', '/admin/boq', '/admin/pool-prices', '/admin/pool-variables', '/admin/pool-template', '/admin/email', '/admin/site'],
+  parametres: ['/admin/models', '/admin/media', '/admin/boq', '/admin/pool-prices', '/admin/pool-variables', '/admin/pool-template', '/admin/email', '/admin/payments', '/admin/site'],
 };
 
 export default function AdminLayout() {

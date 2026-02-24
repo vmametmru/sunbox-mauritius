@@ -164,6 +164,10 @@ interface PdfSettings {
   pdf_template: string;
   pdf_font: string;
   pdf_logo_position: string;
+  pdf_logo_offset_left: string;
+  pdf_logo_offset_right: string;
+  pdf_logo_offset_top: string;
+  pdf_logo_offset_bottom: string;
 }
 
 const defaultPdfSettings: PdfSettings = {
@@ -180,6 +184,10 @@ const defaultPdfSettings: PdfSettings = {
   pdf_template: '1',
   pdf_font: 'inter',
   pdf_logo_position: 'left',
+  pdf_logo_offset_left: '0',
+  pdf_logo_offset_right: '0',
+  pdf_logo_offset_top: '0',
+  pdf_logo_offset_bottom: '0',
 };
 
 export default function EmailSettingsPage() {
@@ -248,6 +256,7 @@ export default function EmailSettingsPage() {
           options_total:    Number(q.options_total),
           total_price:      Number(q.total_price),
           vat_rate:         siteVatRate,
+          notes:            q.notes || '',
           options:          q.options          || [],
           base_categories:  q.base_categories  || [],
           categories:       q.categories       || [],
@@ -1794,6 +1803,33 @@ export default function EmailSettingsPage() {
                 </div>
               </div>
 
+              {/* Logo offset */}
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">Décalage du logo (px)</Label>
+                <p className="text-xs text-gray-500">Ajuste finement la position du logo. Valeurs positives = déplacer dans la direction indiquée.</p>
+                <div className="grid grid-cols-2 gap-3">
+                  {([
+                    { key: 'pdf_logo_offset_left'  as const, label: 'Gauche' },
+                    { key: 'pdf_logo_offset_right' as const, label: 'Droite' },
+                    { key: 'pdf_logo_offset_top'   as const, label: 'Haut' },
+                    { key: 'pdf_logo_offset_bottom' as const, label: 'Bas' },
+                  ] as { key: keyof typeof pdfSettings; label: string }[]).map(({ key, label }) => (
+                    <div key={key} className="flex items-center gap-2">
+                      <Label className="w-16 text-xs">{label}</Label>
+                      <Input
+                        type="number"
+                        min="-100"
+                        max="100"
+                        value={pdfSettings[key] ?? '0'}
+                        onChange={(e) => setPdfSettings({ ...pdfSettings, [key]: e.target.value })}
+                        className="w-20"
+                      />
+                      <span className="text-xs text-gray-400">px</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
               {/* Validity */}
               <div className="space-y-2">
                 <Label>Validité du devis (jours)</Label>
@@ -1892,6 +1928,10 @@ export default function EmailSettingsPage() {
           pdf_template:          previewTemplateId,
           pdf_font:              pdfSettings.pdf_font || 'inter',
           pdf_logo_position:     pdfSettings.pdf_logo_position || 'left',
+          pdf_logo_offset_left:  pdfSettings.pdf_logo_offset_left  || '0',
+          pdf_logo_offset_right: pdfSettings.pdf_logo_offset_right || '0',
+          pdf_logo_offset_top:   pdfSettings.pdf_logo_offset_top   || '0',
+          pdf_logo_offset_bottom: pdfSettings.pdf_logo_offset_bottom || '0',
         };
 
         const sampleCompany: CompanyInfo = {
@@ -1920,6 +1960,7 @@ export default function EmailSettingsPage() {
           options_total:    350000,
           total_price:      3150000,
           vat_rate:         siteVatRate,
+          notes:            'Modalités : 60% à la commande, 30% sur avancement, solde à la remise des clés.',
           is_free_quote:    false,
           options: [
             { option_name: 'Climatisation 3 pièces',  option_price: 120000 },

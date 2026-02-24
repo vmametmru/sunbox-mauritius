@@ -1,6 +1,7 @@
 /**
- * 6 hardcoded PDF quote templates.
+ * 6 PDF quote templates based on "Modele PDF Devis.pdf" layout.
  * Each template function returns a full HTML string (794px wide, portrait A4).
+ * Blocks are wrapped with data-pdf-block attributes for block-aware pagination.
  * Styled with inline CSS only (html2canvas compatible).
  */
 
@@ -48,8 +49,9 @@ export interface QuotePdfData {
   options_total: number;
   total_price: number;
   vat_rate: number;
+  notes?: string;
   // Options (model-based quotes) – simple name+price list
-  options?: Array<{ option_name: string; option_price: number }>;
+  options?: Array<{ option_name: string; option_price: number; option_details?: string }>;
   // Base price breakdown (model-based quotes) – categories with optional subcategories
   base_categories?: QuotePdfCategory[];
   // Categories (free quotes) – categories with optional subcategories
@@ -71,6 +73,11 @@ export interface PdfDisplaySettings {
   pdf_template: string;
   pdf_font: string;
   pdf_logo_position: string;
+  // Logo offset (pixels)
+  pdf_logo_offset_left: string;
+  pdf_logo_offset_right: string;
+  pdf_logo_offset_top: string;
+  pdf_logo_offset_bottom: string;
 }
 
 export interface CompanyInfo {
@@ -80,7 +87,7 @@ export interface CompanyInfo {
   company_address: string;
 }
 
-const fontFamilies: Record<string, string> = {
+export const fontFamilies: Record<string, string> = {
   inter: 'system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
   roboto: '"Roboto", "Noto Sans", Arial, Helvetica, sans-serif',
   poppins: '"Poppins", "Noto Sans", Arial, Helvetica, sans-serif',
@@ -88,7 +95,7 @@ const fontFamilies: Record<string, string> = {
   playfair: '"Playfair Display", "Georgia", "Times New Roman", serif',
 };
 
-function getFont(settings: PdfDisplaySettings): string {
+export function getFont(settings: PdfDisplaySettings): string {
   return fontFamilies[settings.pdf_font] || fontFamilies.inter;
 }
 
@@ -103,163 +110,267 @@ function fmtDate(dateStr?: string): string {
   } catch { return dateStr; }
 }
 
-function logoAlign(pos: string): string {
-  if (pos === 'center') return 'center';
-  if (pos === 'right') return 'flex-end';
-  return 'flex-start';
+function esc(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-function logoSection(settings: PdfDisplaySettings, logoBase64: string, size = 56): string {
-  if (settings.pdf_show_logo !== 'true' || !logoBase64) return '';
-  const align = logoAlign(settings.pdf_logo_position);
-  return `<div style="display:flex;justify-content:${align};margin-bottom:8px;">
-    <img src="${logoBase64}" style="height:${size}px;max-width:180px;object-fit:contain;" alt="Logo" />
-  </div>`;
+function getLogoOffsetStyle(settings: PdfDisplaySettings): string {
+  const left   = parseInt(settings.pdf_logo_offset_left   || '0') || 0;
+  const right  = parseInt(settings.pdf_logo_offset_right  || '0') || 0;
+  const top    = parseInt(settings.pdf_logo_offset_top    || '0') || 0;
+  const bottom = parseInt(settings.pdf_logo_offset_bottom || '0') || 0;
+  const ml = right - left;
+  const mt = bottom - top;
+  if (ml === 0 && mt === 0) return '';
+  return `margin-left:${ml}px;margin-top:${mt}px;`;
 }
 
-function titleBlock(title: string): string {
-  return `<div style="display:inline-block;background:#f97316;color:#fff;font-size:11px;font-weight:700;letter-spacing:2px;padding:4px 12px;border-radius:3px;margin-bottom:4px;">DEVIS</div>
-  <div style="font-size:20px;font-weight:700;margin-bottom:2px;">${title}</div>`;
-}
+// ─── PDF-model style helpers ────────────────────────────────────────────────
 
-function imagesBlock(photo?: string, plan?: string): string {
-  if (!photo && !plan) return '';
-  return `<div style="display:flex;gap:16px;margin-bottom:24px;">
-    ${photo ? `<div style="flex:1;text-align:center;">
-      <img src="${photo}" style="width:100%;max-height:180px;object-fit:cover;border-radius:8px;" alt="Photo du modèle" />
-      <div style="font-size:11px;color:#6b7280;margin-top:6px;">Photo du modèle</div>
-    </div>` : ''}
-    ${plan ? `<div style="flex:1;text-align:center;">
-      <img src="${plan}" style="width:100%;max-height:180px;object-fit:cover;border-radius:8px;" alt="Plan" />
-      <div style="font-size:11px;color:#6b7280;margin-top:6px;">Plan / Vue de dessus</div>
-    </div>` : ''}
-  </div>`;
-}
-
-function linesTable(categories: QuotePdfCategory[] | undefined, accentColor: string, totalTtc: number, showVat: boolean): string {
-  if (!categories?.length) return '';
+/** Render categories in PDF-model style: bold name + comma-separated items */
+function pdfCatBlock(cats: QuotePdfCategory[] | undefined): string {
+  if (!cats?.length) return '';
   let html = '';
-  for (const cat of categories) {
-    html += `<div style="margin-bottom:10px;">
-      <div style="font-size:13px;font-weight:700;color:${accentColor};padding:5px 0;border-bottom:1px solid ${accentColor};margin-bottom:4px;">${cat.name}</div>`;
+  for (const cat of cats) {
     if (cat.subcategories?.length) {
       for (const sub of cat.subcategories) {
-        html += `<div style="padding-left:12px;margin-bottom:4px;">
-          <div style="font-size:12px;font-weight:600;color:#374151;padding:3px 0 3px 6px;border-left:2px solid ${accentColor};">${sub.name}</div>
-          ${sub.lines.map(l => `<div style="font-size:11px;color:#6b7280;padding:2px 0 2px 16px;">• ${l.description}</div>`).join('')}
+        const items = sub.lines.map(l => l.description).join(', ');
+        html += `<div style="margin-bottom:8px;">
+          <div style="font-size:12px;font-weight:700;color:#111827;">${sub.name}</div>
+          ${items ? `<div style="font-size:11px;color:#4b5563;margin-top:2px;">${items}</div>` : ''}
         </div>`;
       }
     } else {
-      html += cat.lines.map(l => `<div style="font-size:11px;color:#6b7280;padding:2px 0 2px 8px;">• ${l.description}</div>`).join('');
+      const items = cat.lines.map(l => l.description).join(', ');
+      html += `<div style="margin-bottom:8px;">
+        <div style="font-size:12px;font-weight:700;color:#111827;">${cat.name}</div>
+        ${items ? `<div style="font-size:11px;color:#4b5563;margin-top:2px;">${items}</div>` : ''}
+      </div>`;
     }
-    html += '</div>';
-  }
-  if (showVat) {
-    html += `<div style="text-align:right;padding:8px 0;border-top:2px solid ${accentColor};margin-top:8px;font-size:13px;font-weight:700;color:${accentColor};">Total base TTC : ${fmt(totalTtc)}</div>`;
   }
   return html;
 }
 
-function optionsTable(options: QuotePdfData['options'], accentColor: string, totalTtc: number, showVat: boolean): string {
-  if (!options?.length) return '';
-  let html = options.map(o => `<div style="font-size:12px;color:#374151;padding:5px 0;border-bottom:1px solid #f3f4f6;">• ${o.option_name}</div>`).join('');
-  if (showVat) {
-    html += `<div style="text-align:right;padding:8px 0;border-top:2px solid ${accentColor};margin-top:8px;font-size:13px;font-weight:700;color:${accentColor};">Total options TTC : ${fmt(totalTtc)}</div>`;
-  }
-  return html;
+/** Render options in PDF-model style: bold name + comma-separated detail items */
+function pdfOptBlock(opts: QuotePdfData['options']): string {
+  if (!opts?.length) return '';
+  return opts.map(o => `<div style="margin-bottom:8px;">
+    <div style="font-size:12px;font-weight:700;color:#111827;">${esc(o.option_name)}</div>
+    ${o.option_details ? `<div style="font-size:11px;color:#4b5563;margin-top:2px;">${esc(o.option_details)}</div>` : ''}
+  </div>`).join('');
 }
 
-function totalsBlock(data: QuotePdfData, primaryColor: string, accentColor: string, showVat: boolean): string {
-  const vatRate = data.vat_rate / 100;
-  const baseTtc = Number(data.base_price) * (1 + vatRate);
-  const optionsTtc = Number(data.options_total) * (1 + vatRate);
-  const grandTotalHt = Number(data.total_price);
-  const vat = grandTotalHt * vatRate;
-  const grandTtc = grandTotalHt + vat;
-  const hasOptions = Number(data.options_total) > 0;
-  return `<table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:8px;">
-    <tr style="border-bottom:1px solid #e5e7eb;">
-      <td style="padding:8px 12px;color:#6b7280;">Prix de base HT</td>
-      <td style="padding:8px 12px;text-align:right;font-weight:600;">${fmt(Number(data.base_price))}</td>
-    </tr>
-    ${showVat ? `<tr style="border-bottom:1px solid #e5e7eb;">
-      <td style="padding:8px 12px;font-weight:600;color:${accentColor};">Prix de base TTC</td>
-      <td style="padding:8px 12px;text-align:right;font-weight:700;color:${accentColor};">${fmt(baseTtc)}</td>
-    </tr>` : ''}
-    ${hasOptions ? `<tr style="border-bottom:1px solid #e5e7eb;">
-      <td style="padding:8px 12px;color:#6b7280;">Total Options HT</td>
-      <td style="padding:8px 12px;text-align:right;font-weight:600;">${fmt(Number(data.options_total))}</td>
-    </tr>` : ''}
-    ${hasOptions && showVat ? `<tr style="border-bottom:1px solid #e5e7eb;">
-      <td style="padding:8px 12px;font-weight:600;color:${accentColor};">Total Options TTC</td>
-      <td style="padding:8px 12px;text-align:right;font-weight:700;color:${accentColor};">${fmt(optionsTtc)}</td>
-    </tr>` : ''}
-    <tr style="border-bottom:2px solid ${accentColor};">
-      <td style="padding:8px 12px;font-weight:700;color:${primaryColor};">Grand Total HT</td>
-      <td style="padding:8px 12px;text-align:right;font-weight:700;font-size:15px;color:${primaryColor};">${fmt(grandTotalHt)}</td>
-    </tr>
-    ${showVat ? `<tr style="border-bottom:1px solid #e5e7eb;">
-      <td style="padding:8px 12px;color:#6b7280;">TVA (${data.vat_rate}%)</td>
-      <td style="padding:8px 12px;text-align:right;">${fmt(vat)}</td>
-    </tr>
-    <tr style="background:${accentColor};">
-      <td style="padding:12px;font-weight:700;color:#fff;font-size:15px;">Grand Total TTC</td>
-      <td style="padding:12px;text-align:right;font-weight:700;font-size:18px;color:#fff;">${fmt(grandTtc)}</td>
-    </tr>` : ''}
-  </table>`;
-}
-
-function customerBlock(data: QuotePdfData, borderColor: string): string {
-  return `<table style="width:100%;border-collapse:collapse;font-size:12px;">
-    ${[
-      ['Nom', data.customer_name],
-      ['Email', data.customer_email],
-      ['Téléphone', data.customer_phone],
-      ...(data.customer_address ? [['Adresse', data.customer_address]] : []),
-    ].map(([lbl, val]) => `
-    <tr style="border-bottom:1px solid ${borderColor};">
-      <td style="padding:6px 8px;color:#6b7280;width:110px;">${lbl}</td>
-      <td style="padding:6px 8px;font-weight:500;">${val}</td>
-    </tr>`).join('')}
-  </table>`;
-}
-
-function companyBlock(co: CompanyInfo, borderColor: string): string {
-  return `<table style="width:100%;border-collapse:collapse;font-size:12px;">
-    ${[
-      ['Société', co.company_name],
-      ['Email', co.company_email],
-      ['Téléphone', co.company_phone],
-      ['Adresse', co.company_address],
-    ].filter(([, v]) => v).map(([lbl, val]) => `
-    <tr style="border-bottom:1px solid ${borderColor};">
-      <td style="padding:6px 8px;color:#6b7280;width:110px;">${lbl}</td>
-      <td style="padding:6px 8px;font-weight:500;">${val}</td>
-    </tr>`).join('')}
-  </table>`;
-}
-
-function validityBlock(data: QuotePdfData, settings: PdfDisplaySettings, accentColor: string): string {
-  const days = settings.pdf_validity_days || '30';
-  const validUntil = data.valid_until ? fmtDate(data.valid_until) : `${days} jours à compter de la date d'émission`;
-  return `<div style="background:#fff7ed;border:1px solid #fdba74;border-radius:6px;padding:10px 14px;font-size:12px;color:#9a3412;display:inline-block;">
-    ⏱ Devis valable : ${validUntil}
+/** Photos in a compact side-by-side layout for the model section */
+function pdfPhotos(photo?: string, plan?: string): string {
+  if (!photo && !plan) return '';
+  return `<div style="display:flex;gap:8px;margin-top:8px;">
+    ${photo ? `<img src="${photo}" style="width:${plan ? '48%' : '70%'};max-height:120px;object-fit:cover;border-radius:4px;" alt="Photo" />` : ''}
+    ${plan ? `<img src="${plan}" style="width:${photo ? '48%' : '70%'};max-height:120px;object-fit:cover;border-radius:4px;" alt="Plan" />` : ''}
   </div>`;
 }
 
-function termsBlock(terms: string, bankDetails: string, showBank: boolean): string {
-  let html = '';
-  if (terms) {
-    html += `<div style="font-size:11px;color:#6b7280;margin-bottom:8px;"><strong style="color:#374151;">Conditions générales :</strong> ${terms}</div>`;
-  }
-  if (showBank && bankDetails) {
-    html += `<div style="font-size:11px;color:#6b7280;white-space:pre-line;"><strong style="color:#374151;">Coordonnées bancaires :</strong><br>${bankDetails}</div>`;
-  }
-  return html;
+/** Totals section in PDF-model style */
+function pdfTotals(data: QuotePdfData, accentColor: string, showVat: boolean): string {
+  const vatRate = data.vat_rate / 100;
+  const totalHt = Number(data.total_price);
+  const vat = totalHt * vatRate;
+  const totalTtc = totalHt + vat;
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
+      <div style="font-size:13px;">
+        <span style="color:${accentColor};font-weight:700;">Total HT</span>
+        <span style="font-weight:700;margin-left:12px;">${fmt(totalHt)}</span>
+      </div>
+      <div style="font-size:13px;">
+        <span style="color:${accentColor};font-weight:700;">Total TTC</span>
+        <span style="font-weight:700;margin-left:12px;">${fmt(totalTtc)}</span>
+      </div>
+    </div>
+    ${showVat ? `<div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:12px;color:#6b7280;">
+      <div><span>TVA (${data.vat_rate}%)</span><span style="font-weight:600;margin-left:12px;">${fmt(vat)}</span></div>
+    </div>` : ''}
+    ${data.notes ? `<div style="font-size:11px;color:#6b7280;margin-bottom:4px;">Notes : ${esc(data.notes)}</div>` : ''}
+    <div style="border-top:1px solid #d1d5db;margin-top:6px;padding-top:8px;text-align:right;">
+      <span style="font-size:24px;font-weight:800;color:${accentColor};">${fmt(totalTtc)}</span>
+    </div>
+  `;
 }
 
-function sectionTitle(title: string, primaryColor: string): string {
-  return `<div style="font-size:14px;font-weight:700;color:${primaryColor};padding-bottom:8px;border-bottom:2px solid ${primaryColor};margin-bottom:12px;">${title}</div>`;
+/** Signature + bank details bottom box (no action button) */
+function pdfSignatureBox(settings: PdfDisplaySettings): string {
+  const showBank = settings.pdf_show_bank_details === 'true';
+  const bankDetails = settings.pdf_bank_details || '';
+  const hasBank = showBank && !!bankDetails;
+  return `<div style="display:flex;border:1px solid #d1d5db;min-height:64px;">
+    <div style="flex:1.5;padding:10px 14px;${hasBank ? 'border-right:1px solid #d1d5db;' : ''}">
+      <div style="font-size:11px;color:#6b7280;">Bon pour accord : (Signature et date)</div>
+    </div>
+    ${hasBank ? `<div style="flex:1;padding:10px 14px;">
+      <div style="font-size:11px;"><strong style="color:#374151;">Coordonnées bancaires :</strong><br/><span style="color:#6b7280;white-space:pre-line;">${esc(bankDetails)}</span></div>
+    </div>` : ''}
+  </div>`;
+}
+
+// ─── Internal template builder ──────────────────────────────────────────────
+
+export interface TemplateTheme {
+  primary: string;
+  accent: string;
+  barColor: string;
+  barHeight: number;
+  titleStyle: string;
+  divider: string;
+  sectionLabelColor: string;
+}
+
+export function buildTemplate(
+  data: QuotePdfData,
+  settings: PdfDisplaySettings,
+  company: CompanyInfo,
+  logoBase64: string,
+  theme: TemplateTheme,
+): string {
+  const font = getFont(settings);
+  const showVat = settings.pdf_show_vat === 'true';
+  const modelTitle = data.is_free_quote ? (data.quote_title || 'Devis') : (data.model_name || '');
+  const baseTtc = Number(data.base_price) * (1 + data.vat_rate / 100);
+  const optionsTtc = Number(data.options_total) * (1 + data.vat_rate / 100);
+  const hasOptions = !data.is_free_quote && (data.options?.length || 0) > 0;
+  const baseCategories = data.is_free_quote ? data.categories : data.base_categories;
+  const hasCats = (baseCategories?.length || 0) > 0;
+  const div = theme.divider;
+
+  const offsetStyle = getLogoOffsetStyle(settings);
+  const logoHtml = settings.pdf_show_logo === 'true' && logoBase64
+    ? `<img src="${logoBase64}" style="${offsetStyle}height:48px;max-width:160px;object-fit:contain;display:block;margin-bottom:8px;" alt="Logo" />`
+    : '';
+
+  return `<div style="font-family:${font};width:794px;background:#fff;color:#1f2937;">
+
+    <!-- BLOCK A: HEADER -->
+    <div data-pdf-block="a">
+      <div style="background:${theme.barColor};height:${theme.barHeight}px;"></div>
+      <div style="padding:22px 40px 16px;display:flex;justify-content:space-between;align-items:flex-start;">
+        <div>
+          ${logoHtml}
+          <div style="font-size:11px;color:#4b5563;line-height:1.7;">
+            ${company.company_name ? `<div style="font-weight:600;color:#374151;">${company.company_name}</div>` : ''}
+            ${company.company_address ? `<div>${company.company_address}</div>` : ''}
+            ${company.company_phone ? `<div>${company.company_phone}</div>` : ''}
+            ${company.company_email ? `<div>${company.company_email}</div>` : ''}
+          </div>
+        </div>
+        <div style="text-align:right;">
+          <div style="${theme.titleStyle}">Devis</div>
+          <div style="font-size:12px;color:#374151;margin-top:4px;">${data.reference_number}</div>
+          <div style="font-size:11px;color:${theme.accent};font-weight:600;margin-top:2px;">envoyé le ${fmtDate(data.created_at)}</div>
+        </div>
+      </div>
+      <div style="border-bottom:1px solid ${div};margin:0 40px;"></div>
+    </div>
+
+    <!-- BLOCK B: CLIENT + MODEL -->
+    <div data-pdf-block="b">
+      <div style="padding:12px 40px 8px;display:flex;gap:32px;">
+        <div style="flex:1;">
+          <div style="font-size:13px;font-weight:700;color:${theme.sectionLabelColor};margin-bottom:6px;">Client</div>
+          <div style="font-size:11px;color:#374151;line-height:1.7;">
+            <div>${data.customer_name}</div>
+            ${data.customer_address ? `<div>${data.customer_address}</div>` : ''}
+            ${data.customer_email ? `<div>${data.customer_email}</div>` : ''}
+            ${data.customer_phone ? `<div>${data.customer_phone}</div>` : ''}
+          </div>
+        </div>
+        <div style="flex:1.3;">
+          ${modelTitle ? `<div style="font-size:13px;font-weight:700;color:${theme.sectionLabelColor};margin-bottom:6px;">Modèle : <span style="font-weight:400;">${modelTitle}</span></div>` : ''}
+          ${pdfPhotos(data.photo_url, data.plan_url)}
+        </div>
+      </div>
+      <div style="border-bottom:1px solid ${div};margin:8px 40px 0;"></div>
+    </div>
+
+    <!-- BLOCK C: BASE CATEGORIES -->
+    ${hasCats ? `
+    <div data-pdf-block="c">
+      <div style="padding:12px 40px 8px;">
+        <div style="font-size:13px;font-weight:700;color:${theme.sectionLabelColor};text-decoration:underline;margin-bottom:10px;">
+          ${data.is_free_quote ? 'Descriptif :' : 'Inclus dans le prix de base :'}
+        </div>
+        ${pdfCatBlock(baseCategories)}
+        ${!data.is_free_quote ? `<div style="text-align:right;margin-top:10px;font-size:12px;border-top:1px solid ${div};padding-top:8px;">
+          <span style="color:${theme.accent};font-weight:600;">Prix de Base TTC</span>
+          <span style="font-weight:700;margin-left:16px;">${fmt(baseTtc)}</span>
+        </div>` : ''}
+      </div>
+      <div style="border-bottom:1px solid ${div};margin:0 40px;"></div>
+    </div>
+    ` : ''}
+
+    <!-- BLOCK D: OPTIONS -->
+    ${hasOptions ? `
+    <div data-pdf-block="d">
+      <div style="padding:12px 40px 8px;">
+        <div style="font-size:13px;font-weight:700;color:${theme.sectionLabelColor};margin-bottom:10px;">Option(s) Sélectionnée(s) :</div>
+        ${pdfOptBlock(data.options)}
+        <div style="text-align:right;margin-top:10px;font-size:12px;border-top:1px solid ${div};padding-top:8px;">
+          <span style="color:${theme.accent};font-weight:600;">Prix des Options TTC</span>
+          <span style="font-weight:700;margin-left:16px;">${fmt(optionsTtc)}</span>
+        </div>
+      </div>
+      <div style="border-bottom:1px solid ${div};margin:0 40px;"></div>
+    </div>
+    ` : ''}
+
+    <!-- BLOCKS E+F: FOOTER (validity + totals + signature + terms) -->
+    <div data-pdf-block="ef">
+      <div style="padding:8px 40px 4px;">
+        <div style="font-size:11px;color:#9a3412;background:#fff7ed;border:1px solid #fdba74;border-radius:4px;padding:6px 12px;display:inline-block;">
+          ⏱ Devis valable : ${data.valid_until ? fmtDate(data.valid_until) : `${settings.pdf_validity_days || 30} jours à compter de la date d'émission`}
+        </div>
+      </div>
+      <div style="padding:8px 40px 12px;">
+        ${pdfTotals(data, theme.accent, showVat)}
+      </div>
+      <div style="margin:0 40px 12px;">
+        ${pdfSignatureBox(settings)}
+      </div>
+      ${settings.pdf_show_terms === 'true' && settings.pdf_terms ? `
+      <div style="padding:0 40px 8px;font-size:11px;font-weight:600;color:#374151;">
+        Modalités de paiements : ${esc(settings.pdf_terms)}
+      </div>
+      ` : ''}
+      ${settings.pdf_footer_text ? `<div style="padding:4px 40px 8px;font-size:10px;color:#9ca3af;text-align:center;">${esc(settings.pdf_footer_text)}</div>` : ''}
+      <div style="background:${theme.barColor};height:${theme.barHeight}px;margin-top:4px;"></div>
+    </div>
+
+  </div>`;
+}
+
+/** Compact continuation header rendered on pages 2+ when content spans multiple pages */
+export function buildContinuationHeader(
+  data: QuotePdfData,
+  settings: PdfDisplaySettings,
+  company: CompanyInfo,
+  logoBase64: string,
+  theme: TemplateTheme,
+): string {
+  const font = getFont(settings);
+  const offsetStyle = getLogoOffsetStyle(settings);
+  const logoHtml = settings.pdf_show_logo === 'true' && logoBase64
+    ? `<img src="${logoBase64}" style="${offsetStyle}height:24px;max-width:80px;object-fit:contain;display:block;" alt="Logo" />`
+    : '';
+  return `<div style="font-family:${font};width:794px;background:${theme.barColor};">
+    <div style="padding:8px 40px;display:flex;justify-content:space-between;align-items:center;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        ${logoHtml}
+        <div style="font-size:10px;color:rgba(255,255,255,0.85);">${company.company_name}</div>
+      </div>
+      <div style="text-align:right;">
+        <div style="font-size:12px;font-weight:700;color:rgba(255,255,255,0.5);letter-spacing:2px;">SUITE</div>
+        <div style="font-size:10px;color:#fff;font-weight:600;">${data.reference_number}</div>
+      </div>
+    </div>
+  </div>`;
 }
 
 // ─────────────────────────────────────────────
@@ -267,412 +378,114 @@ function sectionTitle(title: string, primaryColor: string): string {
 // ─────────────────────────────────────────────
 export function template1(data: QuotePdfData, settings: PdfDisplaySettings, company: CompanyInfo, logoBase64: string): string {
   const primary = settings.pdf_primary_color || '#1A365D';
-  const accent = settings.pdf_accent_color || '#f97316';
-  const font = getFont(settings);
-  const showVat = settings.pdf_show_vat === 'true';
-  const modelTitle = data.is_free_quote ? (data.quote_title || 'Devis') : (data.model_name || 'Devis');
-  const baseTtc = Number(data.base_price) * (1 + data.vat_rate / 100);
-  const optionsTtc = Number(data.options_total) * (1 + data.vat_rate / 100);
-
-  return `<div style="font-family:${font};width:794px;background:#fff;padding:0;color:#1f2937;">
-    <!-- HEADER -->
-    <div style="background:${primary};color:#fff;padding:32px 40px 24px;position:relative;">
-      <div style="display:flex;justify-content:space-between;align-items:center;">
-        <div>
-          ${settings.pdf_show_logo === 'true' && logoBase64 && settings.pdf_logo_position === 'left'
-            ? `<img src="${logoBase64}" style="height:52px;max-width:160px;object-fit:contain;margin-bottom:10px;" alt="Logo" /><br/>` : ''}
-          <div style="font-size:13px;font-weight:300;letter-spacing:1px;opacity:0.8;">${company.company_name}</div>
-          <div style="font-size:10px;opacity:0.6;margin-top:2px;">${company.company_email} • ${company.company_phone}</div>
-        </div>
-        ${settings.pdf_show_logo === 'true' && logoBase64 && settings.pdf_logo_position === 'center'
-          ? `<img src="${logoBase64}" style="height:56px;max-width:160px;object-fit:contain;" alt="Logo" />` : ''}
-        <div style="text-align:right;">
-          <div style="background:${accent};color:#fff;display:inline-block;font-size:11px;font-weight:700;letter-spacing:3px;padding:5px 14px;border-radius:4px;margin-bottom:8px;">DEVIS</div>
-          <div style="font-size:22px;font-weight:700;margin-bottom:4px;">${modelTitle}</div>
-          <div style="font-size:12px;opacity:0.8;">Réf : <strong>${data.reference_number}</strong></div>
-          <div style="font-size:11px;opacity:0.6;">${fmtDate(data.created_at)}</div>
-          ${settings.pdf_show_logo === 'true' && logoBase64 && settings.pdf_logo_position === 'right'
-            ? `<div style="margin-top:10px;"><img src="${logoBase64}" style="height:44px;max-width:130px;object-fit:contain;" alt="Logo" /></div>` : ''}
-        </div>
-      </div>
-    </div>
-    <!-- BODY -->
-    <div style="padding:32px 40px;">
-      ${imagesBlock(data.photo_url, data.plan_url)}
-      <!-- Info row -->
-      <div style="display:flex;gap:24px;margin-bottom:28px;">
-        <div style="flex:1;background:#f8fafc;border-radius:8px;padding:18px;">
-          ${sectionTitle('Client', primary)}
-          ${customerBlock(data, '#e5e7eb')}
-        </div>
-        <div style="flex:1;background:#f8fafc;border-radius:8px;padding:18px;">
-          ${sectionTitle('Sunbox Mauritius', primary)}
-          ${companyBlock(company, '#e5e7eb')}
-        </div>
-      </div>
-      <!-- Validity -->
-      <div style="margin-bottom:24px;">${validityBlock(data, settings, accent)}</div>
-      <!-- Lines / Options -->
-      ${data.is_free_quote && data.categories?.length
-        ? `<div style="margin-bottom:24px;">${sectionTitle('Descriptif', primary)}${linesTable(data.categories, accent, baseTtc, showVat)}</div>`
-        : ''}
-      ${!data.is_free_quote && data.base_categories?.length
-        ? `<div style="margin-bottom:24px;">${sectionTitle('Descriptif du prix de base', primary)}${linesTable(data.base_categories, accent, baseTtc, showVat)}</div>`
-        : ''}
-      ${!data.is_free_quote && data.options?.length
-        ? `<div style="margin-bottom:24px;">${sectionTitle('Options sélectionnées', primary)}${optionsTable(data.options, accent, optionsTtc, showVat)}</div>`
-        : ''}
-      <!-- Totals -->
-      <div style="background:#f8fafc;border-radius:8px;padding:18px;margin-bottom:24px;">
-        ${sectionTitle('Récapitulatif', primary)}
-        ${totalsBlock(data, primary, accent, showVat)}
-      </div>
-      <!-- Terms -->
-      ${settings.pdf_show_terms === 'true' ? `<div style="margin-bottom:12px;">${termsBlock(settings.pdf_terms, settings.pdf_bank_details, settings.pdf_show_bank_details === 'true')}</div>` : ''}
-      <!-- Footer -->
-      <div style="border-top:2px solid #e5e7eb;margin-top:16px;padding-top:14px;text-align:center;font-size:11px;color:#9ca3af;">${settings.pdf_footer_text}</div>
-    </div>
-  </div>`;
+  const accent  = settings.pdf_accent_color  || '#f97316';
+  return buildTemplate(data, settings, company, logoBase64, {
+    primary,
+    accent,
+    barColor:          primary,
+    barHeight:         6,
+    titleStyle:        `font-size:38px;font-weight:800;color:${primary};`,
+    divider:           '#d1d5db',
+    sectionLabelColor: '#111827',
+  });
 }
 
 // ─────────────────────────────────────────────
-// TEMPLATE 2 – MINIMALISTE (White + thin lines)
+// TEMPLATE 2 – MINIMALISTE (Black + thin lines)
 // ─────────────────────────────────────────────
 export function template2(data: QuotePdfData, settings: PdfDisplaySettings, company: CompanyInfo, logoBase64: string): string {
   const primary = settings.pdf_primary_color || '#111827';
-  const accent = settings.pdf_accent_color || '#f97316';
-  const font = getFont(settings);
-  const showVat = settings.pdf_show_vat === 'true';
-  const modelTitle = data.is_free_quote ? (data.quote_title || 'Devis') : (data.model_name || 'Devis');
-  const baseTtc = Number(data.base_price) * (1 + data.vat_rate / 100);
-  const optionsTtc = Number(data.options_total) * (1 + data.vat_rate / 100);
-
-  return `<div style="font-family:${font};width:794px;background:#fff;padding:48px;color:#1f2937;">
-    <!-- HEADER -->
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:40px;padding-bottom:32px;border-bottom:1px solid #e5e7eb;">
-      <div>
-        ${settings.pdf_show_logo === 'true' && logoBase64 && settings.pdf_logo_position === 'left'
-          ? `<img src="${logoBase64}" style="height:48px;max-width:150px;object-fit:contain;margin-bottom:10px;display:block;" alt="Logo" />` : ''}
-        ${settings.pdf_show_logo === 'true' && logoBase64 && settings.pdf_logo_position === 'center'
-          ? `<div style="text-align:center;margin-bottom:12px;"><img src="${logoBase64}" style="height:48px;max-width:150px;object-fit:contain;" alt="Logo" /></div>` : ''}
-        <div style="font-size:13px;font-weight:600;color:#374151;">${company.company_name}</div>
-        <div style="font-size:11px;color:#9ca3af;margin-top:3px;">${company.company_email}</div>
-        <div style="font-size:11px;color:#9ca3af;">${company.company_phone}</div>
-      </div>
-      <div style="text-align:right;">
-        ${settings.pdf_show_logo === 'true' && logoBase64 && settings.pdf_logo_position === 'right'
-          ? `<img src="${logoBase64}" style="height:48px;max-width:150px;object-fit:contain;margin-bottom:10px;display:block;margin-left:auto;" alt="Logo" />` : ''}
-        <div style="font-size:40px;font-weight:800;letter-spacing:-1px;color:${primary};line-height:1;">DEVIS</div>
-        <div style="font-size:14px;font-weight:600;color:#374151;margin-top:4px;">${modelTitle}</div>
-        <div style="font-size:12px;color:#9ca3af;margin-top:4px;">N° <span style="color:${accent};font-weight:700;">${data.reference_number}</span></div>
-        <div style="font-size:11px;color:#9ca3af;">${fmtDate(data.created_at)}</div>
-      </div>
-    </div>
-    ${imagesBlock(data.photo_url, data.plan_url)}
-    <!-- Info row -->
-    <div style="display:flex;gap:32px;margin-bottom:32px;">
-      <div style="flex:1;padding-bottom:4px;border-bottom:2px solid ${primary};">
-        <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:#9ca3af;margin-bottom:10px;text-transform:uppercase;">Client</div>
-        ${customerBlock(data, '#f3f4f6')}
-      </div>
-      <div style="flex:1;padding-bottom:4px;border-bottom:2px solid ${primary};">
-        <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:#9ca3af;margin-bottom:10px;text-transform:uppercase;">Fournisseur</div>
-        ${companyBlock(company, '#f3f4f6')}
-      </div>
-    </div>
-    <div style="margin-bottom:24px;">${validityBlock(data, settings, accent)}</div>
-    ${data.is_free_quote && data.categories?.length
-      ? `<div style="margin-bottom:24px;"><div style="font-size:11px;font-weight:700;letter-spacing:1px;color:#9ca3af;margin-bottom:12px;text-transform:uppercase;">Descriptif</div>${linesTable(data.categories, accent, baseTtc, showVat)}</div>`
-      : ''}
-    ${!data.is_free_quote && data.base_categories?.length
-      ? `<div style="margin-bottom:24px;"><div style="font-size:11px;font-weight:700;letter-spacing:1px;color:#9ca3af;margin-bottom:12px;text-transform:uppercase;">Descriptif du prix de base</div>${linesTable(data.base_categories, accent, baseTtc, showVat)}</div>`
-      : ''}
-    ${!data.is_free_quote && data.options?.length
-      ? `<div style="margin-bottom:24px;"><div style="font-size:11px;font-weight:700;letter-spacing:1px;color:#9ca3af;margin-bottom:12px;text-transform:uppercase;">Options</div>${optionsTable(data.options, accent, optionsTtc, showVat)}</div>`
-      : ''}
-    <div style="border:1px solid #e5e7eb;border-radius:6px;padding:20px;margin-bottom:24px;">
-      <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:#9ca3af;margin-bottom:12px;text-transform:uppercase;">Récapitulatif</div>
-      ${totalsBlock(data, primary, accent, showVat)}
-    </div>
-    ${settings.pdf_show_terms === 'true' ? `<div style="margin-bottom:12px;">${termsBlock(settings.pdf_terms, settings.pdf_bank_details, settings.pdf_show_bank_details === 'true')}</div>` : ''}
-    <div style="margin-top:24px;padding-top:16px;border-top:1px solid #e5e7eb;text-align:center;font-size:11px;color:#9ca3af;">${settings.pdf_footer_text}</div>
-  </div>`;
+  const accent  = settings.pdf_accent_color  || '#374151';
+  return buildTemplate(data, settings, company, logoBase64, {
+    primary,
+    accent,
+    barColor:          primary,
+    barHeight:         2,
+    titleStyle:        `font-size:44px;font-weight:800;color:${primary};letter-spacing:-1px;`,
+    divider:           '#e5e7eb',
+    sectionLabelColor: '#111827',
+  });
 }
 
 // ─────────────────────────────────────────────
-// TEMPLATE 3 – SOLAIRE (Orange header + warm)
+// TEMPLATE 3 – SOLAIRE (Orange + Navy)
 // ─────────────────────────────────────────────
 export function template3(data: QuotePdfData, settings: PdfDisplaySettings, company: CompanyInfo, logoBase64: string): string {
   const primary = settings.pdf_primary_color || '#ea580c';
-  const accent = settings.pdf_accent_color || '#1A365D';
-  const font = getFont(settings);
-  const showVat = settings.pdf_show_vat === 'true';
-  const modelTitle = data.is_free_quote ? (data.quote_title || 'Devis') : (data.model_name || 'Devis');
-  const baseTtc = Number(data.base_price) * (1 + data.vat_rate / 100);
-  const optionsTtc = Number(data.options_total) * (1 + data.vat_rate / 100);
-
-  return `<div style="font-family:${font};width:794px;background:#fff;color:#1f2937;">
-    <!-- ORANGE HEADER -->
-    <div style="background:linear-gradient(135deg,${primary},#fb923c);padding:36px 40px 28px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;">
-        <div>
-          ${settings.pdf_show_logo === 'true' && logoBase64 && settings.pdf_logo_position !== 'right'
-            ? `<img src="${logoBase64}" style="height:50px;max-width:150px;object-fit:contain;margin-bottom:10px;display:block;" alt="Logo" />` : ''}
-          <div style="color:#fff;font-size:22px;font-weight:800;line-height:1;">${modelTitle}</div>
-          <div style="color:#ffedd5;font-size:12px;margin-top:4px;">${company.company_name} • ${company.company_email}</div>
-        </div>
-        <div style="text-align:right;">
-          ${settings.pdf_show_logo === 'true' && logoBase64 && settings.pdf_logo_position === 'right'
-            ? `<img src="${logoBase64}" style="height:50px;max-width:150px;object-fit:contain;margin-bottom:10px;display:block;margin-left:auto;" alt="Logo" />` : ''}
-          <div style="background:rgba(255,255,255,0.2);border-radius:8px;padding:14px 18px;display:inline-block;text-align:right;">
-            <div style="color:#fff;font-size:13px;font-weight:700;letter-spacing:2px;">DEVIS</div>
-            <div style="color:#fff;font-size:18px;font-weight:800;margin-top:2px;">${data.reference_number}</div>
-            <div style="color:#ffedd5;font-size:11px;margin-top:2px;">${fmtDate(data.created_at)}</div>
-          </div>
-        </div>
-      </div>
-      ${settings.pdf_show_logo === 'true' && logoBase64 && settings.pdf_logo_position === 'center'
-        ? `<div style="text-align:center;margin-top:12px;"><img src="${logoBase64}" style="height:44px;max-width:140px;object-fit:contain;" alt="Logo" /></div>` : ''}
-    </div>
-    <!-- BODY -->
-    <div style="padding:32px 40px;">
-      ${imagesBlock(data.photo_url, data.plan_url)}
-      <div style="display:flex;gap:20px;margin-bottom:28px;">
-        <div style="flex:1;border:2px solid #fed7aa;border-radius:10px;padding:16px;">
-          <div style="font-size:12px;font-weight:700;color:${primary};margin-bottom:10px;text-transform:uppercase;letter-spacing:1px;">Client</div>
-          ${customerBlock(data, '#fed7aa')}
-        </div>
-        <div style="flex:1;border:2px solid #fed7aa;border-radius:10px;padding:16px;">
-          <div style="font-size:12px;font-weight:700;color:${primary};margin-bottom:10px;text-transform:uppercase;letter-spacing:1px;">Sunbox Mauritius</div>
-          ${companyBlock(company, '#fed7aa')}
-        </div>
-      </div>
-      <div style="margin-bottom:24px;">${validityBlock(data, settings, primary)}</div>
-      ${data.is_free_quote && data.categories?.length
-        ? `<div style="margin-bottom:24px;"><div style="font-size:12px;font-weight:700;color:${primary};text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Descriptif</div>${linesTable(data.categories, primary, baseTtc, showVat)}</div>`
-        : ''}
-      ${!data.is_free_quote && data.base_categories?.length
-        ? `<div style="margin-bottom:24px;"><div style="font-size:12px;font-weight:700;color:${primary};text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Descriptif du prix de base</div>${linesTable(data.base_categories, primary, baseTtc, showVat)}</div>`
-        : ''}
-      ${!data.is_free_quote && data.options?.length
-        ? `<div style="margin-bottom:24px;"><div style="font-size:12px;font-weight:700;color:${primary};text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Options</div>${optionsTable(data.options, primary, optionsTtc, showVat)}</div>`
-        : ''}
-      <div style="background:#fff7ed;border-radius:10px;padding:20px;margin-bottom:24px;">
-        <div style="font-size:12px;font-weight:700;color:${primary};text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Récapitulatif</div>
-        ${totalsBlock(data, accent, primary, showVat)}
-      </div>
-      ${settings.pdf_show_terms === 'true' ? `<div style="margin-bottom:12px;">${termsBlock(settings.pdf_terms, settings.pdf_bank_details, settings.pdf_show_bank_details === 'true')}</div>` : ''}
-      <div style="border-top:2px solid #fed7aa;margin-top:16px;padding-top:14px;text-align:center;font-size:11px;color:#9a3412;">${settings.pdf_footer_text}</div>
-    </div>
-  </div>`;
+  const accent  = settings.pdf_accent_color  || '#ea580c';
+  return buildTemplate(data, settings, company, logoBase64, {
+    primary,
+    accent,
+    barColor:          primary,
+    barHeight:         6,
+    titleStyle:        `font-size:38px;font-weight:800;color:${primary};`,
+    divider:           '#fed7aa',
+    sectionLabelColor: '#9a3412',
+  });
 }
 
 // ─────────────────────────────────────────────
-// TEMPLATE 4 – NUIT (Dark professional)
+// TEMPLATE 4 – NUIT (Dark Slate + Orange)
 // ─────────────────────────────────────────────
 export function template4(data: QuotePdfData, settings: PdfDisplaySettings, company: CompanyInfo, logoBase64: string): string {
   const primary = settings.pdf_primary_color || '#0f172a';
-  const accent = settings.pdf_accent_color || '#f97316';
-  const font = getFont(settings);
-  const showVat = settings.pdf_show_vat === 'true';
-  const modelTitle = data.is_free_quote ? (data.quote_title || 'Devis') : (data.model_name || 'Devis');
-  const baseTtc = Number(data.base_price) * (1 + data.vat_rate / 100);
-  const optionsTtc = Number(data.options_total) * (1 + data.vat_rate / 100);
-
-  return `<div style="font-family:${font};width:794px;background:#f8fafc;color:#1f2937;">
-    <!-- DARK HEADER -->
-    <div style="background:${primary};padding:0;">
-      <div style="display:flex;align-items:stretch;">
-        <div style="flex:1;padding:32px 40px;">
-          ${settings.pdf_show_logo === 'true' && logoBase64 && (settings.pdf_logo_position === 'left' || settings.pdf_logo_position === 'center')
-            ? `<img src="${logoBase64}" style="height:50px;max-width:150px;object-fit:contain;margin-bottom:12px;display:block;" alt="Logo" />` : ''}
-          <div style="color:#f1f5f9;font-size:26px;font-weight:800;margin-bottom:4px;">${modelTitle}</div>
-          <div style="color:#94a3b8;font-size:12px;">${company.company_name} • ${company.company_email}</div>
-        </div>
-        <div style="background:${accent};padding:32px 36px;display:flex;flex-direction:column;justify-content:center;align-items:flex-end;min-width:200px;">
-          ${settings.pdf_show_logo === 'true' && logoBase64 && settings.pdf_logo_position === 'right'
-            ? `<img src="${logoBase64}" style="height:44px;max-width:130px;object-fit:contain;margin-bottom:12px;" alt="Logo" />` : ''}
-          <div style="color:#fff;font-size:13px;font-weight:700;letter-spacing:3px;margin-bottom:8px;">DEVIS</div>
-          <div style="color:#fff;font-size:20px;font-weight:800;">${data.reference_number}</div>
-          <div style="color:rgba(255,255,255,0.8);font-size:11px;margin-top:4px;">${fmtDate(data.created_at)}</div>
-        </div>
-      </div>
-    </div>
-    <!-- BODY -->
-    <div style="padding:32px 40px;">
-      ${imagesBlock(data.photo_url, data.plan_url)}
-      <div style="display:flex;gap:20px;margin-bottom:28px;">
-        <div style="flex:1;background:#fff;border-radius:8px;padding:18px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
-          <div style="font-size:11px;font-weight:700;color:${accent};text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">Client</div>
-          ${customerBlock(data, '#f1f5f9')}
-        </div>
-        <div style="flex:1;background:#fff;border-radius:8px;padding:18px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
-          <div style="font-size:11px;font-weight:700;color:${accent};text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">Sunbox Mauritius</div>
-          ${companyBlock(company, '#f1f5f9')}
-        </div>
-      </div>
-      <div style="margin-bottom:24px;">${validityBlock(data, settings, accent)}</div>
-      ${data.is_free_quote && data.categories?.length
-        ? `<div style="background:#fff;border-radius:8px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:24px;"><div style="font-size:11px;font-weight:700;color:${accent};text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Descriptif</div>${linesTable(data.categories, accent, baseTtc, showVat)}</div>`
-        : ''}
-      ${!data.is_free_quote && data.base_categories?.length
-        ? `<div style="background:#fff;border-radius:8px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:24px;"><div style="font-size:11px;font-weight:700;color:${accent};text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Descriptif du prix de base</div>${linesTable(data.base_categories, accent, baseTtc, showVat)}</div>`
-        : ''}
-      ${!data.is_free_quote && data.options?.length
-        ? `<div style="background:#fff;border-radius:8px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:24px;"><div style="font-size:11px;font-weight:700;color:${accent};text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Options</div>${optionsTable(data.options, accent, optionsTtc, showVat)}</div>`
-        : ''}
-      <div style="background:#fff;border-radius:8px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:24px;">
-        <div style="font-size:11px;font-weight:700;color:${accent};text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Récapitulatif</div>
-        ${totalsBlock(data, primary, accent, showVat)}
-      </div>
-      ${settings.pdf_show_terms === 'true' ? `<div style="margin-bottom:12px;">${termsBlock(settings.pdf_terms, settings.pdf_bank_details, settings.pdf_show_bank_details === 'true')}</div>` : ''}
-      <div style="border-top:2px solid #e2e8f0;margin-top:16px;padding-top:14px;text-align:center;font-size:11px;color:#94a3b8;">${settings.pdf_footer_text}</div>
-    </div>
-  </div>`;
+  const accent  = settings.pdf_accent_color  || '#f97316';
+  return buildTemplate(data, settings, company, logoBase64, {
+    primary,
+    accent,
+    barColor:          primary,
+    barHeight:         8,
+    titleStyle:        `font-size:38px;font-weight:800;color:${primary};`,
+    divider:           '#cbd5e1',
+    sectionLabelColor: '#1e293b',
+  });
 }
 
 // ─────────────────────────────────────────────
-// TEMPLATE 5 – MODERNE (Two-column sidebar)
+// TEMPLATE 5 – MODERNE (Blue + Orange)
 // ─────────────────────────────────────────────
 export function template5(data: QuotePdfData, settings: PdfDisplaySettings, company: CompanyInfo, logoBase64: string): string {
-  const primary = settings.pdf_primary_color || '#1A365D';
-  const accent = settings.pdf_accent_color || '#f97316';
-  const font = getFont(settings);
-  const showVat = settings.pdf_show_vat === 'true';
-  const modelTitle = data.is_free_quote ? (data.quote_title || 'Devis') : (data.model_name || 'Devis');
-  const baseTtc = Number(data.base_price) * (1 + data.vat_rate / 100);
-  const optionsTtc = Number(data.options_total) * (1 + data.vat_rate / 100);
-  const vat = Number(data.total_price) * (data.vat_rate / 100);
-  const ttc = Number(data.total_price) + vat;
-
-  return `<div style="font-family:${font};width:794px;background:#fff;display:flex;color:#1f2937;">
-    <!-- LEFT SIDEBAR -->
-    <div style="width:240px;min-width:240px;background:${primary};padding:32px 24px;color:#fff;display:flex;flex-direction:column;gap:20px;">
-      ${settings.pdf_show_logo === 'true' && logoBase64
-        ? `<div style="text-align:${settings.pdf_logo_position === 'right' ? 'right' : settings.pdf_logo_position === 'center' ? 'center' : 'left'};margin-bottom:4px;">
-             <img src="${logoBase64}" style="height:48px;max-width:130px;object-fit:contain;" alt="Logo" />
-           </div>` : ''}
-      <div>
-        <div style="font-size:9px;font-weight:700;letter-spacing:2px;opacity:0.6;text-transform:uppercase;margin-bottom:6px;">Devis</div>
-        <div style="font-size:14px;font-weight:800;line-height:1.2;">${modelTitle}</div>
-        <div style="font-size:12px;opacity:0.7;margin-top:4px;">${data.reference_number}</div>
-        <div style="font-size:10px;opacity:0.5;margin-top:2px;">${fmtDate(data.created_at)}</div>
-      </div>
-      <!-- Client -->
-      <div>
-        <div style="font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:${accent};margin-bottom:8px;">Client</div>
-        <div style="font-size:12px;font-weight:600;">${data.customer_name}</div>
-        <div style="font-size:10px;opacity:0.7;margin-top:3px;">${data.customer_email}</div>
-        <div style="font-size:10px;opacity:0.7;">${data.customer_phone}</div>
-        ${data.customer_address ? `<div style="font-size:10px;opacity:0.6;margin-top:2px;">${data.customer_address}</div>` : ''}
-      </div>
-      <!-- Company -->
-      <div>
-        <div style="font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:${accent};margin-bottom:8px;">Fournisseur</div>
-        <div style="font-size:12px;font-weight:600;">${company.company_name}</div>
-        <div style="font-size:10px;opacity:0.7;margin-top:3px;">${company.company_email}</div>
-        <div style="font-size:10px;opacity:0.7;">${company.company_phone}</div>
-      </div>
-      <!-- Mini totals -->
-      <div style="margin-top:auto;border-top:1px solid rgba(255,255,255,0.2);padding-top:16px;">
-        <div style="font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:${accent};margin-bottom:8px;">Montants</div>
-        <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px;"><span style="opacity:0.7;">Base HT</span><span style="font-weight:600;">${fmt(Number(data.base_price))}</span></div>
-        ${Number(data.options_total) > 0 ? `<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px;"><span style="opacity:0.7;">Options HT</span><span style="font-weight:600;">${fmt(Number(data.options_total))}</span></div>` : ''}
-        <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:700;margin-top:8px;border-top:1px solid rgba(255,255,255,0.2);padding-top:8px;"><span>Total HT</span><span style="color:${accent};">${fmt(Number(data.total_price))}</span></div>
-        ${showVat ? `<div style="display:flex;justify-content:space-between;font-size:11px;margin-top:4px;opacity:0.7;"><span>TVA ${data.vat_rate}%</span><span>${fmt(vat)}</span></div>
-        <div style="display:flex;justify-content:space-between;font-size:14px;font-weight:800;margin-top:8px;background:${accent};margin-left:-24px;margin-right:-24px;padding:10px 24px;"><span>TTC</span><span>${fmt(ttc)}</span></div>` : ''}
-      </div>
-    </div>
-    <!-- RIGHT CONTENT -->
-    <div style="flex:1;padding:32px 32px;overflow:hidden;">
-      <div style="margin-bottom:8px;"><span style="background:${accent};color:#fff;font-size:10px;font-weight:700;letter-spacing:2px;padding:3px 10px;border-radius:3px;">DEVIS</span></div>
-      ${imagesBlock(data.photo_url, data.plan_url)}
-      <div style="background:#fff7ed;border-radius:6px;padding:10px 14px;font-size:11px;color:#9a3412;margin-bottom:20px;">
-        ⏱ ${data.valid_until ? `Valable jusqu'au ${fmtDate(data.valid_until)}` : `Valable ${settings.pdf_validity_days || 30} jours`}
-      </div>
-      ${data.is_free_quote && data.categories?.length
-        ? `<div style="margin-bottom:20px;"><div style="font-size:11px;font-weight:700;color:${primary};text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;border-bottom:2px solid ${primary};padding-bottom:6px;">Descriptif</div>${linesTable(data.categories, accent, baseTtc, showVat)}</div>`
-        : ''}
-      ${!data.is_free_quote && data.base_categories?.length
-        ? `<div style="margin-bottom:20px;"><div style="font-size:11px;font-weight:700;color:${primary};text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;border-bottom:2px solid ${primary};padding-bottom:6px;">Descriptif du prix de base</div>${linesTable(data.base_categories, accent, baseTtc, showVat)}</div>`
-        : ''}
-      ${!data.is_free_quote && data.options?.length
-        ? `<div style="margin-bottom:20px;"><div style="font-size:11px;font-weight:700;color:${primary};text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;border-bottom:2px solid ${primary};padding-bottom:6px;">Options</div>${optionsTable(data.options, accent, optionsTtc, showVat)}</div>`
-        : ''}
-      ${settings.pdf_show_terms === 'true' ? `<div style="margin-bottom:12px;">${termsBlock(settings.pdf_terms, settings.pdf_bank_details, settings.pdf_show_bank_details === 'true')}</div>` : ''}
-      <div style="border-top:1px solid #e5e7eb;margin-top:16px;padding-top:10px;font-size:10px;color:#9ca3af;">${settings.pdf_footer_text}</div>
-    </div>
-  </div>`;
+  const primary = settings.pdf_primary_color || '#0369a1';
+  const accent  = settings.pdf_accent_color  || '#f97316';
+  return buildTemplate(data, settings, company, logoBase64, {
+    primary,
+    accent,
+    barColor:          primary,
+    barHeight:         6,
+    titleStyle:        `font-size:38px;font-weight:800;color:${primary};`,
+    divider:           '#bae6fd',
+    sectionLabelColor: primary,
+  });
 }
 
 // ─────────────────────────────────────────────
-// TEMPLATE 6 – AQUA (Teal / Blue-green)
+// TEMPLATE 6 – AQUA (Teal + Orange)
 // ─────────────────────────────────────────────
 export function template6(data: QuotePdfData, settings: PdfDisplaySettings, company: CompanyInfo, logoBase64: string): string {
   const primary = settings.pdf_primary_color || '#0d9488';
-  const accent = settings.pdf_accent_color || '#f97316';
-  const font = getFont(settings);
-  const showVat = settings.pdf_show_vat === 'true';
-  const modelTitle = data.is_free_quote ? (data.quote_title || 'Devis') : (data.model_name || 'Devis');
-  const baseTtc = Number(data.base_price) * (1 + data.vat_rate / 100);
-  const optionsTtc = Number(data.options_total) * (1 + data.vat_rate / 100);
+  const accent  = settings.pdf_accent_color  || '#f97316';
+  return buildTemplate(data, settings, company, logoBase64, {
+    primary,
+    accent,
+    barColor:          primary,
+    barHeight:         6,
+    titleStyle:        `font-size:38px;font-weight:800;color:${primary};`,
+    divider:           '#99f6e4',
+    sectionLabelColor: primary,
+  });
+}
 
-  return `<div style="font-family:${font};width:794px;background:#fff;color:#1f2937;">
-    <!-- TEAL HEADER -->
-    <div style="background:linear-gradient(120deg,${primary},#14b8a6);padding:32px 40px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;">
-        <div>
-          ${settings.pdf_show_logo === 'true' && logoBase64 && settings.pdf_logo_position !== 'right'
-            ? `<img src="${logoBase64}" style="height:50px;max-width:150px;object-fit:contain;margin-bottom:10px;display:block;" alt="Logo" />` : ''}
-          <div style="color:#fff;font-size:24px;font-weight:800;">${modelTitle}</div>
-          <div style="color:rgba(255,255,255,0.75);font-size:11px;margin-top:3px;">${company.company_name} • ${company.company_address}</div>
-        </div>
-        <div style="text-align:right;">
-          ${settings.pdf_show_logo === 'true' && logoBase64 && settings.pdf_logo_position === 'right'
-            ? `<img src="${logoBase64}" style="height:50px;max-width:150px;object-fit:contain;margin-bottom:10px;display:block;margin-left:auto;" alt="Logo" />` : ''}
-          <div style="background:rgba(255,255,255,0.15);border-radius:8px;padding:12px 16px;display:inline-block;">
-            <div style="color:#fff;font-size:12px;font-weight:700;letter-spacing:2px;margin-bottom:6px;">DEVIS</div>
-            <div style="color:#fff;font-size:17px;font-weight:800;">${data.reference_number}</div>
-            <div style="color:rgba(255,255,255,0.7);font-size:10px;margin-top:3px;">${fmtDate(data.created_at)}</div>
-          </div>
-        </div>
-      </div>
-      ${settings.pdf_show_logo === 'true' && logoBase64 && settings.pdf_logo_position === 'center'
-        ? `<div style="text-align:center;margin-top:14px;"><img src="${logoBase64}" style="height:44px;max-width:140px;object-fit:contain;" alt="Logo" /></div>` : ''}
-    </div>
-    <!-- TEAL ACCENT BAR -->
-    <div style="background:${accent};height:4px;"></div>
-    <!-- BODY -->
-    <div style="padding:32px 40px;">
-      ${imagesBlock(data.photo_url, data.plan_url)}
-      <div style="display:flex;gap:20px;margin-bottom:28px;">
-        <div style="flex:1;border:2px solid #99f6e4;border-radius:10px;padding:16px;">
-          <div style="font-size:11px;font-weight:700;color:${primary};text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">Client</div>
-          ${customerBlock(data, '#99f6e4')}
-        </div>
-        <div style="flex:1;border:2px solid #99f6e4;border-radius:10px;padding:16px;">
-          <div style="font-size:11px;font-weight:700;color:${primary};text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">Sunbox Mauritius</div>
-          ${companyBlock(company, '#99f6e4')}
-        </div>
-      </div>
-      <div style="margin-bottom:24px;">${validityBlock(data, settings, primary)}</div>
-      ${data.is_free_quote && data.categories?.length
-        ? `<div style="margin-bottom:24px;"><div style="font-size:11px;font-weight:700;color:${primary};text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;border-bottom:2px solid ${primary};padding-bottom:6px;">Descriptif</div>${linesTable(data.categories, primary, baseTtc, showVat)}</div>`
-        : ''}
-      ${!data.is_free_quote && data.base_categories?.length
-        ? `<div style="margin-bottom:24px;"><div style="font-size:11px;font-weight:700;color:${primary};text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;border-bottom:2px solid ${primary};padding-bottom:6px;">Descriptif du prix de base</div>${linesTable(data.base_categories, primary, baseTtc, showVat)}</div>`
-        : ''}
-      ${!data.is_free_quote && data.options?.length
-        ? `<div style="margin-bottom:24px;"><div style="font-size:11px;font-weight:700;color:${primary};text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;border-bottom:2px solid ${primary};padding-bottom:6px;">Options</div>${optionsTable(data.options, primary, optionsTtc, showVat)}</div>`
-        : ''}
-      <div style="background:#f0fdfa;border:2px solid #99f6e4;border-radius:10px;padding:20px;margin-bottom:24px;">
-        <div style="font-size:11px;font-weight:700;color:${primary};text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Récapitulatif</div>
-        ${totalsBlock(data, primary, accent, showVat)}
-      </div>
-      ${settings.pdf_show_terms === 'true' ? `<div style="margin-bottom:12px;">${termsBlock(settings.pdf_terms, settings.pdf_bank_details, settings.pdf_show_bank_details === 'true')}</div>` : ''}
-      <div style="border-top:2px solid #99f6e4;margin-top:16px;padding-top:14px;text-align:center;font-size:11px;color:#0f766e;">${settings.pdf_footer_text}</div>
-    </div>
-  </div>`;
+const TEMPLATE_THEMES: Record<string, (settings: PdfDisplaySettings) => TemplateTheme> = {
+  '1': (s) => { const p = s.pdf_primary_color || '#1A365D'; const a = s.pdf_accent_color || '#f97316'; return { primary: p, accent: a, barColor: p, barHeight: 6, titleStyle: `font-size:38px;font-weight:800;color:${p};`, divider: '#d1d5db', sectionLabelColor: '#111827' }; },
+  '2': (s) => { const p = s.pdf_primary_color || '#111827'; const a = s.pdf_accent_color || '#374151'; return { primary: p, accent: a, barColor: p, barHeight: 2, titleStyle: `font-size:44px;font-weight:800;color:${p};letter-spacing:-1px;`, divider: '#e5e7eb', sectionLabelColor: '#111827' }; },
+  '3': (s) => { const p = s.pdf_primary_color || '#ea580c'; const a = s.pdf_accent_color || '#ea580c'; return { primary: p, accent: a, barColor: p, barHeight: 6, titleStyle: `font-size:38px;font-weight:800;color:${p};`, divider: '#fed7aa', sectionLabelColor: '#9a3412' }; },
+  '4': (s) => { const p = s.pdf_primary_color || '#0f172a'; const a = s.pdf_accent_color || '#f97316'; return { primary: p, accent: a, barColor: p, barHeight: 8, titleStyle: `font-size:38px;font-weight:800;color:${p};`, divider: '#cbd5e1', sectionLabelColor: '#1e293b' }; },
+  '5': (s) => { const p = s.pdf_primary_color || '#0369a1'; const a = s.pdf_accent_color || '#f97316'; return { primary: p, accent: a, barColor: p, barHeight: 6, titleStyle: `font-size:38px;font-weight:800;color:${p};`, divider: '#bae6fd', sectionLabelColor: p }; },
+  '6': (s) => { const p = s.pdf_primary_color || '#0d9488'; const a = s.pdf_accent_color || '#f97316'; return { primary: p, accent: a, barColor: p, barHeight: 6, titleStyle: `font-size:38px;font-weight:800;color:${p};`, divider: '#99f6e4', sectionLabelColor: p }; },
+};
+
+export function getTheme(settings: PdfDisplaySettings): TemplateTheme {
+  return (TEMPLATE_THEMES[settings.pdf_template || '1'] || TEMPLATE_THEMES['1'])(settings);
 }
 
 export const TEMPLATES: Record<string, (data: QuotePdfData, settings: PdfDisplaySettings, company: CompanyInfo, logo: string) => string> = {
@@ -694,12 +507,12 @@ export const TEMPLATE_NAMES: Record<string, string> = {
 };
 
 export const TEMPLATE_DESCRIPTIONS: Record<string, string> = {
-  '1': 'En-tête marine sombre, corps blanc, accents orange',
-  '2': 'Tout blanc, bordures fines, typographie épurée',
-  '3': 'En-tête dégradé orange, chaleureux et lumineux',
-  '4': 'En-tête ardoise sombre, style luxe professionnel',
-  '5': 'Barre latérale colorée, mise en page bicolonne',
-  '6': 'En-tête sarcelle/vert, fraîcheur contemporaine',
+  '1': 'Bandes marines, accent orange, fidèle au modèle PDF',
+  '2': 'Bande fine noire, typographie épurée, style minimaliste',
+  '3': 'Bandes orangées, accent chaud et lumineux',
+  '4': 'Bandes ardoise sombre, accent orange, style luxe',
+  '5': 'Bandes bleues, accent orange, style corporate',
+  '6': 'Bandes sarcelles, accent orange, fraîcheur contemporaine',
 };
 
 export function getTemplate(templateId: string) {

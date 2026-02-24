@@ -1,11 +1,24 @@
 /**
  * PDF generation utilities using html2canvas + jsPDF.
  * Produces real PDF files (not browser print dialogs).
+ * Implements block-aware pagination:
+ *   – Measures DOM block positions before rendering
+ *   – Never slices a block across pages
+ *   – Shows a minimal "SUITE" header on continuation pages
+ *   – Pushes the EF footer block to the bottom of the last content page
+ *   – Adds a separate final action page with a single clickable button
  */
 
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
-import { getTemplate, type QuotePdfData, type PdfDisplaySettings, type CompanyInfo } from './QuotePdfTemplates';
+import {
+  getTemplate,
+  getTheme,
+  buildContinuationHeader,
+  type QuotePdfData,
+  type PdfDisplaySettings,
+  type CompanyInfo,
+} from './QuotePdfTemplates';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -53,72 +66,129 @@ function waitForImages(container: HTMLElement): Promise<void> {
   ).then(() => undefined);
 }
 
-// ─── action bar ───────────────────────────────────────────────────────────────
+/** Mount an HTML string in an off-screen hidden div (794 px wide). */
+function mountHidden(html: string): HTMLDivElement {
+  const div = document.createElement('div');
+  Object.assign(div.style, {
+    position:   'fixed',
+    left:       '-9999px',
+    top:        '0',
+    width:      '794px',
+    background: '#ffffff',
+    zIndex:     '-1',
+  });
+  div.innerHTML = html;
+  document.body.appendChild(div);
+  return div;
+}
 
-function drawActionBar(
+/** Render a hidden div to a canvas at 2× scale. */
+async function renderToCanvas(div: HTMLDivElement): Promise<HTMLCanvasElement> {
+  return html2canvas(div, {
+    scale:           2,
+    useCORS:         true,
+    allowTaint:      false,
+    backgroundColor: '#ffffff',
+    logging:         false,
+    width:           794,
+    windowWidth:     794,
+  });
+}
+
+/** Extract a horizontal slice [srcY, srcY+sliceH) from a source canvas. */
+function sliceCanvas(src: HTMLCanvasElement, srcY: number, sliceH: number): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width  = src.width;
+  c.height = Math.max(1, sliceH);
+  const ctx = c.getContext('2d')!;
+  ctx.drawImage(src, 0, srcY, src.width, sliceH, 0, 0, src.width, sliceH);
+  return c;
+}
+
+/** Add a canvas image to a jsPDF page, returning the height in mm added. */
+function addCanvasToPage(pdf: jsPDF, canvas: HTMLCanvasElement, yMM: number, pdfW: number): number {
+  if (canvas.height <= 0) return 0;
+  const heightMM = (canvas.height / canvas.width) * pdfW;
+  const imgData = canvas.toDataURL('image/jpeg', 0.92);
+  pdf.addImage(imgData, 'JPEG', 0, yMM, pdfW, heightMM);
+  return heightMM;
+}
+
+/** Draw the page-number footer at the very bottom-left of the current page. */
+function drawPageNumber(pdf: jsPDF, current: number, total: number): void {
+  const pdfH = pdf.internal.pageSize.getHeight();
+  pdf.setFont('helvetica', 'normal');
+  pdf.setFontSize(8);
+  pdf.setTextColor(150, 150, 150);
+  pdf.text(`page ${current} / ${total}`, 10, pdfH - 5);
+}
+
+// ─── action page ──────────────────────────────────────────────────────────────
+
+/** Draws a dedicated action page with a single centred "respond to quote" button. */
+function drawActionPage(
   pdf: jsPDF,
-  startY: number,
   quoteId: number,
   reference: string,
   primaryColor: string,
-  accentColor: string,
   baseUrl: string,
-) {
-  const pw = pdf.internal.pageSize.getWidth();
-  const approveUrl  = `${baseUrl}/#/quote-action/${quoteId}?action=approve`;
-  const rejectUrl   = `${baseUrl}/#/quote-action/${quoteId}?action=reject`;
-  const changesUrl  = `${baseUrl}/#/quote-action/${quoteId}?action=changes`;
+): void {
+  const pw  = pdf.internal.pageSize.getWidth();
+  const ph  = pdf.internal.pageSize.getHeight();
+  const url = `${baseUrl}/#/quote-action/${quoteId}`;
 
-  // Background
-  pdf.setFillColor(248, 250, 252);
-  pdf.rect(0, startY, pw, 62, 'F');
+  // White background
+  pdf.setFillColor(255, 255, 255);
+  pdf.rect(0, 0, pw, ph, 'F');
 
-  // Top border
+  // Light grey border box centred on the page
+  const boxW = 150, boxH = 80;
+  const bx = (pw - boxW) / 2;
+  const by = ph / 2 - boxH / 2 - 10;
   pdf.setDrawColor(229, 231, 235);
-  pdf.line(0, startY, pw, startY);
+  pdf.setLineWidth(0.3);
+  pdf.roundedRect(bx, by, boxW, boxH, 4, 4, 'S');
 
   // Title
   pdf.setFont('helvetica', 'bold');
-  pdf.setFontSize(10);
+  pdf.setFontSize(11);
   pdf.setTextColor(55, 65, 81);
-  pdf.text(`Répondez à ce devis – Réf. ${reference}`, pw / 2, startY + 10, { align: 'center' });
+  pdf.text(`Répondez à ce devis – Réf. ${reference}`, pw / 2, by + 14, { align: 'center' });
 
+  // Subtitle
   pdf.setFont('helvetica', 'normal');
   pdf.setFontSize(9);
   pdf.setTextColor(107, 114, 128);
-  pdf.text('Cliquez sur un bouton pour approuver, rejeter ou demander des modifications :', pw / 2, startY + 18, { align: 'center' });
+  pdf.text(
+    'Cliquez sur le bouton pour approuver, rejeter ou demander des modifications :',
+    pw / 2, by + 24, { align: 'center' },
+  );
 
-  const btnW = 52, btnH = 14, gap = 10;
-  const totalW = 3 * btnW + 2 * gap;
-  const bx = (pw - totalW) / 2;
-  const by = startY + 24;
+  // Single centred button
+  const btnW = 80, btnH = 14;
+  const btnX = (pw - btnW) / 2;
+  const btnY = by + 32;
 
-  // Approve – green
-  pdf.setFillColor(34, 197, 94);
-  pdf.roundedRect(bx, by, btnW, btnH, 2, 2, 'F');
+  // Parse primary color (hex) → RGB
+  const hexToRgb = (h: string) => {
+    const clean = (h || '#1A365D').replace('#', '');
+    const big = parseInt(clean.length === 3 ? clean.split('').map(c => c + c).join('') : clean, 16);
+    return [(big >> 16) & 255, (big >> 8) & 255, big & 255] as [number, number, number];
+  };
+  const [r, g, b] = hexToRgb(primaryColor);
+  pdf.setFillColor(r, g, b);
+  pdf.roundedRect(btnX, btnY, btnW, btnH, 3, 3, 'F');
   pdf.setTextColor(255, 255, 255);
   pdf.setFont('helvetica', 'bold');
-  pdf.setFontSize(9);
-  pdf.text('✓  Approuver', bx + btnW / 2, by + 9, { align: 'center' });
-  pdf.link(bx, by, btnW, btnH, { url: approveUrl });
+  pdf.setFontSize(10);
+  pdf.text('Approuver, Rejeter ou Modifier', pw / 2, btnY + 9, { align: 'center' });
+  pdf.link(btnX, btnY, btnW, btnH, { url });
 
-  // Reject – red
-  pdf.setFillColor(239, 68, 68);
-  pdf.roundedRect(bx + btnW + gap, by, btnW, btnH, 2, 2, 'F');
-  pdf.text('✕  Rejeter', bx + btnW + gap + btnW / 2, by + 9, { align: 'center' });
-  pdf.link(bx + btnW + gap, by, btnW, btnH, { url: rejectUrl });
-
-  // Changes – blue
-  pdf.setFillColor(59, 130, 246);
-  pdf.roundedRect(bx + 2 * (btnW + gap), by, btnW, btnH, 2, 2, 'F');
-  pdf.text('⚙  Modifications', bx + 2 * (btnW + gap) + btnW / 2, by + 9, { align: 'center' });
-  pdf.link(bx + 2 * (btnW + gap), by, btnW, btnH, { url: changesUrl });
-
-  // URL
+  // URL hint
   pdf.setFont('helvetica', 'normal');
-  pdf.setFontSize(7.5);
+  pdf.setFontSize(8);
   pdf.setTextColor(156, 163, 175);
-  pdf.text(`Ou visitez : ${baseUrl}/#/quote-action/${quoteId}`, pw / 2, by + btnH + 8, { align: 'center' });
+  pdf.text(`Ou visitez : ${url}`, pw / 2, btnY + btnH + 10, { align: 'center' });
 }
 
 // ─── main generator ───────────────────────────────────────────────────────────
@@ -135,86 +205,162 @@ export interface GeneratePdfOptions {
 export async function generateQuotePdf(opts: GeneratePdfOptions): Promise<jsPDF> {
   const { data, settings, company, logoBase64 = '', actionBaseUrl = window.location.origin } = opts;
 
-  // Pre-convert images to base64 to avoid CORS issues in html2canvas
+  // ── 1. Pre-convert images ──────────────────────────────────────────────────
   const [safePhoto, safePlan] = await Promise.all([
     data.photo_url ? imageUrlToBase64(data.photo_url) : Promise.resolve(''),
     data.plan_url  ? imageUrlToBase64(data.plan_url)  : Promise.resolve(''),
   ]);
-
   const safeData: QuotePdfData = { ...data, photo_url: safePhoto, plan_url: safePlan };
 
-  // Build HTML from the selected template
-  const templateFn = getTemplate(settings.pdf_template || '1');
+  // ── 2. Build main HTML ─────────────────────────────────────────────────────
+  const templateFn  = getTemplate(settings.pdf_template || '1');
   const htmlContent = templateFn(safeData, settings, company, logoBase64);
+  const theme       = getTheme(settings);
 
-  // Mount in a hidden container (794 px wide – standard A4 screen width)
-  const container = document.createElement('div');
-  Object.assign(container.style, {
-    position:   'fixed',
-    left:       '-9999px',
-    top:        '0',
-    width:      '794px',
-    background: '#ffffff',
-    zIndex:     '-1',
-  });
-  container.innerHTML = htmlContent;
-  document.body.appendChild(container);
+  // ── 3. Mount, measure block positions, render canvas ──────────────────────
+  const mainDiv = mountHidden(htmlContent);
+  await waitForImages(mainDiv);
 
-  await waitForImages(container);
+  /** Returns offsetTop + offsetHeight for a data-pdf-block element, in DOM px. */
+  const measureBlock = (name: string): { top: number; bottom: number } | null => {
+    const el = mainDiv.querySelector(`[data-pdf-block="${name}"]`) as HTMLElement | null;
+    if (!el) return null;
+    return { top: el.offsetTop, bottom: el.offsetTop + el.offsetHeight };
+  };
 
-  // Capture full template as a canvas (scale=2 for quality)
-  const canvas = await html2canvas(container, {
-    scale:           2,
-    useCORS:         true,
-    allowTaint:      false,
-    backgroundColor: '#ffffff',
-    logging:         false,
-    width:           794,
-    windowWidth:     794,
-  });
+  const bA  = measureBlock('a');
+  const bB  = measureBlock('b');
+  const bC  = measureBlock('c');
+  const bD  = measureBlock('d');
+  const bEF = measureBlock('ef');
 
-  document.body.removeChild(container);
+  const mainCanvas = await renderToCanvas(mainDiv);
+  document.body.removeChild(mainDiv);
 
-  // Create jsPDF instance
-  const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const SCALE = 2;  // matches html2canvas scale option
+  const A4_W_PX = 794 * SCALE;   // = 1588 canvas pixels
+  const A4_H_PX = Math.floor((297 / 210) * A4_W_PX); // ≈ 2246 canvas pixels
+
+  // Convert DOM pixels → canvas pixels
+  const toPx = (domPx: number) => Math.round(domPx * SCALE);
+
+  // Footer (EF block) boundaries in canvas pixels
+  const footerTopPx    = bEF ? toPx(bEF.top)    : mainCanvas.height;
+  const footerBottomPx = bEF ? toPx(bEF.bottom)  : mainCanvas.height;
+  const footerHeightPx = footerBottomPx - footerTopPx;
+
+  // ── 4. Render continuation header canvas (if needed) ──────────────────────
+  const miniHtml  = buildContinuationHeader(safeData, settings, company, logoBase64, theme);
+  const miniDiv   = mountHidden(miniHtml);
+  const miniCanvas = await renderToCanvas(miniDiv);
+  document.body.removeChild(miniDiv);
+  const MINI_H_PX = miniCanvas.height;  // canvas pixels
+
+  // ── 5. Determine page breaks (block-aware) ─────────────────────────────────
+  // Middle blocks (B, C, D) whose boundaries we must not split across pages
+  const middleBlockBounds: { startPx: number; endPx: number }[] = [bB, bC, bD]
+    .filter((b): b is NonNullable<typeof b> => b !== null)
+    .map(b => ({ startPx: toPx(b.top), endPx: toPx(b.bottom) }));
+
+  /**
+   * Adjust a tentative page-break position to avoid splitting a block.
+   * If the break falls inside any block, move the break to the block's start.
+   */
+  const adjustBreak = (tentative: number): number => {
+    for (const b of middleBlockBounds) {
+      if (tentative > b.startPx && tentative < b.endPx) {
+        // The break lands mid-block → push break back to start of block
+        return b.startPx;
+      }
+    }
+    return tentative;
+  };
+
+  // "Content" = everything above the footer
+  const contentEndPx = footerTopPx;
+
+  // Determine where each content page ends (in mainCanvas pixel coordinates)
+  const pageEndPositions: number[] = [];  // canvas-pixel end of content for each page
+  let   pos         = 0;
+  let   isFirstPage = true;
+
+  while (pos < contentEndPx) {
+    const capacity  = isFirstPage ? A4_H_PX : (A4_H_PX - MINI_H_PX);
+    if (capacity <= 0) break; // should never happen, but guard against zero-capacity pages
+    const natural   = pos + capacity;
+    if (natural >= contentEndPx) break;  // remaining fits on one page
+
+    const adjusted = adjustBreak(natural);
+    // If adjusted <= pos (block is larger than a full page) → force break at natural to avoid infinite loop
+    const breakAt = adjusted > pos ? adjusted : natural;
+    pageEndPositions.push(breakAt);
+    pos = breakAt;
+    isFirstPage = false;
+  }
+  // All remaining content ends at contentEndPx (last content page)
+  pageEndPositions.push(contentEndPx);
+
+  // ── 6. Compute last-page footer placement ─────────────────────────────────
+  const numContentPages = pageEndPositions.length;
+  const lastPageIsFirst = numContentPages === 1;
+  const lastPageMiniH   = lastPageIsFirst ? 0 : MINI_H_PX;
+  const lastPageStart   = pageEndPositions.length > 1 ? pageEndPositions[pageEndPositions.length - 2] : 0;
+  const lastContentH    = contentEndPx - lastPageStart;
+  const lastAvailable   = A4_H_PX - lastPageMiniH;     // canvas pixels available on last content page
+
+  // Spacer before footer so it sits at the very bottom
+  const footerSpacerPx = Math.max(0, lastAvailable - lastContentH - footerHeightPx);
+
+  // Total logical pages: content pages + action page
+  const totalPages = numContentPages + 1;
+
+  // ── 7. Assemble PDF pages ─────────────────────────────────────────────────
+  const pdf  = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const pdfW = pdf.internal.pageSize.getWidth();   // 210 mm
   const pdfH = pdf.internal.pageSize.getHeight();  // 297 mm
 
-  // How many canvas pixels correspond to one A4 page height
-  const pageHeightPx = Math.floor((pdfH / pdfW) * canvas.width);
-  const totalPages   = Math.ceil(canvas.height / pageHeightPx);
+  /** mm per canvas pixel at A4 width */
+  const mmPerPx = pdfW / A4_W_PX;
 
-  let lastContentHeightMM = 0;
+  let currentStart = 0;
 
-  for (let i = 0; i < totalPages; i++) {
+  for (let i = 0; i < numContentPages; i++) {
     if (i > 0) pdf.addPage();
 
-    const srcY  = i * pageHeightPx;
-    const srcH  = Math.min(pageHeightPx, canvas.height - srcY);
+    let yMM = 0;
+    const isFirst = i === 0;
+    const isLast  = i === numContentPages - 1;
 
-    const pageCanvas = document.createElement('canvas');
-    pageCanvas.width  = canvas.width;
-    pageCanvas.height = srcH;
-    const ctx = pageCanvas.getContext('2d')!;
-    ctx.drawImage(canvas, 0, -srcY);
+    // Continuation header on pages 2+
+    if (!isFirst) {
+      yMM += addCanvasToPage(pdf, miniCanvas, 0, pdfW);
+    }
 
-    const imgData         = pageCanvas.toDataURL('image/jpeg', 0.92);
-    const contentHeightMM = (srcH / canvas.width) * pdfW;
+    // Content slice for this page
+    const sliceEnd = isLast ? contentEndPx : pageEndPositions[i];
+    const sliceH   = sliceEnd - currentStart;
+    if (sliceH > 0) {
+      const slice = sliceCanvas(mainCanvas, currentStart, sliceH);
+      yMM += addCanvasToPage(pdf, slice, yMM, pdfW);
+    }
 
-    pdf.addImage(imgData, 'JPEG', 0, 0, pdfW, contentHeightMM);
-    lastContentHeightMM = contentHeightMM;
+    // Footer (EF block) on the last content page, at the very bottom
+    if (isLast && footerHeightPx > 0) {
+      yMM += footerSpacerPx * mmPerPx;  // spacer
+      const footerSlice = sliceCanvas(mainCanvas, footerTopPx, footerHeightPx);
+      addCanvasToPage(pdf, footerSlice, yMM, pdfW);
+    }
+
+    // Page number
+    drawPageNumber(pdf, i + 1, totalPages);
+
+    currentStart = isLast ? contentEndPx : pageEndPositions[i];
   }
 
-  // Action bar (62 mm tall). Add on last page if enough room, else new page.
-  // Action bar height in mm — must match the height drawn by drawActionBar()
-  const ACTION_BAR_H = 62;
-  const remaining = pdfH - lastContentHeightMM;
-  if (remaining < ACTION_BAR_H + 5) {
-    pdf.addPage();
-    drawActionBar(pdf, 10, data.id, data.reference_number, settings.pdf_primary_color, settings.pdf_accent_color, actionBaseUrl);
-  } else {
-    drawActionBar(pdf, lastContentHeightMM + 4, data.id, data.reference_number, settings.pdf_primary_color, settings.pdf_accent_color, actionBaseUrl);
-  }
+  // ── 8. Action page ────────────────────────────────────────────────────────
+  pdf.addPage();
+  drawActionPage(pdf, data.id, data.reference_number, settings.pdf_primary_color || '#1A365D', actionBaseUrl);
+  drawPageNumber(pdf, totalPages, totalPages);
 
   return pdf;
 }
@@ -231,7 +377,6 @@ export async function downloadQuotePdf(opts: GeneratePdfOptions): Promise<void> 
 /** Return the PDF as a base64 string (for email attachment). */
 export async function getQuotePdfBase64(opts: GeneratePdfOptions): Promise<string> {
   const pdf = await generateQuotePdf(opts);
-  // jsPDF output returns the raw binary, encode manually to base64
   const raw = pdf.output('arraybuffer');
   let binary = '';
   const bytes = new Uint8Array(raw);
