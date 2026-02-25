@@ -1,10 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { CreditCard, TrendingUp } from 'lucide-react';
+import { CreditCard, TrendingUp, Upload } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 
@@ -44,6 +44,8 @@ export default function ProSettingsPage() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [saving, setSaving] = useState(false);
   const [buyingPack, setBuyingPack] = useState(false);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const logoInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -95,6 +97,26 @@ export default function ProSettingsPage() {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
     } finally {
       setBuyingPack(false);
+    }
+  };
+
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      setUploadingLogo(true);
+      const r = await fetch('/api/upload_sketch.php', { method: 'POST', body: formData, credentials: 'include' });
+      const j = await r.json();
+      if (!r.ok || j.error) throw new Error(j.error || 'Upload échoué');
+      await api.updateProProfile({ logo_url: j.url });
+      setProfile((prev) => prev ? { ...prev, logo_url: j.url } : prev);
+      toast({ title: 'Logo mis à jour' });
+    } catch (err: any) {
+      toast({ title: 'Erreur upload logo', description: err.message, variant: 'destructive' });
+    } finally {
+      setUploadingLogo(false);
     }
   };
 
@@ -166,6 +188,29 @@ export default function ProSettingsPage() {
                 step="0.5"
                 value={profile.sunbox_margin_percent}
                 onChange={(e) => setProfile({ ...profile, sunbox_margin_percent: parseFloat(e.target.value) || 0 })}
+              />
+            </div>
+            <div>
+              <Label>Logo de l'entreprise</Label>
+              {profile.logo_url && (
+                <img src={profile.logo_url} alt="Logo" className="h-12 mb-2 border rounded bg-white" />
+              )}
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => logoInputRef.current?.click()}
+                disabled={uploadingLogo}
+                className="gap-2"
+              >
+                <Upload className="h-4 w-4" />
+                {uploadingLogo ? 'Upload...' : 'Changer le logo'}
+              </Button>
+              <input
+                ref={logoInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                onChange={handleLogoUpload}
               />
             </div>
           </div>

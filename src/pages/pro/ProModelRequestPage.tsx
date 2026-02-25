@@ -1,11 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { Cpu, Plus } from 'lucide-react';
+import { Cpu, Plus, Upload } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 
@@ -43,6 +43,8 @@ export default function ProModelRequestPage() {
   const [form, setForm] = useState({ ...emptyForm });
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [uploadingSketch, setUploadingSketch] = useState(false);
+  const sketchInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -58,6 +60,25 @@ export default function ProModelRequestPage() {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSketchUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      setUploadingSketch(true);
+      const r = await fetch('/api/upload_sketch.php', { method: 'POST', body: formData, credentials: 'include' });
+      const j = await r.json();
+      if (!r.ok || j.error) throw new Error(j.error || 'Upload échoué');
+      setForm((prev) => ({ ...prev, sketch_url: j.url }));
+      toast({ title: 'Croquis uploadé' });
+    } catch (err: any) {
+      toast({ title: 'Erreur upload', description: err.message, variant: 'destructive' });
+    } finally {
+      setUploadingSketch(false);
     }
   };
 
@@ -155,12 +176,30 @@ export default function ProModelRequestPage() {
             </div>
 
             <div>
-              <Label>URL du croquis (JPG, optionnel)</Label>
-              <Input
-                type="url"
-                value={form.sketch_url}
-                onChange={(e) => setForm({ ...form, sketch_url: e.target.value })}
-                placeholder="https://..."
+              <Label>Croquis (JPG/PNG, optionnel)</Label>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => sketchInputRef.current?.click()}
+                  disabled={uploadingSketch}
+                  className="gap-2"
+                >
+                  <Upload className="h-4 w-4" />
+                  {uploadingSketch ? 'Upload...' : 'Choisir un fichier'}
+                </Button>
+                {form.sketch_url && (
+                  <a href={form.sketch_url} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline">
+                    Voir le croquis
+                  </a>
+                )}
+              </div>
+              <input
+                ref={sketchInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                onChange={handleSketchUpload}
               />
             </div>
 
