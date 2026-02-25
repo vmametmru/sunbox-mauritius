@@ -9,7 +9,7 @@ import {
   X,
   LogOut,
   CreditCard,
-  Coins,
+  DollarSign,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -143,7 +143,7 @@ export default function ProLayout() {
           {/* Credit rules */}
           <div className="p-4 border-t border-white/10">
             <p className="text-xs opacity-50 uppercase tracking-wider mb-2 flex items-center gap-1">
-              <Coins className="h-3 w-3" /> Tarifs crédits
+              <DollarSign className="h-3 w-3" /> Tarifs crédits
             </p>
             <div className="space-y-1">
               {creditRules.map((rule) => (
