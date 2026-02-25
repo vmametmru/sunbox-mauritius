@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import PublicLayout from '@/layouts/PublicLayout';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import {
@@ -14,6 +15,16 @@ import { Slider } from '@/components/ui/slider';
 import { useQuote } from '@/contexts/QuoteContext';
 import ConfigureModal from '@/components/ConfigureModal';
 import { useSiteSettings, calculateTTC } from '@/hooks/use-site-settings';
+
+interface ActiveDiscount {
+  id: number;
+  name: string;
+  discount_type: 'percentage' | 'fixed';
+  discount_value: number;
+  apply_to: 'base_price' | 'options' | 'both';
+  end_date: string;
+  model_ids?: number[];
+}
 
 interface Model {
   id: number;
@@ -32,10 +43,12 @@ interface Model {
   has_overflow?: boolean;
   image_url: string;
   plan_url?: string;
+  active_discounts?: ActiveDiscount[];
 }
 
 export default function ModelsPage() {
   const [models, setModels] = useState<Model[]>([]);
+  const [allActiveDiscounts, setAllActiveDiscounts] = useState<ActiveDiscount[]>([]);
   const [filterType, setFilterType] = useState<'all' | 'container' | 'pool'>('all');
   const [modalImage, setModalImage] = useState<string | null>(null);
   const { data: siteSettings } = useSiteSettings();
@@ -82,6 +95,10 @@ export default function ModelsPage() {
       setRangeLimits(r => ({ ...r, surface: [minSurface, maxSurface] }));
       setFilters(f => ({ ...f, surfaceMin: minSurface, surfaceMax: maxSurface }));
     });
+    // Fetch all active discounts as fallback (in case server hasn't embedded them in get_models)
+    api.getActiveDiscounts().then((data) => {
+      setAllActiveDiscounts(Array.isArray(data) ? data : []);
+    }).catch(() => {});
   }, []);
 
   // Recompute TTC price limits whenever models or vatRate changes
@@ -101,6 +118,54 @@ export default function ModelsPage() {
     };
     setSelectedModel(modelWithPrice);
     setShowConfigurator(true);
+  };
+
+  // Get active discounts for a model.
+  // Primary source: active_discounts embedded by PHP in get_models.
+  // Fallback: filter allActiveDiscounts fetched separately (uses Number() to handle string IDs).
+  const getModelDiscounts = (model: Model): ActiveDiscount[] => {
+    if (model.active_discounts !== undefined) {
+      return model.active_discounts;
+    }
+    const modelId = Number(model.id);
+    return allActiveDiscounts.filter(d => {
+      const ids = Array.isArray(d.model_ids) ? d.model_ids.map(Number) : [];
+      return ids.length === 0 || ids.includes(modelId);
+    });
+  };
+
+  // Returns the discounted TTC price when at least one discount affects the base price.
+  // Returns null if no price-affecting discount exists.
+  const getDiscountedBasePriceTTC = (model: Model, discounts: ActiveDiscount[]): number | null => {
+    const originalTTC = getDisplayPriceTTC(model);
+    let discountAmount = 0;
+    for (const d of discounts) {
+      if (d.apply_to === 'options') continue;
+      const value = Number(d.discount_value);
+      if (d.discount_type === 'percentage') {
+        discountAmount += originalTTC * value / 100;
+      } else {
+        discountAmount += value;
+      }
+    }
+    if (discountAmount <= 0) return null;
+    return Math.max(0, originalTTC - discountAmount);
+  };
+
+  // Format YYYY-MM-DD → DD/MM/YYYY
+  const formatDate = (d: string) => {
+    if (!d) return '';
+    const [y, m, day] = d.split('-');
+    return `${day}/${m}/${y}`;
+  };
+
+  // Return the soonest end_date among discounts (first to expire)
+  const getEarliestEndDate = (discounts: ActiveDiscount[]): string => {
+    if (discounts.length === 0) return '';
+    return discounts.reduce((earliest, d) =>
+      d.end_date < earliest ? d.end_date : earliest,
+      discounts[0].end_date
+    );
   };
 
   const filtered = models
@@ -176,7 +241,14 @@ export default function ModelsPage() {
 
         {/* Grille modèles */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filtered.map((model) => (
+          {filtered.map((model) => {
+            const modelDiscounts = getModelDiscounts(model);
+            const discountedPrice = model.type !== 'pool'
+              ? getDiscountedBasePriceTTC(model, modelDiscounts)
+              : null;
+            const originalPriceTTC = getDisplayPriceTTC(model);
+            const earliestEndDate = getEarliestEndDate(modelDiscounts);
+            return (
             <div key={model.id} className="border rounded-lg overflow-hidden shadow-sm bg-white">
               <div className="relative">
                 <img
@@ -193,6 +265,15 @@ export default function ModelsPage() {
                     onClick={() => setModalImage(model.plan_url!)}
                   />
                 )}
+                {modelDiscounts.length > 0 && (
+                  <div className="absolute top-2 right-2 flex flex-col gap-1 items-end">
+                    {modelDiscounts.map(d => (
+                      <Badge key={d.id} className="bg-green-600 text-white text-xs px-2 py-0.5">
+                        🏷 {d.discount_type === 'percentage' ? `−${d.discount_value}%` : `−Rs ${Number(d.discount_value).toLocaleString()}`}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="p-4 space-y-1">
@@ -200,9 +281,34 @@ export default function ModelsPage() {
                 <p className="text-gray-600 text-sm">
                   {model.type === 'pool' ? 'Piscine en blocs BAB et béton armé' : `${model.surface_m2} m²`}
                 </p>
-                <p className="text-orange-600 font-semibold">
-                  {model.type === 'pool' ? 'Cliquez sur configurer' : `A partir de ${Number(getDisplayPriceTTC(model)).toLocaleString(undefined, { maximumFractionDigits: 0 })} Rs TTC`}
-                </p>
+
+                {/* Discount validity line — shown above the price */}
+                {modelDiscounts.length > 0 && (
+                  <p className="text-green-700 text-sm font-medium">
+                    🏷 Remise valable jusqu'au : {formatDate(earliestEndDate)}
+                  </p>
+                )}
+
+                {/* Price line */}
+                {model.type === 'pool' ? (
+                  <p className="text-orange-600 font-semibold">Cliquez sur configurer</p>
+                ) : discountedPrice !== null ? (
+                  <>
+                    <p className="text-gray-900 font-semibold">
+                      A partir de{' '}
+                      <span className="line-through text-gray-400">
+                        {Number(originalPriceTTC).toLocaleString(undefined, { maximumFractionDigits: 0 })} Rs TTC
+                      </span>
+                    </p>
+                    <p className="text-green-700 font-semibold">
+                      {Number(discountedPrice).toLocaleString(undefined, { maximumFractionDigits: 0 })} Rs TTC
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-orange-600 font-semibold">
+                    A partir de {Number(originalPriceTTC).toLocaleString(undefined, { maximumFractionDigits: 0 })} Rs TTC
+                  </p>
+                )}
 
                 <div className="pt-3">
                   <Button variant="outline" onClick={() => openConfigurator(model)}>
@@ -211,7 +317,8 @@ export default function ModelsPage() {
                 </div>
               </div>
             </div>
-          ))}
+          );
+          })}
         </div>
       </div>
 

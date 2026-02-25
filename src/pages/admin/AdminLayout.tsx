@@ -24,6 +24,7 @@ import {
   ChevronDown,
   ChevronRight,
   LogOut,
+  Tag,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -73,6 +74,7 @@ const navItems: NavItem[] = [
     key: 'parametres',
     children: [
       { icon: Package, label: 'Modèles', path: '/admin/models' },
+      { icon: Tag, label: 'Remises', path: '/admin/discounts' },
       { icon: ImageIcon, label: 'Photos', path: '/admin/media' },
       { icon: Calculator, label: 'BOQ', path: '/admin/boq' },
       { icon: DollarSign, label: 'Prix Piscine', path: '/admin/pool-prices' },
@@ -91,7 +93,7 @@ const navItems: NavItem[] = [
 const groupPaths: Record<string, string[]> = {
   commerce: ['/admin/quotes'],
   contacts: ['/admin/contacts', '/admin/suppliers'],
-  parametres: ['/admin/models', '/admin/media', '/admin/boq', '/admin/pool-prices', '/admin/pool-variables', '/admin/pool-template', '/admin/email', '/admin/payments', '/admin/site'],
+  parametres: ['/admin/models', '/admin/discounts', '/admin/media', '/admin/boq', '/admin/pool-prices', '/admin/pool-variables', '/admin/pool-template', '/admin/email', '/admin/payments', '/admin/site'],
 };
 
 export default function AdminLayout() {
