@@ -294,8 +294,11 @@ export default function ModelsPage() {
                   <p className="text-orange-600 font-semibold">Cliquez sur configurer</p>
                 ) : discountedPrice !== null ? (
                   <>
-                    <p className="text-gray-400 font-semibold line-through">
-                      A partir de {Number(originalPriceTTC).toLocaleString(undefined, { maximumFractionDigits: 0 })} Rs TTC
+                    <p className="text-gray-900 font-semibold">
+                      A partir de{' '}
+                      <span className="line-through text-gray-400">
+                        {Number(originalPriceTTC).toLocaleString(undefined, { maximumFractionDigits: 0 })} Rs TTC
+                      </span>
                     </p>
                     <p className="text-green-700 font-semibold">
                       {Number(discountedPrice).toLocaleString(undefined, { maximumFractionDigits: 0 })} Rs TTC
