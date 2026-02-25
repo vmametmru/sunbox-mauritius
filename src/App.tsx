@@ -41,6 +41,16 @@ import PoolBOQPriceListPage from "./pages/admin/PoolBOQPriceListPage";
 import PoolBOQTemplatePage from "./pages/admin/PoolBOQTemplatePage";
 import DevIdeasPage from "./pages/admin/DevIdeasPage";
 import DiscountsPage from "./pages/admin/DiscountsPage";
+import UsersPage from "./pages/admin/UsersPage";
+
+// Pro Pages
+import ProLoginPage from "./pages/pro/ProLoginPage";
+import ProLayout from "./pages/pro/ProLayout";
+import ProDashboardPage from "./pages/pro/ProDashboardPage";
+import ProQuotesPage from "./pages/pro/ProQuotesPage";
+import ProSettingsPage from "./pages/pro/ProSettingsPage";
+import ProModelRequestPage from "./pages/pro/ProModelRequestPage";
+import RequirePro from "./components/RequirePro";
 
 const queryClient = new QueryClient();
 
@@ -85,6 +95,18 @@ const App = () => (
                   <Route path="site" element={<SiteSettingsPage />} />
                   <Route path="dev-ideas" element={<DevIdeasPage />} />
                   <Route path="discounts" element={<DiscountsPage />} />
+                  <Route path="users" element={<UsersPage />} />
+                </Route>
+              </Route>
+
+              {/* Professional Portal */}
+              <Route path="/pro-login" element={<ProLoginPage />} />
+              <Route element={<RequirePro />}>
+                <Route path="/pro" element={<ProLayout />}>
+                  <Route index element={<ProDashboardPage />} />
+                  <Route path="quotes" element={<ProQuotesPage />} />
+                  <Route path="model-request" element={<ProModelRequestPage />} />
+                  <Route path="settings" element={<ProSettingsPage />} />
                 </Route>
               </Route>
 

@@ -2572,6 +2572,297 @@ try {
             break;
         }
 
+        // =====================================================================
+        // PROFESSIONAL USERS (admin management)
+        // =====================================================================
+
+        case 'get_pro_users': {
+            $stmt = $db->query("
+                SELECT u.id, u.name, u.email, u.role,
+                       pp.company_name, pp.address, pp.vat_number, pp.brn_number,
+                       pp.phone, pp.logo_url, pp.sunbox_margin_percent, pp.credits, pp.is_active
+                FROM users u
+                LEFT JOIN professional_profiles pp ON pp.user_id = u.id
+                WHERE u.role = 'professional'
+                ORDER BY u.name ASC
+            ");
+            ok($stmt->fetchAll());
+            break;
+        }
+
+        case 'create_pro_user': {
+            validateRequired($body, ['name', 'email', 'password', 'company_name']);
+            $passwordHash = password_hash((string)$body['password'], PASSWORD_BCRYPT);
+            $db->beginTransaction();
+            try {
+                $stmt = $db->prepare("
+                    INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, 'professional')
+                ");
+                $stmt->execute([$body['name'], strtolower(trim($body['email'])), $passwordHash]);
+                $userId = (int)$db->lastInsertId();
+
+                $stmt = $db->prepare("
+                    INSERT INTO professional_profiles
+                        (user_id, company_name, address, vat_number, brn_number, phone, is_active)
+                    VALUES (?, ?, ?, ?, ?, ?, 1)
+                ");
+                $stmt->execute([
+                    $userId,
+                    $body['company_name'],
+                    $body['address'] ?? '',
+                    $body['vat_number'] ?? '',
+                    $body['brn_number'] ?? '',
+                    $body['phone'] ?? '',
+                ]);
+                $db->commit();
+                ok(['id' => $userId]);
+            } catch (Throwable $e) {
+                $db->rollBack();
+                throw $e;
+            }
+            break;
+        }
+
+        case 'update_pro_user': {
+            validateRequired($body, ['id']);
+            $id = (int)$body['id'];
+
+            $userSets = [];
+            $userParams = [];
+            if (array_key_exists('name', $body)) { $userSets[] = 'name = ?'; $userParams[] = $body['name']; }
+            if (array_key_exists('email', $body)) { $userSets[] = 'email = ?'; $userParams[] = strtolower(trim($body['email'])); }
+            if (!empty($body['password'])) { $userSets[] = 'password_hash = ?'; $userParams[] = password_hash((string)$body['password'], PASSWORD_BCRYPT); }
+            if (!empty($userSets)) {
+                $userParams[] = $id;
+                $db->prepare("UPDATE users SET " . implode(', ', $userSets) . " WHERE id = ?")->execute($userParams);
+            }
+
+            $profSets = [];
+            $profParams = [];
+            if (array_key_exists('company_name', $body)) { $profSets[] = 'company_name = ?'; $profParams[] = $body['company_name']; }
+            if (array_key_exists('address', $body)) { $profSets[] = 'address = ?'; $profParams[] = $body['address']; }
+            if (array_key_exists('vat_number', $body)) { $profSets[] = 'vat_number = ?'; $profParams[] = $body['vat_number']; }
+            if (array_key_exists('brn_number', $body)) { $profSets[] = 'brn_number = ?'; $profParams[] = $body['brn_number']; }
+            if (array_key_exists('phone', $body)) { $profSets[] = 'phone = ?'; $profParams[] = $body['phone']; }
+            if (array_key_exists('sunbox_margin_percent', $body)) { $profSets[] = 'sunbox_margin_percent = ?'; $profParams[] = (float)$body['sunbox_margin_percent']; }
+            if (array_key_exists('is_active', $body)) { $profSets[] = 'is_active = ?'; $profParams[] = (int)(bool)$body['is_active']; }
+            if (!empty($profSets)) {
+                $profSets[] = 'updated_at = NOW()';
+                $profParams[] = $id;
+                $db->prepare("UPDATE professional_profiles SET " . implode(', ', $profSets) . " WHERE user_id = ?")->execute($profParams);
+            }
+            ok();
+            break;
+        }
+
+        case 'delete_pro_user': {
+            validateRequired($body, ['id']);
+            $db->prepare("DELETE FROM users WHERE id = ? AND role = 'professional'")->execute([(int)$body['id']]);
+            ok();
+            break;
+        }
+
+        case 'get_pro_profile': {
+            startSession();
+            $userId = (int)($_SESSION['pro_user_id'] ?? $body['user_id'] ?? 0);
+            if (!$userId) { fail('Non authentifié', 401); }
+            $stmt = $db->prepare("
+                SELECT u.id, u.name, u.email,
+                       pp.company_name, pp.address, pp.vat_number, pp.brn_number,
+                       pp.phone, pp.logo_url, pp.sunbox_margin_percent, pp.credits, pp.is_active
+                FROM users u
+                LEFT JOIN professional_profiles pp ON pp.user_id = u.id
+                WHERE u.id = ?
+                LIMIT 1
+            ");
+            $stmt->execute([$userId]);
+            $profile = $stmt->fetch();
+            if (!$profile) { fail('Profil introuvable', 404); }
+            $profile['sunbox_margin_percent'] = (float)$profile['sunbox_margin_percent'];
+            $profile['credits'] = (float)$profile['credits'];
+            ok($profile);
+            break;
+        }
+
+        case 'update_pro_profile': {
+            startSession();
+            $userId = (int)($_SESSION['pro_user_id'] ?? 0);
+            if (!$userId) { fail('Non authentifié', 401); }
+            $sets = [];
+            $params = [];
+            if (array_key_exists('company_name', $body)) { $sets[] = 'company_name = ?'; $params[] = $body['company_name']; }
+            if (array_key_exists('address', $body)) { $sets[] = 'address = ?'; $params[] = $body['address']; }
+            if (array_key_exists('vat_number', $body)) { $sets[] = 'vat_number = ?'; $params[] = $body['vat_number']; }
+            if (array_key_exists('brn_number', $body)) { $sets[] = 'brn_number = ?'; $params[] = $body['brn_number']; }
+            if (array_key_exists('phone', $body)) { $sets[] = 'phone = ?'; $params[] = $body['phone']; }
+            if (array_key_exists('sunbox_margin_percent', $body)) { $sets[] = 'sunbox_margin_percent = ?'; $params[] = (float)$body['sunbox_margin_percent']; }
+            if (array_key_exists('logo_url', $body)) { $sets[] = 'logo_url = ?'; $params[] = $body['logo_url']; }
+            if (!empty($sets)) {
+                $sets[] = 'updated_at = NOW()';
+                $params[] = $userId;
+                $db->prepare("UPDATE professional_profiles SET " . implode(', ', $sets) . " WHERE user_id = ?")->execute($params);
+            }
+            ok();
+            break;
+        }
+
+        case 'buy_pro_pack': {
+            validateRequired($body, ['user_id']);
+            $userId = (int)$body['user_id'];
+            $packAmount = 10000;
+            $db->beginTransaction();
+            try {
+                // Add credits
+                $db->prepare("UPDATE professional_profiles SET credits = credits + ?, updated_at = NOW() WHERE user_id = ?")->execute([$packAmount, $userId]);
+                // Get new balance
+                $balance = (float)$db->prepare("SELECT credits FROM professional_profiles WHERE user_id = ?")->execute([$userId]) ? $db->query("SELECT credits FROM professional_profiles WHERE user_id = $userId")->fetchColumn() : 0;
+                $stmt = $db->prepare("SELECT credits FROM professional_profiles WHERE user_id = ?");
+                $stmt->execute([$userId]);
+                $balance = (float)$stmt->fetchColumn();
+                // Record pack
+                $db->prepare("INSERT INTO professional_packs (user_id, amount) VALUES (?, ?)")->execute([$userId, $packAmount]);
+                // Record transaction
+                $db->prepare("
+                    INSERT INTO professional_credit_transactions (user_id, amount, reason, balance_after)
+                    VALUES (?, ?, 'pack_purchase', ?)
+                ")->execute([$userId, $packAmount, $balance]);
+                $db->commit();
+                ok(['credits' => $balance]);
+            } catch (Throwable $e) {
+                $db->rollBack();
+                throw $e;
+            }
+            break;
+        }
+
+        case 'get_pro_credits': {
+            startSession();
+            $userId = (int)($_SESSION['pro_user_id'] ?? $body['user_id'] ?? 0);
+            if (!$userId) { fail('Non authentifié', 401); }
+            $stmt = $db->prepare("SELECT credits FROM professional_profiles WHERE user_id = ?");
+            $stmt->execute([$userId]);
+            $credits = (float)($stmt->fetchColumn() ?? 0);
+
+            $txStmt = $db->prepare("
+                SELECT * FROM professional_credit_transactions
+                WHERE user_id = ?
+                ORDER BY created_at DESC
+                LIMIT 20
+            ");
+            $txStmt->execute([$userId]);
+            $transactions = $txStmt->fetchAll();
+            ok(['credits' => $credits, 'transactions' => $transactions]);
+            break;
+        }
+
+        case 'deduct_pro_credits': {
+            startSession();
+            $userId = (int)($_SESSION['pro_user_id'] ?? $body['user_id'] ?? 0);
+            if (!$userId) { fail('Non authentifié', 401); }
+            validateRequired($body, ['amount', 'reason']);
+            $amount = (float)$body['amount'];
+            $reason = (string)$body['reason'];
+            $quoteId = isset($body['quote_id']) ? (int)$body['quote_id'] : null;
+
+            $db->beginTransaction();
+            try {
+                $stmt = $db->prepare("SELECT credits FROM professional_profiles WHERE user_id = ? FOR UPDATE");
+                $stmt->execute([$userId]);
+                $current = (float)$stmt->fetchColumn();
+                if ($current < $amount) { $db->rollBack(); fail('Crédits insuffisants', 402); }
+                $newBalance = $current - $amount;
+                $db->prepare("UPDATE professional_profiles SET credits = ?, updated_at = NOW() WHERE user_id = ?")->execute([$newBalance, $userId]);
+                $db->prepare("
+                    INSERT INTO professional_credit_transactions (user_id, amount, reason, quote_id, balance_after)
+                    VALUES (?, ?, ?, ?, ?)
+                ")->execute([$userId, -$amount, $reason, $quoteId, $newBalance]);
+                $db->commit();
+                ok(['credits' => $newBalance]);
+            } catch (Throwable $e) {
+                $db->rollBack();
+                throw $e;
+            }
+            break;
+        }
+
+        case 'get_model_requests': {
+            startSession();
+            if (!empty($body['user_id'])) {
+                $userId = (int)$body['user_id'];
+            } else {
+                $userId = (int)($_SESSION['pro_user_id'] ?? 0);
+            }
+            if ($userId) {
+                $stmt = $db->prepare("SELECT * FROM professional_model_requests WHERE user_id = ? ORDER BY created_at DESC");
+                $stmt->execute([$userId]);
+            } else {
+                $stmt = $db->query("SELECT r.*, u.name AS user_name, pp.company_name FROM professional_model_requests r LEFT JOIN users u ON u.id = r.user_id LEFT JOIN professional_profiles pp ON pp.user_id = r.user_id ORDER BY r.created_at DESC");
+            }
+            ok($stmt->fetchAll());
+            break;
+        }
+
+        case 'create_model_request': {
+            startSession();
+            $userId = (int)($_SESSION['pro_user_id'] ?? 0);
+            if (!$userId) { fail('Non authentifié', 401); }
+            validateRequired($body, ['description']);
+            $cost = 3000;
+            $db->beginTransaction();
+            try {
+                // Check credits
+                $stmt = $db->prepare("SELECT credits FROM professional_profiles WHERE user_id = ? FOR UPDATE");
+                $stmt->execute([$userId]);
+                $credits = (float)$stmt->fetchColumn();
+                if ($credits < $cost) { $db->rollBack(); fail('Crédits insuffisants (3000 Rs requis)', 402); }
+                // Deduct
+                $newBalance = $credits - $cost;
+                $db->prepare("UPDATE professional_profiles SET credits = ?, updated_at = NOW() WHERE user_id = ?")->execute([$newBalance, $userId]);
+                // Create request
+                $stmt = $db->prepare("
+                    INSERT INTO professional_model_requests
+                        (user_id, description, container_20ft_count, container_40ft_count, bedrooms, bathrooms, sketch_url)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                ");
+                $stmt->execute([
+                    $userId,
+                    $body['description'],
+                    (int)($body['container_20ft_count'] ?? 0),
+                    (int)($body['container_40ft_count'] ?? 0),
+                    (int)($body['bedrooms'] ?? 0),
+                    (int)($body['bathrooms'] ?? 0),
+                    $body['sketch_url'] ?? null,
+                ]);
+                $reqId = (int)$db->lastInsertId();
+                // Record transaction
+                $db->prepare("
+                    INSERT INTO professional_credit_transactions (user_id, amount, reason, balance_after)
+                    VALUES (?, ?, 'model_request', ?)
+                ")->execute([$userId, -$cost, $newBalance]);
+                $db->commit();
+                ok(['id' => $reqId, 'credits' => $newBalance]);
+            } catch (Throwable $e) {
+                $db->rollBack();
+                throw $e;
+            }
+            break;
+        }
+
+        case 'update_model_request': {
+            validateRequired($body, ['id']);
+            $sets = [];
+            $params = [];
+            if (array_key_exists('status', $body)) { $sets[] = 'status = ?'; $params[] = $body['status']; }
+            if (array_key_exists('admin_notes', $body)) { $sets[] = 'admin_notes = ?'; $params[] = $body['admin_notes']; }
+            if (!empty($sets)) {
+                $sets[] = 'updated_at = NOW()';
+                $params[] = (int)$body['id'];
+                $db->prepare("UPDATE professional_model_requests SET " . implode(', ', $sets) . " WHERE id = ?")->execute($params);
+            }
+            ok();
+            break;
+        }
+
         default:
             fail('Invalid action', 400);
     }

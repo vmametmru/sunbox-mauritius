@@ -842,6 +842,63 @@ export const api = {
   getActiveDiscounts(modelId?: number) {
     return this.query('get_active_discounts', modelId ? { model_id: modelId } : {});
   },
+
+  /* =====================================================
+     PROFESSIONAL USERS (admin)
+  ===================================================== */
+  getProUsers() {
+    return this.query('get_pro_users');
+  },
+
+  createProUser(user: { name: string; email: string; password: string; company_name: string; address?: string; vat_number?: string; brn_number?: string; phone?: string }) {
+    return this.query('create_pro_user', user);
+  },
+
+  updateProUser(user: { id: number; name?: string; email?: string; password?: string; is_active?: boolean; company_name?: string; address?: string; vat_number?: string; brn_number?: string; phone?: string; sunbox_margin_percent?: number }) {
+    return this.query('update_pro_user', user);
+  },
+
+  deleteProUser(id: number) {
+    return this.query('delete_pro_user', { id });
+  },
+
+  buyProPack(userId: number) {
+    return this.query('buy_pro_pack', { user_id: userId });
+  },
+
+  /* =====================================================
+     PROFESSIONAL MODEL REQUESTS
+  ===================================================== */
+  getModelRequests(userId?: number) {
+    return this.query('get_model_requests', userId ? { user_id: userId } : {});
+  },
+
+  createModelRequest(req: { description: string; container_20ft_count: number; container_40ft_count: number; bedrooms: number; bathrooms: number; sketch_url?: string }) {
+    return this.query('create_model_request', req);
+  },
+
+  updateModelRequest(req: { id: number; status: string; admin_notes?: string }) {
+    return this.query('update_model_request', req);
+  },
+
+  /* =====================================================
+     PRO PROFILE (self)
+  ===================================================== */
+  getProProfile() {
+    return this.query('get_pro_profile', {});
+  },
+
+  updateProProfile(profile: { company_name?: string; address?: string; vat_number?: string; brn_number?: string; phone?: string; sunbox_margin_percent?: number; logo_url?: string }) {
+    return this.query('update_pro_profile', profile);
+  },
+
+  getProCredits() {
+    return this.query('get_pro_credits', {});
+  },
+
+  deductProCredits(amount: number, reason: string, quoteId?: number) {
+    return this.query('deduct_pro_credits', { amount, reason, ...(quoteId ? { quote_id: quoteId } : {}) });
+  },
 };
 
 export default api;
