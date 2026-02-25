@@ -798,6 +798,46 @@ export const api = {
   getDefaultPoolBOQTemplateFromDB() {
     return this.query('get_default_pool_boq_template');
   },
+
+  /* =====================================================
+     DISCOUNTS
+  ===================================================== */
+  getDiscounts() {
+    return this.query('get_discounts');
+  },
+
+  createDiscount(discount: {
+    name: string;
+    description?: string;
+    discount_type: 'percentage' | 'fixed';
+    discount_value: number;
+    apply_to: 'base_price' | 'options' | 'both';
+    start_date: string;
+    end_date: string;
+    is_active?: boolean;
+    model_ids?: number[];
+  }) {
+    return this.query('create_discount', discount);
+  },
+
+  updateDiscount(discount: {
+    id: number;
+    name?: string;
+    description?: string;
+    discount_type?: 'percentage' | 'fixed';
+    discount_value?: number;
+    apply_to?: 'base_price' | 'options' | 'both';
+    start_date?: string;
+    end_date?: string;
+    is_active?: boolean;
+    model_ids?: number[];
+  }) {
+    return this.query('update_discount', discount);
+  },
+
+  deleteDiscount(id: number) {
+    return this.query('delete_discount', { id });
+  },
 };
 
 export default api;

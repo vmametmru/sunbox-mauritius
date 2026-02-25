@@ -2427,6 +2427,90 @@ try {
             break;
         }
 
+        // === DISCOUNTS
+        case 'get_discounts': {
+            $stmt = $db->prepare("SELECT * FROM discounts ORDER BY start_date DESC, name ASC");
+            $stmt->execute();
+            $discounts = $stmt->fetchAll();
+            foreach ($discounts as &$d) {
+                // Fetch associated model ids
+                $mStmt = $db->prepare("SELECT model_id FROM discount_models WHERE discount_id = ?");
+                $mStmt->execute([$d['id']]);
+                $d['model_ids'] = array_column($mStmt->fetchAll(), 'model_id');
+                $d['discount_value'] = (float)$d['discount_value'];
+                $d['is_active'] = (bool)$d['is_active'];
+            }
+            ok($discounts);
+            break;
+        }
+
+        case 'create_discount': {
+            validateRequired($body, ['name', 'discount_type', 'discount_value', 'apply_to', 'start_date', 'end_date']);
+            $stmt = $db->prepare("
+                INSERT INTO discounts (name, description, discount_type, discount_value, apply_to, start_date, end_date, is_active)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ");
+            $stmt->execute([
+                $body['name'],
+                $body['description'] ?? null,
+                $body['discount_type'],
+                (float)$body['discount_value'],
+                $body['apply_to'],
+                $body['start_date'],
+                $body['end_date'],
+                isset($body['is_active']) ? (int)(bool)$body['is_active'] : 1,
+            ]);
+            $discountId = (int)$db->lastInsertId();
+            // Associate models
+            if (!empty($body['model_ids']) && is_array($body['model_ids'])) {
+                $mStmt = $db->prepare("INSERT IGNORE INTO discount_models (discount_id, model_id) VALUES (?, ?)");
+                foreach ($body['model_ids'] as $modelId) {
+                    $mStmt->execute([$discountId, (int)$modelId]);
+                }
+            }
+            ok(['id' => $discountId]);
+            break;
+        }
+
+        case 'update_discount': {
+            validateRequired($body, ['id']);
+            $id = (int)$body['id'];
+            $sets = [];
+            $params = [];
+            if (array_key_exists('name', $body)) { $sets[] = 'name = ?'; $params[] = $body['name']; }
+            if (array_key_exists('description', $body)) { $sets[] = 'description = ?'; $params[] = $body['description']; }
+            if (array_key_exists('discount_type', $body)) { $sets[] = 'discount_type = ?'; $params[] = $body['discount_type']; }
+            if (array_key_exists('discount_value', $body)) { $sets[] = 'discount_value = ?'; $params[] = (float)$body['discount_value']; }
+            if (array_key_exists('apply_to', $body)) { $sets[] = 'apply_to = ?'; $params[] = $body['apply_to']; }
+            if (array_key_exists('start_date', $body)) { $sets[] = 'start_date = ?'; $params[] = $body['start_date']; }
+            if (array_key_exists('end_date', $body)) { $sets[] = 'end_date = ?'; $params[] = $body['end_date']; }
+            if (array_key_exists('is_active', $body)) { $sets[] = 'is_active = ?'; $params[] = (int)(bool)$body['is_active']; }
+            if (!empty($sets)) {
+                $sets[] = 'updated_at = NOW()';
+                $params[] = $id;
+                $sql = "UPDATE discounts SET " . implode(', ', $sets) . " WHERE id = ?";
+                $stmt = $db->prepare($sql);
+                $stmt->execute($params);
+            }
+            // Sync model associations
+            if (array_key_exists('model_ids', $body) && is_array($body['model_ids'])) {
+                $db->prepare("DELETE FROM discount_models WHERE discount_id = ?")->execute([$id]);
+                $mStmt = $db->prepare("INSERT IGNORE INTO discount_models (discount_id, model_id) VALUES (?, ?)");
+                foreach ($body['model_ids'] as $modelId) {
+                    $mStmt->execute([$id, (int)$modelId]);
+                }
+            }
+            ok();
+            break;
+        }
+
+        case 'delete_discount': {
+            validateRequired($body, ['id']);
+            $db->prepare("DELETE FROM discounts WHERE id = ?")->execute([(int)$body['id']]);
+            ok();
+            break;
+        }
+
         default:
             fail('Invalid action', 400);
     }
