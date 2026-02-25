@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Plus,
   Edit,
@@ -13,6 +13,7 @@ import {
   RefreshCw,
   Globe,
   KeyRound,
+  Upload,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -47,6 +48,7 @@ interface ProUser {
   is_active?: boolean;
   domain?: string;
   api_token?: string;
+  logo_url?: string;
 }
 
 const emptyUser: ProUser = {
@@ -60,6 +62,7 @@ const emptyUser: ProUser = {
   phone: '',
   sunbox_margin_percent: 0,
   domain: '',
+  logo_url: '',
   is_active: true,
 };
 
@@ -75,6 +78,8 @@ export default function UsersPage() {
   const [saving, setSaving] = useState(false);
   const [buyingPack, setBuyingPack] = useState<number | null>(null);
   const [regenerating, setRegenerating] = useState<number | null>(null);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const logoInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   const API_BASE = 'https://sunbox-mauritius.com/api';
@@ -181,6 +186,26 @@ export default function UsersPage() {
     });
   };
 
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !editingUser) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      setUploadingLogo(true);
+      const r = await fetch('/api/upload_sketch.php', { method: 'POST', body: formData, credentials: 'include' });
+      const j = await r.json();
+      if (!r.ok || j.error) throw new Error(j.error || 'Upload échoué');
+      setEditingUser((prev) => prev ? { ...prev, logo_url: j.url } : prev);
+      toast({ title: 'Logo uploadé' });
+    } catch (err: any) {
+      toast({ title: 'Erreur upload logo', description: err.message, variant: 'destructive' });
+    } finally {
+      setUploadingLogo(false);
+      if (logoInputRef.current) logoInputRef.current.value = '';
+    }
+  };
+
   const downloadZip = (userId: number) => {
     window.open(`${API_BASE}/download_pro_zip.php?user_id=${userId}`, '_blank');
   };
@@ -236,9 +261,17 @@ export default function UsersPage() {
                 {/* Header */}
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                      <Building2 className="h-5 w-5 text-blue-600" />
-                    </div>
+                    {user.logo_url ? (
+                      <img
+                        src={user.logo_url}
+                        alt="Logo"
+                        className="w-10 h-10 object-contain rounded-lg border bg-white flex-shrink-0"
+                      />
+                    ) : (
+                      <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
+                        <Building2 className="h-5 w-5 text-blue-600" />
+                      </div>
+                    )}
                     <div>
                       <h3 className="font-bold">{user.name}</h3>
                       <p className="text-xs text-gray-500">{user.email}</p>
@@ -403,6 +436,49 @@ export default function UsersPage() {
                 <p className="text-xs text-gray-500 mt-1">
                   Domaine sur lequel le site pro sera déployé. Utilisé pour valider les requêtes API.
                 </p>
+              </div>
+
+              <div>
+                <Label>Logo de l'entreprise</Label>
+                <div className="flex items-center gap-3 mt-1">
+                  {editingUser.logo_url && (
+                    <img
+                      src={editingUser.logo_url}
+                      alt="Logo actuel"
+                      className="h-14 max-w-[120px] object-contain border rounded bg-white p-1"
+                    />
+                  )}
+                  <div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => logoInputRef.current?.click()}
+                      disabled={uploadingLogo}
+                      className="gap-2"
+                    >
+                      <Upload className="h-4 w-4" />
+                      {uploadingLogo ? 'Upload...' : editingUser.logo_url ? 'Changer le logo' : 'Choisir un logo'}
+                    </Button>
+                    {editingUser.logo_url && (
+                      <button
+                        type="button"
+                        onClick={() => setEditingUser({ ...editingUser, logo_url: '' })}
+                        className="ml-2 text-xs text-red-500 hover:underline"
+                      >
+                        Supprimer
+                      </button>
+                    )}
+                    <p className="text-xs text-gray-400 mt-1">JPG, PNG ou WEBP</p>
+                  </div>
+                </div>
+                <input
+                  ref={logoInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={handleLogoUpload}
+                />
               </div>
 
               <div>

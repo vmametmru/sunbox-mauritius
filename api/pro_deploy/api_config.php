@@ -151,9 +151,9 @@ function fetchSunboxModels(): array
         'ssl' => ['verify_peer' => true, 'verify_peer_name' => true],
     ];
     $raw = @file_get_contents($url, false, stream_context_create($opts));
-    if ($raw === false) return ['models' => [], 'catalog_mode' => true, 'credits' => 0];
+    if ($raw === false) return ['models' => [], 'catalog_mode' => true, 'credits' => 0, 'logo_url' => '', 'company_name' => ''];
     $json = json_decode($raw, true);
-    if (!$json || !$json['success']) return ['models' => [], 'catalog_mode' => true, 'credits' => 0];
+    if (!$json || !$json['success']) return ['models' => [], 'catalog_mode' => true, 'credits' => 0, 'logo_url' => '', 'company_name' => ''];
     return $json['data'];
 }
 

@@ -854,7 +854,7 @@ export const api = {
     return this.query('create_pro_user', user);
   },
 
-  updateProUser(user: { id: number; name?: string; email?: string; password?: string; is_active?: boolean; company_name?: string; address?: string; vat_number?: string; brn_number?: string; phone?: string; sunbox_margin_percent?: number; domain?: string }) {
+  updateProUser(user: { id: number; name?: string; email?: string; password?: string; is_active?: boolean; company_name?: string; address?: string; vat_number?: string; brn_number?: string; phone?: string; sunbox_margin_percent?: number; domain?: string; logo_url?: string }) {
     return this.query('update_pro_user', user);
   },
 

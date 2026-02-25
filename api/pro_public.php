@@ -179,6 +179,8 @@ switch ($action) {
                 'models' => $result,
                 'catalog_mode' => $credits <= 0,
                 'credits' => $credits,
+                'logo_url' => $profile['logo_url'] ?? '',
+                'company_name' => $profile['company_name'] ?? '',
             ]);
         } catch (Throwable $e) {
             pub_fail(API_DEBUG ? $e->getMessage() : 'Erreur serveur', 500);

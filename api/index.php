@@ -2649,6 +2649,7 @@ try {
             if (array_key_exists('brn_number', $body)) { $profSets[] = 'brn_number = ?'; $profParams[] = $body['brn_number']; }
             if (array_key_exists('phone', $body)) { $profSets[] = 'phone = ?'; $profParams[] = $body['phone']; }
             if (array_key_exists('domain', $body)) { $profSets[] = 'domain = ?'; $profParams[] = strtolower(trim($body['domain'])); }
+            if (array_key_exists('logo_url', $body)) { $profSets[] = 'logo_url = ?'; $profParams[] = $body['logo_url']; }
             if (array_key_exists('sunbox_margin_percent', $body)) { $profSets[] = 'sunbox_margin_percent = ?'; $profParams[] = (float)$body['sunbox_margin_percent']; }
             if (array_key_exists('is_active', $body)) { $profSets[] = 'is_active = ?'; $profParams[] = (int)(bool)$body['is_active']; }
             if (!empty($profSets)) {
