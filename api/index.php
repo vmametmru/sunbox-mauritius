@@ -2580,7 +2580,8 @@ try {
             $stmt = $db->query("
                 SELECT u.id, u.name, u.email, u.role,
                        pp.company_name, pp.address, pp.vat_number, pp.brn_number,
-                       pp.phone, pp.logo_url, pp.sunbox_margin_percent, pp.credits, pp.is_active
+                       pp.phone, pp.logo_url, pp.sunbox_margin_percent, pp.credits, pp.is_active,
+                       pp.domain, pp.api_token
                 FROM users u
                 LEFT JOIN professional_profiles pp ON pp.user_id = u.id
                 WHERE u.role = 'professional'
@@ -2593,6 +2594,7 @@ try {
         case 'create_pro_user': {
             validateRequired($body, ['name', 'email', 'password', 'company_name']);
             $passwordHash = password_hash((string)$body['password'], PASSWORD_BCRYPT);
+            $apiToken = bin2hex(random_bytes(32));
             $db->beginTransaction();
             try {
                 $stmt = $db->prepare("
@@ -2603,8 +2605,8 @@ try {
 
                 $stmt = $db->prepare("
                     INSERT INTO professional_profiles
-                        (user_id, company_name, address, vat_number, brn_number, phone, is_active)
-                    VALUES (?, ?, ?, ?, ?, ?, 1)
+                        (user_id, company_name, address, vat_number, brn_number, phone, domain, api_token, is_active)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
                 ");
                 $stmt->execute([
                     $userId,
@@ -2613,9 +2615,11 @@ try {
                     $body['vat_number'] ?? '',
                     $body['brn_number'] ?? '',
                     $body['phone'] ?? '',
+                    $body['domain'] ?? '',
+                    $apiToken,
                 ]);
                 $db->commit();
-                ok(['id' => $userId]);
+                ok(['id' => $userId, 'api_token' => $apiToken]);
             } catch (Throwable $e) {
                 $db->rollBack();
                 throw $e;
@@ -2644,6 +2648,7 @@ try {
             if (array_key_exists('vat_number', $body)) { $profSets[] = 'vat_number = ?'; $profParams[] = $body['vat_number']; }
             if (array_key_exists('brn_number', $body)) { $profSets[] = 'brn_number = ?'; $profParams[] = $body['brn_number']; }
             if (array_key_exists('phone', $body)) { $profSets[] = 'phone = ?'; $profParams[] = $body['phone']; }
+            if (array_key_exists('domain', $body)) { $profSets[] = 'domain = ?'; $profParams[] = strtolower(trim($body['domain'])); }
             if (array_key_exists('sunbox_margin_percent', $body)) { $profSets[] = 'sunbox_margin_percent = ?'; $profParams[] = (float)$body['sunbox_margin_percent']; }
             if (array_key_exists('is_active', $body)) { $profSets[] = 'is_active = ?'; $profParams[] = (int)(bool)$body['is_active']; }
             if (!empty($profSets)) {
@@ -2651,6 +2656,37 @@ try {
                 $profParams[] = $id;
                 $db->prepare("UPDATE professional_profiles SET " . implode(', ', $profSets) . " WHERE user_id = ?")->execute($profParams);
             }
+            ok();
+            break;
+        }
+
+        case 'regenerate_pro_token': {
+            validateRequired($body, ['id']);
+            $newToken = bin2hex(random_bytes(32));
+            $db->prepare("UPDATE professional_profiles SET api_token = ?, updated_at = NOW() WHERE user_id = ?")->execute([$newToken, (int)$body['id']]);
+            ok(['api_token' => $newToken]);
+            break;
+        }
+
+        case 'get_pro_model_overrides': {
+            validateRequired($body, ['user_id']);
+            $stmt = $db->prepare("SELECT * FROM pro_model_overrides WHERE user_id = ?");
+            $stmt->execute([(int)$body['user_id']]);
+            ok($stmt->fetchAll());
+            break;
+        }
+
+        case 'set_pro_model_override': {
+            validateRequired($body, ['user_id', 'model_id']);
+            $uid = (int)$body['user_id'];
+            $mid = (int)$body['model_id'];
+            $adj = isset($body['price_adjustment']) ? (float)$body['price_adjustment'] : 0;
+            $enabled = isset($body['is_enabled']) ? (int)(bool)$body['is_enabled'] : 1;
+            $db->prepare("
+                INSERT INTO pro_model_overrides (user_id, model_id, price_adjustment, is_enabled)
+                VALUES (?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE price_adjustment = ?, is_enabled = ?, updated_at = NOW()
+            ")->execute([$uid, $mid, $adj, $enabled, $adj, $enabled]);
             ok();
             break;
         }

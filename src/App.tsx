@@ -50,6 +50,7 @@ import ProDashboardPage from "./pages/pro/ProDashboardPage";
 import ProQuotesPage from "./pages/pro/ProQuotesPage";
 import ProSettingsPage from "./pages/pro/ProSettingsPage";
 import ProModelRequestPage from "./pages/pro/ProModelRequestPage";
+import ProModelsOverridePage from "./pages/pro/ProModelsOverridePage";
 import RequirePro from "./components/RequirePro";
 
 const queryClient = new QueryClient();
@@ -106,6 +107,7 @@ const App = () => (
                   <Route index element={<ProDashboardPage />} />
                   <Route path="quotes" element={<ProQuotesPage />} />
                   <Route path="model-request" element={<ProModelRequestPage />} />
+                  <Route path="models" element={<ProModelsOverridePage />} />
                   <Route path="settings" element={<ProSettingsPage />} />
                 </Route>
               </Route>

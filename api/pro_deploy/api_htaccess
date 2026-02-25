@@ -1,0 +1,11 @@
+RewriteEngine On
+RewriteBase /api/
+
+# Deny direct .env access
+<Files ".env">
+    Require all denied
+</Files>
+
+# Route all requests to index.php
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteRule ^(.*)$ index.php [QSA,L]

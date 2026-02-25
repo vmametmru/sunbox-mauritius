@@ -8,6 +8,11 @@ import {
   CreditCard,
   Building2,
   TrendingUp,
+  Download,
+  Copy,
+  RefreshCw,
+  Globe,
+  KeyRound,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -40,6 +45,8 @@ interface ProUser {
   sunbox_margin_percent?: number;
   credits?: number;
   is_active?: boolean;
+  domain?: string;
+  api_token?: string;
 }
 
 const emptyUser: ProUser = {
@@ -52,6 +59,7 @@ const emptyUser: ProUser = {
   brn_number: '',
   phone: '',
   sunbox_margin_percent: 0,
+  domain: '',
   is_active: true,
 };
 
@@ -66,7 +74,10 @@ export default function UsersPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [buyingPack, setBuyingPack] = useState<number | null>(null);
+  const [regenerating, setRegenerating] = useState<number | null>(null);
   const { toast } = useToast();
+
+  const API_BASE = 'https://sunbox-mauritius.com/api';
 
   useEffect(() => {
     loadUsers();
@@ -150,6 +161,30 @@ export default function UsersPage() {
     }
   };
 
+  const regenerateToken = async (userId: number) => {
+    if (!confirm('Régénérer le token API ? L\'ancien token sera immédiatement invalidé.')) return;
+    try {
+      setRegenerating(userId);
+      const data = await api.regenerateProToken(userId);
+      toast({ title: 'Token régénéré', description: 'Le nouveau token a été généré.' });
+      setUsers(users.map((u) => u.id === userId ? { ...u, api_token: data.api_token } : u));
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setRegenerating(null);
+    }
+  };
+
+  const copyToClipboard = (text: string, label: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      toast({ title: `${label} copié` });
+    });
+  };
+
+  const downloadZip = (userId: number) => {
+    window.open(`${API_BASE}/download_pro_zip.php?user_id=${userId}`, '_blank');
+  };
+
   /* ======================================================
      FILTER
   ====================================================== */
@@ -157,7 +192,8 @@ export default function UsersPage() {
     (u) =>
       u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       u.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      u.company_name?.toLowerCase().includes(searchTerm.toLowerCase())
+      u.company_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (u.domain ?? '').toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   /* ======================================================
@@ -181,7 +217,7 @@ export default function UsersPage() {
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
             <Input
-              placeholder="Rechercher un utilisateur..."
+              placeholder="Rechercher un utilisateur, domaine..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-10"
@@ -193,10 +229,11 @@ export default function UsersPage() {
       {loading ? (
         <p className="text-gray-400">Chargement...</p>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {filteredUsers.map((user) => (
             <Card key={user.id} className="overflow-hidden">
-              <CardContent className="p-4">
+              <CardContent className="p-4 space-y-3">
+                {/* Header */}
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
@@ -218,7 +255,8 @@ export default function UsersPage() {
                   </div>
                 </div>
 
-                <div className="mt-3 space-y-1 text-sm text-gray-600">
+                {/* Info */}
+                <div className="space-y-1 text-sm text-gray-600">
                   {user.company_name && (
                     <div className="flex items-center gap-2">
                       <Users className="h-4 w-4 text-gray-400" />
@@ -231,18 +269,65 @@ export default function UsersPage() {
                       {(user.credits ?? 0).toLocaleString()} Rs
                     </span>
                   </div>
+                  {user.domain && (
+                    <div className="flex items-center gap-2">
+                      <Globe className="h-4 w-4 text-gray-400" />
+                      <span className="text-blue-600">{user.domain}</span>
+                    </div>
+                  )}
                 </div>
 
-                <div className="mt-3">
+                {/* API Token */}
+                {user.api_token && (
+                  <div className="bg-gray-50 rounded-lg p-2">
+                    <p className="text-xs text-gray-500 mb-1 flex items-center gap-1">
+                      <KeyRound className="h-3 w-3" /> Token API
+                    </p>
+                    <div className="flex items-center gap-1">
+                      <code className="text-xs text-gray-700 flex-1 truncate bg-white border rounded px-2 py-1">
+                        {user.api_token}
+                      </code>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 w-7 p-0"
+                        onClick={() => copyToClipboard(user.api_token!, 'Token')}
+                      >
+                        <Copy className="h-3 w-3" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 w-7 p-0 text-orange-600"
+                        onClick={() => regenerateToken(user.id!)}
+                        disabled={regenerating === user.id}
+                      >
+                        <RefreshCw className={`h-3 w-3 ${regenerating === user.id ? 'animate-spin' : ''}`} />
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div className="grid grid-cols-2 gap-2">
                   <Button
                     size="sm"
                     variant="outline"
-                    className="w-full text-orange-600 border-orange-300 hover:bg-orange-50"
+                    className="text-orange-600 border-orange-300 hover:bg-orange-50"
                     onClick={() => buyPackForUser(user.id!, user.name)}
                     disabled={buyingPack === user.id}
                   >
-                    <TrendingUp className="h-4 w-4 mr-2" />
-                    {buyingPack === user.id ? 'Ajout...' : 'Ajouter pack (10 000 Rs)'}
+                    <TrendingUp className="h-4 w-4 mr-1" />
+                    {buyingPack === user.id ? 'Ajout...' : 'Pack +10 000 Rs'}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-blue-600 border-blue-300 hover:bg-blue-50"
+                    onClick={() => downloadZip(user.id!)}
+                  >
+                    <Download className="h-4 w-4 mr-1" />
+                    Télécharger ZIP
                   </Button>
                 </div>
               </CardContent>
@@ -306,6 +391,18 @@ export default function UsersPage() {
                   onChange={(e) => setEditingUser({ ...editingUser, company_name: e.target.value })}
                   placeholder="Nom de la société"
                 />
+              </div>
+
+              <div>
+                <Label>Domaine du site pro</Label>
+                <Input
+                  value={editingUser.domain ?? ''}
+                  onChange={(e) => setEditingUser({ ...editingUser, domain: e.target.value })}
+                  placeholder="poolbuilder.mu"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Domaine sur lequel le site pro sera déployé. Utilisé pour valider les requêtes API.
+                </p>
               </div>
 
               <div>

@@ -850,11 +850,11 @@ export const api = {
     return this.query('get_pro_users');
   },
 
-  createProUser(user: { name: string; email: string; password: string; company_name: string; address?: string; vat_number?: string; brn_number?: string; phone?: string }) {
+  createProUser(user: { name: string; email: string; password: string; company_name: string; address?: string; vat_number?: string; brn_number?: string; phone?: string; domain?: string }) {
     return this.query('create_pro_user', user);
   },
 
-  updateProUser(user: { id: number; name?: string; email?: string; password?: string; is_active?: boolean; company_name?: string; address?: string; vat_number?: string; brn_number?: string; phone?: string; sunbox_margin_percent?: number }) {
+  updateProUser(user: { id: number; name?: string; email?: string; password?: string; is_active?: boolean; company_name?: string; address?: string; vat_number?: string; brn_number?: string; phone?: string; sunbox_margin_percent?: number; domain?: string }) {
     return this.query('update_pro_user', user);
   },
 
@@ -862,8 +862,20 @@ export const api = {
     return this.query('delete_pro_user', { id });
   },
 
+  regenerateProToken(id: number) {
+    return this.query('regenerate_pro_token', { id });
+  },
+
   buyProPack(userId: number) {
     return this.query('buy_pro_pack', { user_id: userId });
+  },
+
+  getProModelOverrides(userId: number) {
+    return this.query('get_pro_model_overrides', { user_id: userId });
+  },
+
+  setProModelOverride(override: { user_id: number; model_id: number; price_adjustment: number; is_enabled: boolean }) {
+    return this.query('set_pro_model_override', override);
   },
 
   /* =====================================================

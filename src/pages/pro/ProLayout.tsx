@@ -10,6 +10,7 @@ import {
   LogOut,
   CreditCard,
   DollarSign,
+  Package,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -26,6 +27,7 @@ interface ProUser {
 const navItems = [
   { icon: LayoutDashboard, label: 'Tableau de bord', path: '/pro' },
   { icon: FileText, label: 'Mes Devis', path: '/pro/quotes' },
+  { icon: Package, label: 'Mes Modèles', path: '/pro/models' },
   { icon: Cpu, label: 'Demande de Modèle', path: '/pro/model-request' },
   { icon: Settings, label: 'Mon Profil', path: '/pro/settings' },
 ];
