@@ -16,6 +16,15 @@ import { useQuote } from '@/contexts/QuoteContext';
 import ConfigureModal from '@/components/ConfigureModal';
 import { useSiteSettings, calculateTTC } from '@/hooks/use-site-settings';
 
+interface ActiveDiscount {
+  id: number;
+  name: string;
+  discount_type: 'percentage' | 'fixed';
+  discount_value: number;
+  apply_to: 'base_price' | 'options' | 'both';
+  end_date: string;
+}
+
 interface Model {
   id: number;
   name: string;
@@ -33,21 +42,11 @@ interface Model {
   has_overflow?: boolean;
   image_url: string;
   plan_url?: string;
-}
-
-interface ActiveDiscount {
-  id: number;
-  name: string;
-  discount_type: 'percentage' | 'fixed';
-  discount_value: number;
-  apply_to: 'base_price' | 'options' | 'both';
-  end_date: string;
-  model_ids: number[];
+  active_discounts?: ActiveDiscount[];
 }
 
 export default function ModelsPage() {
   const [models, setModels] = useState<Model[]>([]);
-  const [activeDiscounts, setActiveDiscounts] = useState<ActiveDiscount[]>([]);
   const [filterType, setFilterType] = useState<'all' | 'container' | 'pool'>('all');
   const [modalImage, setModalImage] = useState<string | null>(null);
   const { data: siteSettings } = useSiteSettings();
@@ -94,9 +93,6 @@ export default function ModelsPage() {
       setRangeLimits(r => ({ ...r, surface: [minSurface, maxSurface] }));
       setFilters(f => ({ ...f, surfaceMin: minSurface, surfaceMax: maxSurface }));
     });
-    api.getActiveDiscounts().then((data) => {
-      setActiveDiscounts(Array.isArray(data) ? data : []);
-    }).catch(() => {});
   }, []);
 
   // Recompute TTC price limits whenever models or vatRate changes
@@ -118,11 +114,9 @@ export default function ModelsPage() {
     setShowConfigurator(true);
   };
 
-  // Get applicable discounts for a model (global = no model_ids, or model in model_ids)
-  const getModelDiscounts = (modelId: number): ActiveDiscount[] => {
-    return activeDiscounts.filter(d =>
-      d.model_ids.length === 0 || d.model_ids.map(Number).includes(modelId)
-    );
+  // Get active discounts for a model from the embedded active_discounts field
+  const getModelDiscounts = (model: Model): ActiveDiscount[] => {
+    return Array.isArray(model.active_discounts) ? model.active_discounts : [];
   };
 
   // Format YYYY-MM-DD → DD/MM/YYYY
@@ -206,7 +200,7 @@ export default function ModelsPage() {
         {/* Grille modèles */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filtered.map((model) => {
-            const modelDiscounts = getModelDiscounts(model.id);
+            const modelDiscounts = getModelDiscounts(model);
             return (
             <div key={model.id} className="border rounded-lg overflow-hidden shadow-sm bg-white">
               <div className="relative">

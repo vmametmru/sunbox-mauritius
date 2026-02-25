@@ -183,6 +183,28 @@ try {
                         $m['price_source'] = 'manual';
                     }
                 }
+
+                // Embed active discounts for this model (global or model-specific)
+                $todayDisc = date('Y-m-d');
+                $discStmt = $db->prepare("
+                    SELECT d.id, d.name, d.discount_type, d.discount_value, d.apply_to, d.end_date
+                    FROM discounts d
+                    WHERE d.is_active = 1
+                      AND d.start_date <= ? AND d.end_date >= ?
+                      AND (
+                          NOT EXISTS (SELECT 1 FROM discount_models dm WHERE dm.discount_id = d.id)
+                          OR EXISTS (SELECT 1 FROM discount_models dm WHERE dm.discount_id = d.id AND dm.model_id = ?)
+                      )
+                    ORDER BY d.discount_value DESC
+                ");
+                $discStmt->execute([$todayDisc, $todayDisc, (int)$m['id']]);
+                $activeDiscs = $discStmt->fetchAll();
+                foreach ($activeDiscs as &$disc) {
+                    $disc['discount_value'] = (float)$disc['discount_value'];
+                    $disc['id'] = (int)$disc['id'];
+                }
+                unset($disc);
+                $m['active_discounts'] = $activeDiscs;
             }
 
             ok($models);

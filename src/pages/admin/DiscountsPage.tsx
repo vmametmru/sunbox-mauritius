@@ -128,7 +128,10 @@ export default function DiscountsPage() {
   };
 
   const openEdit = (d: Discount) => {
-    setEditingDiscount({ ...d, model_ids: Array.isArray(d.model_ids) ? [...d.model_ids] : [] });
+    setEditingDiscount({
+      ...d,
+      model_ids: Array.isArray(d.model_ids) ? d.model_ids.map(Number) : [],
+    });
     setIsDialogOpen(true);
   };
 
@@ -167,11 +170,14 @@ export default function DiscountsPage() {
      MODEL CHECKBOX TOGGLE
   ====================================================== */
   const toggleModel = (modelId: number) => {
-    if (!editingDiscount) return;
-    const ids = editingDiscount.model_ids.map(Number).includes(modelId)
-      ? editingDiscount.model_ids.filter((id) => Number(id) !== modelId)
-      : [...editingDiscount.model_ids.map(Number), modelId];
-    setEditingDiscount({ ...editingDiscount, model_ids: ids });
+    setEditingDiscount(prev => {
+      if (!prev) return prev;
+      const currentIds = prev.model_ids.map(Number);
+      const ids = currentIds.includes(modelId)
+        ? currentIds.filter(id => id !== modelId)
+        : [...currentIds, modelId];
+      return { ...prev, model_ids: ids };
+    });
   };
 
   /* ======================================================
