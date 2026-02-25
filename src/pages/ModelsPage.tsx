@@ -76,27 +76,22 @@ export default function ModelsPage() {
       setModels(data);
 
       const surfaces = data.map((m: any) => Number(m.surface_m2) || 0);
-      const prices = data.map((m: any) => Number(m.calculated_base_price ?? m.base_price) || 0);
-
       const minSurface = Math.min(...surfaces);
       const maxSurface = Math.max(...surfaces);
-      const minPrice = Math.min(...prices);
-      const maxPrice = Math.max(...prices);
 
-      setRangeLimits({
-        surface: [minSurface, maxSurface],
-        price: [minPrice, maxPrice]
-      });
-
-      setFilters(f => ({
-        ...f,
-        surfaceMin: minSurface,
-        surfaceMax: maxSurface,
-        priceMin: minPrice,
-        priceMax: maxPrice
-      }));
+      setRangeLimits(r => ({ ...r, surface: [minSurface, maxSurface] }));
+      setFilters(f => ({ ...f, surfaceMin: minSurface, surfaceMax: maxSurface }));
     });
   }, []);
+
+  // Recompute TTC price limits whenever models or vatRate changes
+  useEffect(() => {
+    if (models.length === 0) return;
+    const ttcPrices = models.map(m => getDisplayPriceTTC(m));
+    const maxPriceTTC = Math.max(...ttcPrices);
+    setRangeLimits(r => ({ ...r, price: [0, maxPriceTTC] }));
+    setFilters(f => ({ ...f, priceMin: 0, priceMax: maxPriceTTC }));
+  }, [models, vatRate]);
 
   const openConfigurator = (model: Model) => {
     // Update the model with calculated TTC price before sending to configurator
@@ -125,9 +120,9 @@ export default function ModelsPage() {
 
       if (m.surface_m2 < filters.surfaceMin || m.surface_m2 > filters.surfaceMax) return false;
 
-      // Use calculated price for filtering
-      const modelPrice = getDisplayPriceHT(m);
-      if (modelPrice < filters.priceMin || modelPrice > filters.priceMax) return false;
+      // Use TTC price for filtering
+      const modelPriceTTC = getDisplayPriceTTC(m);
+      if (modelPriceTTC < filters.priceMin || modelPriceTTC > filters.priceMax) return false;
 
       return true;
     })
@@ -151,11 +146,11 @@ export default function ModelsPage() {
         </div>
 
         {/* Price range filter */}
-        {rangeLimits.price[0] < rangeLimits.price[1] && (
+        {rangeLimits.price[1] > 0 && (
           <div className="flex justify-end mb-4">
             <div className="w-full max-w-sm">
               <div className="flex justify-between text-sm text-gray-600 mb-1">
-                <span>Prix</span>
+                <span>Prix de base TTC</span>
                 <span>
                   {Number(filters.priceMin).toLocaleString(undefined, { maximumFractionDigits: 0 })} Rs
                   {' – '}
@@ -163,7 +158,7 @@ export default function ModelsPage() {
                 </span>
               </div>
               <Slider
-                min={rangeLimits.price[0]}
+                min={0}
                 max={rangeLimits.price[1]}
                 step={1000}
                 value={[filters.priceMin, filters.priceMax]}
@@ -172,7 +167,7 @@ export default function ModelsPage() {
                 }
               />
               <div className="flex justify-between text-xs text-gray-400 mt-1">
-                <span>{Number(rangeLimits.price[0]).toLocaleString(undefined, { maximumFractionDigits: 0 })} Rs</span>
+                <span>0 Rs</span>
                 <span>{Number(rangeLimits.price[1]).toLocaleString(undefined, { maximumFractionDigits: 0 })} Rs</span>
               </div>
             </div>
