@@ -177,6 +177,244 @@ try {
             break;
         }
 
+        // === PRO USERS CRUD
+        case 'get_pro_users': {
+            requireAdmin();
+            $stmt = $db->query("SELECT * FROM pro_users ORDER BY name ASC");
+            $rows = $stmt->fetchAll();
+            foreach ($rows as &$r) {
+                $r['is_active'] = (bool)$r['is_active'];
+            }
+            ok($rows);
+            break;
+        }
+
+        case 'create_pro_user': {
+            requireAdmin();
+            validateRequired($body, ['name', 'email']);
+            $stmt = $db->prepare("
+                INSERT INTO pro_users (name, email, company_name, phone, is_active)
+                VALUES (?, ?, ?, ?, ?)
+            ");
+            $stmt->execute([
+                sanitize($body['name']),
+                sanitize($body['email']),
+                isset($body['company_name']) ? sanitize($body['company_name']) : null,
+                isset($body['phone']) ? sanitize($body['phone']) : null,
+                isset($body['is_active']) ? (int)(bool)$body['is_active'] : 1,
+            ]);
+            ok(['id' => (int)$db->lastInsertId()]);
+            break;
+        }
+
+        case 'update_pro_user': {
+            requireAdmin();
+            validateRequired($body, ['id']);
+            $id = (int)$body['id'];
+            $sets = [];
+            $params = [];
+            if (array_key_exists('name', $body))         { $sets[] = 'name = ?';         $params[] = sanitize($body['name']); }
+            if (array_key_exists('email', $body))        { $sets[] = 'email = ?';        $params[] = sanitize($body['email']); }
+            if (array_key_exists('company_name', $body)) { $sets[] = 'company_name = ?'; $params[] = sanitize($body['company_name']); }
+            if (array_key_exists('phone', $body))        { $sets[] = 'phone = ?';        $params[] = sanitize($body['phone']); }
+            if (array_key_exists('is_active', $body))    { $sets[] = 'is_active = ?';    $params[] = (int)(bool)$body['is_active']; }
+            if (!empty($sets)) {
+                $sets[]   = 'updated_at = NOW()';
+                $params[] = $id;
+                $db->prepare("UPDATE pro_users SET " . implode(', ', $sets) . " WHERE id = ?")->execute($params);
+            }
+            ok();
+            break;
+        }
+
+        case 'delete_pro_user': {
+            requireAdmin();
+            validateRequired($body, ['id']);
+            $id = (int)$body['id'];
+            $db->prepare("DELETE FROM pro_users WHERE id = ?")->execute([$id]);
+            // Clean up settings for this pro user
+            $db->prepare("DELETE FROM settings WHERE setting_group = ?")->execute(['pro_db_' . $id]);
+            ok();
+            break;
+        }
+
+        // === PRO USER DB OPERATIONS
+        case 'check_pro_user_db': {
+            requireAdmin();
+            validateRequired($body, ['pro_user_id']);
+
+            $proUserId = (int)$body['pro_user_id'];
+            $group     = 'pro_db_' . $proUserId;
+
+            // Load stored credentials
+            $stmt = $db->prepare("SELECT setting_key, setting_value FROM settings WHERE setting_group = ?");
+            $stmt->execute([$group]);
+            $creds = [];
+            foreach ($stmt->fetchAll() as $row) {
+                $creds[$row['setting_key']] = $row['setting_value'];
+            }
+
+            if (empty($creds['db_host']) || empty($creds['db_name']) || empty($creds['db_user'])) {
+                ok(['status' => 'no_credentials', 'message' => 'Aucun identifiant de base de données configuré.']);
+                break;
+            }
+
+            // Decrypt password
+            $dbPass = '';
+            if (!empty($creds['db_pass'])) {
+                if (PRO_DB_ENCRYPTION_KEY === '') {
+                    fail('ERREUR : PRO DB ENCRYPTION KEY Manquant (PRO_DB_ENCRYPTION_KEY non défini dans .env)', 500);
+                }
+                $dbPass = decryptProDbField($creds['db_pass']);
+            }
+
+            try {
+                $charset = $creds['db_charset'] ?? 'utf8mb4';
+                $dsn = "mysql:host={$creds['db_host']};dbname={$creds['db_name']};charset={$charset}";
+                $proDb = new PDO($dsn, $creds['db_user'], $dbPass, [
+                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                    PDO::ATTR_TIMEOUT => 5,
+                ]);
+                $tableCount = (int)$proDb->query("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE()")->fetchColumn();
+                ok([
+                    'status'       => $tableCount > 0 ? 'exists' : 'empty',
+                    'table_count'  => $tableCount,
+                    'message'      => $tableCount > 0
+                        ? "Base de données existante ({$tableCount} tables)."
+                        : 'Base de données accessible mais vide.',
+                ]);
+            } catch (PDOException $e) {
+                ok(['status' => 'error', 'message' => 'Connexion impossible : ' . $e->getMessage()]);
+            }
+            break;
+        }
+
+        case 'init_pro_user_db': {
+            requireAdmin();
+            validateRequired($body, ['pro_user_id']);
+
+            $proUserId = (int)$body['pro_user_id'];
+            $group     = 'pro_db_' . $proUserId;
+
+            // Load stored credentials
+            $stmt = $db->prepare("SELECT setting_key, setting_value FROM settings WHERE setting_group = ?");
+            $stmt->execute([$group]);
+            $creds = [];
+            foreach ($stmt->fetchAll() as $row) {
+                $creds[$row['setting_key']] = $row['setting_value'];
+            }
+
+            if (empty($creds['db_host']) || empty($creds['db_name']) || empty($creds['db_user'])) {
+                fail('Aucun identifiant de base de données configuré pour cet utilisateur pro.');
+            }
+
+            if (PRO_DB_ENCRYPTION_KEY === '') {
+                fail('ERREUR : PRO DB ENCRYPTION KEY Manquant (PRO_DB_ENCRYPTION_KEY non défini dans .env)', 500);
+            }
+
+            $dbPass = '';
+            if (!empty($creds['db_pass'])) {
+                $dbPass = decryptProDbField($creds['db_pass']);
+            }
+
+            try {
+                $charset = $creds['db_charset'] ?? 'utf8mb4';
+                $dsn = "mysql:host={$creds['db_host']};dbname={$creds['db_name']};charset={$charset}";
+                $proDb = new PDO($dsn, $creds['db_user'], $dbPass, [
+                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                    PDO::ATTR_TIMEOUT => 10,
+                ]);
+
+                // Core schema for a Sunbox pro instance
+                $schema = "
+                    CREATE TABLE IF NOT EXISTS `settings` (
+                      `id` int NOT NULL AUTO_INCREMENT,
+                      `setting_key` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+                      `setting_value` text COLLATE utf8mb4_unicode_ci,
+                      `setting_group` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT 'general',
+                      `description` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+                      `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+                      `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                      PRIMARY KEY (`id`),
+                      UNIQUE KEY `uq_settings_key_group` (`setting_key`, `setting_group`)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+                    CREATE TABLE IF NOT EXISTS `contacts` (
+                      `id` int NOT NULL AUTO_INCREMENT,
+                      `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+                      `email` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+                      `phone` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+                      `address` text COLLATE utf8mb4_unicode_ci,
+                      `status` enum('new','read','replied','archived') COLLATE utf8mb4_unicode_ci DEFAULT 'new',
+                      `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+                      `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                      PRIMARY KEY (`id`)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+                    CREATE TABLE IF NOT EXISTS `models` (
+                      `id` int NOT NULL AUTO_INCREMENT,
+                      `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+                      `type` enum('container','pool') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'container',
+                      `description` text COLLATE utf8mb4_unicode_ci,
+                      `base_price` decimal(12,2) NOT NULL DEFAULT '0.00',
+                      `unforeseen_cost_percent` decimal(5,2) NOT NULL DEFAULT '0.00',
+                      `surface_m2` decimal(8,2) DEFAULT NULL,
+                      `bedrooms` int DEFAULT NULL,
+                      `bathrooms` int DEFAULT NULL,
+                      `image_url` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+                      `is_active` tinyint(1) NOT NULL DEFAULT '1',
+                      `display_order` int NOT NULL DEFAULT '0',
+                      `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+                      `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                      PRIMARY KEY (`id`)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+                    CREATE TABLE IF NOT EXISTS `quotes` (
+                      `id` int NOT NULL AUTO_INCREMENT,
+                      `reference_number` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+                      `contact_id` int DEFAULT NULL,
+                      `model_id` int DEFAULT NULL,
+                      `model_name` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+                      `base_price` decimal(12,2) NOT NULL DEFAULT '0.00',
+                      `options_total` decimal(12,2) NOT NULL DEFAULT '0.00',
+                      `total_price` decimal(12,2) NOT NULL DEFAULT '0.00',
+                      `status` enum('draft','open','validated','cancelled','pending','approved','rejected','completed') COLLATE utf8mb4_unicode_ci DEFAULT 'pending',
+                      `notes` text COLLATE utf8mb4_unicode_ci,
+                      `valid_until` date DEFAULT NULL,
+                      `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+                      `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                      PRIMARY KEY (`id`)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+                    CREATE TABLE IF NOT EXISTS `email_logs` (
+                      `id` int NOT NULL AUTO_INCREMENT,
+                      `recipient_email` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+                      `recipient_name` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+                      `subject` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+                      `template_key` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+                      `status` enum('pending','sent','failed') COLLATE utf8mb4_unicode_ci DEFAULT 'pending',
+                      `sent_at` datetime DEFAULT NULL,
+                      `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+                      PRIMARY KEY (`id`)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+                ";
+
+                // Execute each CREATE TABLE statement individually
+                foreach (array_filter(array_map('trim', explode(';', $schema))) as $sql) {
+                    if ($sql !== '') {
+                        $proDb->exec($sql);
+                    }
+                }
+
+                $tableCount = (int)$proDb->query("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE()")->fetchColumn();
+                ok(['table_count' => $tableCount, 'message' => "Base de données initialisée ({$tableCount} tables créées)."]);
+
+            } catch (PDOException $e) {
+                fail('Erreur initialisation : ' . $e->getMessage());
+            }
+            break;
+        }
+
         // === MODELS
         case 'get_models': {
             $type       = $body['type'] ?? null;

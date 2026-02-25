@@ -41,6 +41,7 @@ import PoolBOQPriceListPage from "./pages/admin/PoolBOQPriceListPage";
 import PoolBOQTemplatePage from "./pages/admin/PoolBOQTemplatePage";
 import DevIdeasPage from "./pages/admin/DevIdeasPage";
 import DiscountsPage from "./pages/admin/DiscountsPage";
+import ProUsersPage from "./pages/admin/ProUsersPage";
 
 const queryClient = new QueryClient();
 
@@ -85,6 +86,7 @@ const App = () => (
                   <Route path="site" element={<SiteSettingsPage />} />
                   <Route path="dev-ideas" element={<DevIdeasPage />} />
                   <Route path="discounts" element={<DiscountsPage />} />
+                  <Route path="pro-users" element={<ProUsersPage />} />
                 </Route>
               </Route>
 

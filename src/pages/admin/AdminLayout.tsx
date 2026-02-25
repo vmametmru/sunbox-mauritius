@@ -21,6 +21,7 @@ import {
   FileCode,
   ShoppingCart,
   BookUser,
+  UserCheck,
   ChevronDown,
   ChevronRight,
   LogOut,
@@ -57,6 +58,7 @@ const navItems: NavItem[] = [
     key: 'commerce',
     children: [
       { icon: FileText, label: 'Devis', path: '/admin/quotes' },
+      { icon: UserCheck, label: 'Utilisateurs Pro', path: '/admin/pro-users' },
     ],
   },
   {
@@ -91,7 +93,7 @@ const navItems: NavItem[] = [
 
 // All paths that belong to each group (for auto-expand)
 const groupPaths: Record<string, string[]> = {
-  commerce: ['/admin/quotes'],
+  commerce: ['/admin/quotes', '/admin/pro-users'],
   contacts: ['/admin/contacts', '/admin/suppliers'],
   parametres: ['/admin/models', '/admin/discounts', '/admin/media', '/admin/boq', '/admin/pool-prices', '/admin/pool-variables', '/admin/pool-template', '/admin/email', '/admin/payments', '/admin/site'],
 };

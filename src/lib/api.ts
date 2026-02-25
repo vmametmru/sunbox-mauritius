@@ -860,6 +860,33 @@ export const api = {
   getProUserDb(proUserId: number) {
     return this.query('get_pro_user_db', { pro_user_id: proUserId });
   },
+
+  /* =====================================================
+     PRO USERS CRUD
+  ===================================================== */
+  getProUsers() {
+    return this.query('get_pro_users');
+  },
+
+  createProUser(data: { name: string; email: string; company_name?: string; phone?: string; is_active?: boolean }) {
+    return this.query('create_pro_user', data);
+  },
+
+  updateProUser(data: { id: number; name?: string; email?: string; company_name?: string; phone?: string; is_active?: boolean }) {
+    return this.query('update_pro_user', data);
+  },
+
+  deleteProUser(id: number) {
+    return this.query('delete_pro_user', { id });
+  },
+
+  checkProUserDb(proUserId: number) {
+    return this.query('check_pro_user_db', { pro_user_id: proUserId });
+  },
+
+  initProUserDb(proUserId: number) {
+    return this.query('init_pro_user_db', { pro_user_id: proUserId });
+  },
 };
 
 export default api;
