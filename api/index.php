@@ -113,6 +113,70 @@ try {
             break;
         }
 
+        // === PRO USER DB SETTINGS
+        case 'save_pro_user_db': {
+            requireAdmin();
+            validateRequired($body, ['pro_user_id', 'db_host', 'db_name', 'db_user']);
+
+            if (PRO_DB_ENCRYPTION_KEY === '') {
+                fail('ERREUR : PRO DB ENCRYPTION KEY Manquant (PRO_DB_ENCRYPTION_KEY non défini dans .env)', 500);
+            }
+
+            $proUserId = (int)$body['pro_user_id'];
+            $group     = 'pro_db_' . $proUserId;
+
+            $fields = [
+                'db_host'    => sanitize($body['db_host']),
+                'db_name'    => sanitize($body['db_name']),
+                'db_user'    => sanitize($body['db_user']),
+                'db_charset' => sanitize($body['db_charset'] ?? 'utf8mb4'),
+            ];
+
+            // Encrypt the DB password if provided
+            if (!empty($body['db_pass'])) {
+                $fields['db_pass'] = encryptProDbField((string)$body['db_pass']);
+            }
+
+            $stmt = $db->prepare("
+                INSERT INTO settings (setting_key, setting_value, setting_group)
+                VALUES (?, ?, ?)
+                ON DUPLICATE KEY UPDATE
+                  setting_value = VALUES(setting_value),
+                  updated_at = NOW()
+            ");
+
+            foreach ($fields as $key => $value) {
+                $stmt->execute([$key, $value, $group]);
+            }
+
+            ok();
+            break;
+        }
+
+        case 'get_pro_user_db': {
+            requireAdmin();
+            validateRequired($body, ['pro_user_id']);
+
+            $proUserId = (int)$body['pro_user_id'];
+            $group     = 'pro_db_' . $proUserId;
+
+            $stmt = $db->prepare("SELECT setting_key, setting_value FROM settings WHERE setting_group = ?");
+            $stmt->execute([$group]);
+
+            $result = [];
+            foreach ($stmt->fetchAll() as $row) {
+                $result[$row['setting_key']] = $row['setting_value'];
+            }
+
+            // Never return the encrypted password – replace with a masked placeholder
+            if (isset($result['db_pass']) && $result['db_pass'] !== '') {
+                $result['db_pass'] = '••••••••';
+            }
+
+            ok($result);
+            break;
+        }
+
         // === MODELS
         case 'get_models': {
             $type       = $body['type'] ?? null;

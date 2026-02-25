@@ -1,10 +1,16 @@
 import { createClient } from '@supabase/supabase-js';
 
+// PRO DB configuration from environment variables
+const supabaseUrl = import.meta.env.VITE_PRO_DB_URL as string | undefined;
+const supabaseKey = import.meta.env.VITE_PRO_DB_KEY as string | undefined;
 
-// Initialize database client
-const supabaseUrl = 'https://jelizzyrgwedhuzuihnu.databasepad.com';
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjQzODQ4NDY4LWU4Y2UtNDQzMS1iMmNjLWMwZDY3MzZhNmE1ZSJ9.eyJwcm9qZWN0SWQiOiJqZWxpenp5cmd3ZWRodXp1aWhudSIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNzY1OTgwMDIyLCJleHAiOjIwODEzNDAwMjIsImlzcyI6ImZhbW91cy5kYXRhYmFzZXBhZCIsImF1ZCI6ImZhbW91cy5jbGllbnRzIn0.-44OZzVI0F-foRXikCZwLtSm-ALVyHq3TvSOqwMz2k4';
+if (!supabaseUrl) {
+  throw new Error('ERREUR : PRO DB URL Manquant (VITE_PRO_DB_URL non défini dans .env)');
+}
+if (!supabaseKey) {
+  throw new Error('ERREUR : PRO DB ENCRYPTION KEY Manquant (VITE_PRO_DB_KEY non défini dans .env)');
+}
+
 const supabase = createClient(supabaseUrl, supabaseKey);
-
 
 export { supabase };

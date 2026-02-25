@@ -91,6 +91,8 @@ define('DB_USER', env('DB_USER', ''));
 define('DB_PASS', env('DB_PASS', ''));
 define('DB_CHARSET', env('DB_CHARSET', 'utf8mb4'));
 
+define('PRO_DB_ENCRYPTION_KEY', env('PRO_DB_ENCRYPTION_KEY', ''));
+
 define('ALLOWED_ORIGINS', [
     'http://localhost:3000',
     'http://localhost:5173',
@@ -237,6 +239,42 @@ function sanitize($value) {
         return strip_tags(trim($value));
     }
     return $value;
+}
+
+/**
+ * Encrypt a value using PRO_DB_ENCRYPTION_KEY (AES-256-CBC).
+ * Returns base64-encoded ciphertext or throws if the key is not configured.
+ */
+function encryptProDbField(string $plaintext): string {
+    $key = PRO_DB_ENCRYPTION_KEY;
+    if ($key === '') {
+        errorResponse('ERREUR : PRO DB ENCRYPTION KEY Manquant (PRO_DB_ENCRYPTION_KEY non défini dans .env)');
+    }
+    $iv = random_bytes(16);
+    $cipher = openssl_encrypt($plaintext, 'AES-256-CBC', substr(hash('sha256', $key, true), 0, 32), OPENSSL_RAW_DATA, $iv);
+    if ($cipher === false) {
+        errorResponse('Erreur de chiffrement PRO DB');
+    }
+    return base64_encode($iv . $cipher);
+}
+
+/**
+ * Decrypt a value that was encrypted with encryptProDbField().
+ * Returns the original plaintext or throws if the key is not configured.
+ */
+function decryptProDbField(string $encoded): string {
+    $key = PRO_DB_ENCRYPTION_KEY;
+    if ($key === '') {
+        errorResponse('ERREUR : PRO DB ENCRYPTION KEY Manquant (PRO_DB_ENCRYPTION_KEY non défini dans .env)');
+    }
+    $data = base64_decode($encoded, true);
+    if ($data === false || strlen($data) < 17) {
+        return '';
+    }
+    $iv     = substr($data, 0, 16);
+    $cipher = substr($data, 16);
+    $plain  = openssl_decrypt($cipher, 'AES-256-CBC', substr(hash('sha256', $key, true), 0, 32), OPENSSL_RAW_DATA, $iv);
+    return $plain !== false ? $plain : '';
 }
 
 function generateQuoteReference(): string {
