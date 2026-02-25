@@ -293,15 +293,14 @@ export default function ModelsPage() {
                 {model.type === 'pool' ? (
                   <p className="text-orange-600 font-semibold">Cliquez sur configurer</p>
                 ) : discountedPrice !== null ? (
-                  <p className="font-semibold">
-                    A partir de{' '}
-                    <span className="line-through text-gray-400 mr-1">
-                      {Number(originalPriceTTC).toLocaleString(undefined, { maximumFractionDigits: 0 })} Rs TTC
-                    </span>
-                    <span className="text-green-700">
+                  <>
+                    <p className="text-gray-400 font-semibold line-through">
+                      A partir de {Number(originalPriceTTC).toLocaleString(undefined, { maximumFractionDigits: 0 })} Rs TTC
+                    </p>
+                    <p className="text-green-700 font-semibold">
                       {Number(discountedPrice).toLocaleString(undefined, { maximumFractionDigits: 0 })} Rs TTC
-                    </span>
-                  </p>
+                    </p>
+                  </>
                 ) : (
                   <p className="text-orange-600 font-semibold">
                     A partir de {Number(originalPriceTTC).toLocaleString(undefined, { maximumFractionDigits: 0 })} Rs TTC
