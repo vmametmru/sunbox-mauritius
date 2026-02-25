@@ -434,8 +434,19 @@ export default function DiscountsPage() {
                           <div key={m.id} className="flex items-center gap-2 py-0.5">
                             <Checkbox
                               id={`model-${m.id}`}
-                              checked={editingDiscount.model_ids.map(Number).includes(m.id)}
-                              onCheckedChange={() => toggleModel(m.id)}
+                              checked={editingDiscount.model_ids.map(Number).includes(Number(m.id))}
+                              onCheckedChange={(checked) => {
+                                const mid = Number(m.id);
+                                setEditingDiscount(prev => {
+                                  if (!prev) return prev;
+                                  const currentIds = prev.model_ids.map(Number);
+                                  if (checked === true) {
+                                    return currentIds.includes(mid) ? prev : { ...prev, model_ids: [...currentIds, mid] };
+                                  } else {
+                                    return { ...prev, model_ids: currentIds.filter(id => id !== mid) };
+                                  }
+                                });
+                              }}
                             />
                             <label
                               htmlFor={`model-${m.id}`}
