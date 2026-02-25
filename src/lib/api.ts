@@ -842,6 +842,24 @@ export const api = {
   getActiveDiscounts(modelId?: number) {
     return this.query('get_active_discounts', modelId ? { model_id: modelId } : {});
   },
+
+  /* =====================================================
+     PRO USER DB SETTINGS
+  ===================================================== */
+  saveProUserDb(data: {
+    pro_user_id: number;
+    db_host: string;
+    db_name: string;
+    db_user: string;
+    db_pass?: string;
+    db_charset?: string;
+  }) {
+    return this.query('save_pro_user_db', data);
+  },
+
+  getProUserDb(proUserId: number) {
+    return this.query('get_pro_user_db', { pro_user_id: proUserId });
+  },
 };
 
 export default api;
