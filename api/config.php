@@ -102,6 +102,46 @@ define('ALLOWED_ORIGINS', [
 
 /**
  * ------------------------------------------------------------
+ * 3b) Pro DB credential encryption helpers
+ * Key stored in .env as PRO_DB_ENCRYPTION_KEY (base64-encoded 32 bytes).
+ * Generate once: php -r "echo base64_encode(random_bytes(32)) . PHP_EOL;"
+ * ------------------------------------------------------------
+ */
+function proDbEncrypt(string $plaintext): string
+{
+    $rawKey = base64_decode((string)env('PRO_DB_ENCRYPTION_KEY', ''));
+    if (!$rawKey || strlen($rawKey) !== 32) {
+        throw new \Exception('PRO_DB_ENCRYPTION_KEY manquant ou invalide (32 bytes requis, encodé en base64).');
+    }
+    $iv = random_bytes(16);
+    $ciphertext = openssl_encrypt($plaintext, 'aes-256-cbc', $rawKey, OPENSSL_RAW_DATA, $iv);
+    if ($ciphertext === false) {
+        throw new \Exception('Chiffrement DB échoué.');
+    }
+    return base64_encode($iv . $ciphertext);
+}
+
+function proDbDecrypt(string $encoded): string
+{
+    $rawKey = base64_decode((string)env('PRO_DB_ENCRYPTION_KEY', ''));
+    if (!$rawKey || strlen($rawKey) !== 32) {
+        throw new \Exception('PRO_DB_ENCRYPTION_KEY manquant ou invalide.');
+    }
+    $data = base64_decode($encoded);
+    if (strlen($data) < 17) {
+        throw new \Exception('Données chiffrées corrompues.');
+    }
+    $iv         = substr($data, 0, 16);
+    $ciphertext = substr($data, 16);
+    $plain = openssl_decrypt($ciphertext, 'aes-256-cbc', $rawKey, OPENSSL_RAW_DATA, $iv);
+    if ($plain === false) {
+        throw new \Exception('Déchiffrement DB échoué.');
+    }
+    return $plain;
+}
+
+/**
+ * ------------------------------------------------------------
  * 3) DB connection
  * ------------------------------------------------------------
  */

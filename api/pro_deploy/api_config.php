@@ -3,7 +3,9 @@ declare(strict_types=1);
 
 /**
  * Pro Site API config
- * Connects to the pro's own database + Sunbox main API bridge.
+ * DB credentials are NOT stored locally.
+ * They are fetched at runtime from Sunbox (encrypted at rest) via the API token.
+ * Only SUNBOX_API_URL and SUNBOX_API_TOKEN are needed in .env.
  */
 
 function loadEnvFile(): void
@@ -56,31 +58,69 @@ function envBool(string $key, bool $default = false): bool
     return in_array($v, ['1', 'true', 'yes', 'on'], true);
 }
 
-define('API_DEBUG', envBool('API_DEBUG', false));
-define('DB_HOST',    env('DB_HOST', 'localhost'));
-define('DB_NAME',    env('DB_NAME', ''));
-define('DB_USER',    env('DB_USER', ''));
-define('DB_PASS',    env('DB_PASS', ''));
-define('DB_CHARSET', env('DB_CHARSET', 'utf8mb4'));
-
-// Sunbox main API credentials
+define('API_DEBUG',        envBool('API_DEBUG', false));
 define('SUNBOX_API_URL',   rtrim((string)env('SUNBOX_API_URL', 'https://sunbox-mauritius.com/api'), '/'));
 define('SUNBOX_API_TOKEN', (string)env('SUNBOX_API_TOKEN', ''));
 define('SUNBOX_DOMAIN',    (string)env('SUNBOX_DOMAIN', ''));
 define('VAT_RATE',         (float)env('VAT_RATE', 15));
 
+/**
+ * Fetch DB credentials from Sunbox main API (server-to-server, encrypted at rest).
+ * Result is cached in a static variable for the duration of this PHP request.
+ */
+function getDbConfig(): array
+{
+    static $cfg = null;
+    if ($cfg !== null) return $cfg;
+
+    $url  = SUNBOX_API_URL . '/pro_public.php?action=get_db_config&token=' . urlencode(SUNBOX_API_TOKEN);
+    $opts = [
+        'http' => [
+            'method'  => 'GET',
+            'header'  => "Accept: application/json\r\nUser-Agent: ProSite/1.0\r\n",
+            'timeout' => 5,
+        ],
+        'ssl' => ['verify_peer' => true, 'verify_peer_name' => true],
+    ];
+
+    $raw = @file_get_contents($url, false, stream_context_create($opts));
+    if ($raw === false) {
+        throw new \Exception('Impossible de récupérer la configuration de la base de données depuis Sunbox.');
+    }
+    $json = json_decode($raw, true);
+    if (!$json || !($json['success'] ?? false)) {
+        throw new \Exception($json['error'] ?? 'Erreur de configuration DB Sunbox.');
+    }
+    $cfg = $json['data'];
+    return $cfg;
+}
+
+/**
+ * Get PDO connection to the pro site's own database.
+ * Credentials are fetched from Sunbox — no local DB config needed.
+ */
 function getDB(): PDO
 {
     static $pdo = null;
-    if ($pdo === null) {
-        if (!DB_NAME || !DB_USER) throw new Exception("Database env missing.");
-        $dsn = "mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=" . DB_CHARSET;
-        $pdo = new PDO($dsn, DB_USER, DB_PASS, [
-            PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_EMULATE_PREPARES   => false,
-        ]);
+    if ($pdo !== null) return $pdo;
+
+    $cfg = getDbConfig();
+    $host    = $cfg['host']    ?? 'localhost';
+    $name    = $cfg['name']    ?? '';
+    $user    = $cfg['user']    ?? '';
+    $pass    = $cfg['pass']    ?? '';
+    $charset = $cfg['charset'] ?? 'utf8mb4';
+
+    if (!$name || !$user) {
+        throw new \Exception('Configuration DB incomplète.');
     }
+
+    $dsn = "mysql:host={$host};dbname={$name};charset={$charset}";
+    $pdo = new PDO($dsn, $user, $pass, [
+        PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        PDO::ATTR_EMULATE_PREPARES   => false,
+    ]);
     return $pdo;
 }
 
@@ -173,9 +213,6 @@ function checkSunboxCredits(): array
 
 /**
  * Deduct credits from Sunbox main API.
- * @param float $amount Amount to deduct
- * @param string $reason Reason code
- * @param int|null $quoteId
  */
 function deductSunboxCredits(float $amount, string $reason, ?int $quoteId = null): array
 {

@@ -2581,7 +2581,8 @@ try {
                 SELECT u.id, u.name, u.email, u.role,
                        pp.company_name, pp.address, pp.vat_number, pp.brn_number,
                        pp.phone, pp.logo_url, pp.sunbox_margin_percent, pp.credits, pp.is_active,
-                       pp.domain, pp.api_token
+                       pp.domain, pp.api_token,
+                       pp.db_host, pp.db_name, pp.db_user
                 FROM users u
                 LEFT JOIN professional_profiles pp ON pp.user_id = u.id
                 WHERE u.role = 'professional'
@@ -2595,6 +2596,12 @@ try {
             validateRequired($body, ['name', 'email', 'password', 'company_name']);
             $passwordHash = password_hash((string)$body['password'], PASSWORD_BCRYPT);
             $apiToken = bin2hex(random_bytes(32));
+
+            $dbPassEnc = '';
+            if (!empty($body['db_pass'])) {
+                $dbPassEnc = proDbEncrypt((string)$body['db_pass']);
+            }
+
             $db->beginTransaction();
             try {
                 $stmt = $db->prepare("
@@ -2605,8 +2612,9 @@ try {
 
                 $stmt = $db->prepare("
                     INSERT INTO professional_profiles
-                        (user_id, company_name, address, vat_number, brn_number, phone, domain, api_token, is_active)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+                        (user_id, company_name, address, vat_number, brn_number, phone, domain, api_token,
+                         db_host, db_name, db_user, db_pass_enc, is_active)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                 ");
                 $stmt->execute([
                     $userId,
@@ -2617,6 +2625,10 @@ try {
                     $body['phone'] ?? '',
                     $body['domain'] ?? '',
                     $apiToken,
+                    $body['db_host'] ?? 'localhost',
+                    $body['db_name'] ?? '',
+                    $body['db_user'] ?? '',
+                    $dbPassEnc,
                 ]);
                 $db->commit();
                 ok(['id' => $userId, 'api_token' => $apiToken]);
@@ -2650,6 +2662,10 @@ try {
             if (array_key_exists('phone', $body)) { $profSets[] = 'phone = ?'; $profParams[] = $body['phone']; }
             if (array_key_exists('domain', $body)) { $profSets[] = 'domain = ?'; $profParams[] = strtolower(trim($body['domain'])); }
             if (array_key_exists('logo_url', $body)) { $profSets[] = 'logo_url = ?'; $profParams[] = $body['logo_url']; }
+            if (array_key_exists('db_host', $body)) { $profSets[] = 'db_host = ?'; $profParams[] = $body['db_host']; }
+            if (array_key_exists('db_name', $body)) { $profSets[] = 'db_name = ?'; $profParams[] = $body['db_name']; }
+            if (array_key_exists('db_user', $body)) { $profSets[] = 'db_user = ?'; $profParams[] = $body['db_user']; }
+            if (!empty($body['db_pass'])) { $profSets[] = 'db_pass_enc = ?'; $profParams[] = proDbEncrypt((string)$body['db_pass']); }
             if (array_key_exists('sunbox_margin_percent', $body)) { $profSets[] = 'sunbox_margin_percent = ?'; $profParams[] = (float)$body['sunbox_margin_percent']; }
             if (array_key_exists('is_active', $body)) { $profSets[] = 'is_active = ?'; $profParams[] = (int)(bool)$body['is_active']; }
             if (!empty($profSets)) {

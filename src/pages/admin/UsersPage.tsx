@@ -49,6 +49,10 @@ interface ProUser {
   domain?: string;
   api_token?: string;
   logo_url?: string;
+  db_host?: string;
+  db_name?: string;
+  db_user?: string;
+  db_pass?: string; // write-only, never returned from API
 }
 
 const emptyUser: ProUser = {
@@ -63,6 +67,10 @@ const emptyUser: ProUser = {
   sunbox_margin_percent: 0,
   domain: '',
   logo_url: '',
+  db_host: 'localhost',
+  db_name: '',
+  db_user: '',
+  db_pass: '',
   is_active: true,
 };
 
@@ -537,6 +545,58 @@ export default function UsersPage() {
                   <Label>Compte actif</Label>
                 </div>
               )}
+
+              {/* DB Config */}
+              <div className="border rounded-lg p-4 space-y-3 bg-gray-50">
+                <p className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                  🗄️ Configuration de la base de données
+                </p>
+                <p className="text-xs text-gray-500">
+                  Créez la base de données sur le serveur, puis renseignez les identifiants ici.
+                  Ils seront stockés chiffrés et transmis de façon sécurisée au site pro.
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label>Hôte DB</Label>
+                    <Input
+                      value={editingUser.db_host ?? 'localhost'}
+                      onChange={(e) => setEditingUser({ ...editingUser, db_host: e.target.value })}
+                      placeholder="localhost"
+                    />
+                  </div>
+                  <div>
+                    <Label>Nom de la base de données</Label>
+                    <Input
+                      value={editingUser.db_name ?? ''}
+                      onChange={(e) => setEditingUser({ ...editingUser, db_name: e.target.value })}
+                      placeholder="mauriti2_pro_poolbuilder"
+                    />
+                  </div>
+                  <div>
+                    <Label>Utilisateur DB</Label>
+                    <Input
+                      value={editingUser.db_user ?? ''}
+                      onChange={(e) => setEditingUser({ ...editingUser, db_user: e.target.value })}
+                      placeholder="mauriti2_poolbuilder"
+                    />
+                  </div>
+                  <div>
+                    <Label>
+                      Mot de passe DB
+                      {editingUser.id && (
+                        <span className="text-xs text-gray-400 ml-1">(laisser vide = inchangé)</span>
+                      )}
+                    </Label>
+                    <Input
+                      type="password"
+                      value={editingUser.db_pass ?? ''}
+                      onChange={(e) => setEditingUser({ ...editingUser, db_pass: e.target.value })}
+                      placeholder="••••••••"
+                      autoComplete="new-password"
+                    />
+                  </div>
+                </div>
+              </div>
 
               <div className="flex justify-end gap-2 pt-4">
                 <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
