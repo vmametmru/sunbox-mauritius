@@ -67,21 +67,6 @@ $companyName = $user['company_name'] ?: $user['name'];
 
 $templateDir = __DIR__ . '/pro_deploy';
 
-// ── Build the ZIP in memory ───────────────────────────────────────────────────
-if (!class_exists('ZipArchive')) {
-    http_response_code(500);
-    echo json_encode(['error' => 'ZipArchive extension manquante sur le serveur'], JSON_UNESCAPED_UNICODE);
-    exit();
-}
-
-$zipPath = sys_get_temp_dir() . '/sunbox_pro_' . $userId . '_' . time() . '.zip';
-$zip = new ZipArchive();
-if ($zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
-    http_response_code(500);
-    echo json_encode(['error' => 'Impossible de créer le ZIP'], JSON_UNESCAPED_UNICODE);
-    exit();
-}
-
 /**
  * Replace template placeholders with actual values.
  */
@@ -99,85 +84,159 @@ $placeholders = [
     'COMPANY_NAME' => $companyName,
 ];
 
-// ── Add template files to ZIP ─────────────────────────────────────────────────
+// ── Collect files to include in ZIP ──────────────────────────────────────────
 
-// Map: [source file in pro_deploy/] => [path inside ZIP]
+/** @var array<string,string> $files  zipPath => fileContent */
+$files = [];
+
+// Template files: [source file in pro_deploy/] => [path inside ZIP]
 $templateFiles = [
-    'README.md'          => 'README.md',
-    'dot_env_example'    => '.env.example',
-    'api_config.php'     => 'api/config.php',
-    'api_index.php'      => 'api/index.php',
-    'api_htaccess'       => 'api/.htaccess',
-    'htaccess'           => '.htaccess',
-    'pro_site_schema.sql'=> 'database/pro_site_schema.sql',
+    'README.md'           => 'README.md',
+    'dot_env_example'     => '.env.example',
+    'api_config.php'      => 'api/config.php',
+    'api_index.php'       => 'api/index.php',
+    'api_htaccess'        => 'api/.htaccess',
+    'htaccess'            => '.htaccess',
+    'pro_site_schema.sql' => 'database/pro_site_schema.sql',
 ];
 
 foreach ($templateFiles as $src => $dest) {
     $srcPath = $templateDir . '/' . $src;
     if (!is_file($srcPath)) continue;
-
     $content = file_get_contents($srcPath);
     if ($content === false) continue;
-
-    $content = replacePlaceholders($content, $placeholders);
-    $zip->addFromString($dest, $content);
+    $files[$dest] = replacePlaceholders($content, $placeholders);
 }
 
-// ── Add a vite environment template ──────────────────────────────────────────
-$viteEnv = <<<ENV
-# Vite environment for pro site build
-# Set these before running: npm run build
+// Vite environment template
+$files['.env.production'] = "# Vite environment for pro site build\n"
+    . "# Set these before running: npm run build\n\n"
+    . "VITE_PRO_MODE=true\n"
+    . "VITE_API_URL=/api\n"
+    . "VITE_SUNBOX_API_URL=https://sunbox-mauritius.com/api\n"
+    . "VITE_SUNBOX_API_TOKEN={$token}\n"
+    . "VITE_COMPANY_NAME={$companyName}\n"
+    . "VITE_DOMAIN={$domain}\n";
 
-VITE_PRO_MODE=true
-VITE_API_URL=/api
-VITE_SUNBOX_API_URL=https://sunbox-mauritius.com/api
-VITE_SUNBOX_API_TOKEN={$token}
-VITE_COMPANY_NAME={$companyName}
-VITE_DOMAIN={$domain}
-ENV;
-$zip->addFromString('.env.production', $viteEnv);
+// Build instructions
+$files['BUILD_INSTRUCTIONS.md'] = "# Frontend Build Instructions\n\n"
+    . "## Prerequisites\n- Node.js 18+\n- npm 9+\n\n"
+    . "## Steps\n\n"
+    . "1. Clone or download the Sunbox frontend source:\n"
+    . "   git clone https://github.com/vmametmru/sunbox-mauritius.git\n\n"
+    . "2. Copy the .env.production file from this package to the project root\n\n"
+    . "3. Install dependencies:\n   npm install\n\n"
+    . "4. Build for production:\n   npm run build\n\n"
+    . "5. Upload the contents of the `dist/` folder to your web server root (public_html/)\n\n"
+    . "## Notes\n"
+    . "- VITE_PRO_MODE=true hides BOQ, model creation, and admin-only features\n"
+    . "- The site automatically enters catalog mode when credits run out\n"
+    . "- Models and prices are fetched from Sunbox main API using your token\n";
 
-// ── Add a build instructions file ────────────────────────────────────────────
-$buildInstructions = <<<INST
-# Frontend Build Instructions
+// ── Build ZIP bytes in-memory (pure PHP, no extensions needed) ───────────────
 
-## Prerequisites
-- Node.js 18+
-- npm 9+
+/**
+ * Build a ZIP archive as a string.
+ * Implements ZIP 2.0 (stored / no compression) – perfectly adequate for text files.
+ *
+ * @param array<string,string> $entries  zipPath => fileContent
+ * @return string  Raw ZIP bytes
+ */
+function buildZip(array $entries): string
+{
+    $localHeaders  = '';
+    $centralDir    = '';
+    $offset        = 0;
+    $dosDate       = dosDateTime();
 
-## Steps
+    foreach ($entries as $name => $data) {
+        $crc    = crc32($data);
+        $size   = strlen($data);
+        $nameB  = $name;
+        $nameLen = strlen($nameB);
 
-1. Clone or download the Sunbox frontend source:
-   git clone https://github.com/vmametmru/sunbox-mauritius.git
+        // Local file header
+        $local  = "\x50\x4b\x03\x04";   // signature
+        $local .= pack('v', 20);          // version needed: 2.0
+        $local .= pack('v', 0);           // general purpose bit flag
+        $local .= pack('v', 0);           // compression: stored
+        $local .= pack('V', $dosDate);    // last mod time+date (packed together)
+        $local .= pack('V', $crc);        // CRC-32
+        $local .= pack('V', $size);       // compressed size
+        $local .= pack('V', $size);       // uncompressed size
+        $local .= pack('v', $nameLen);    // file name length
+        $local .= pack('v', 0);           // extra field length
+        $local .= $nameB;                 // file name
+        $local .= $data;                  // file data
 
-2. Copy the .env.production file from this package to the project root
+        $localHeaders .= $local;
 
-3. Install dependencies:
-   npm install
+        // Central directory entry
+        $central  = "\x50\x4b\x01\x02";  // signature
+        $central .= pack('v', 20);         // version made by
+        $central .= pack('v', 20);         // version needed
+        $central .= pack('v', 0);          // general purpose bit flag
+        $central .= pack('v', 0);          // compression
+        $central .= pack('V', $dosDate);   // last mod time+date
+        $central .= pack('V', $crc);       // CRC-32
+        $central .= pack('V', $size);      // compressed size
+        $central .= pack('V', $size);      // uncompressed size
+        $central .= pack('v', $nameLen);   // file name length
+        $central .= pack('v', 0);          // extra field length
+        $central .= pack('v', 0);          // file comment length
+        $central .= pack('v', 0);          // disk number start
+        $central .= pack('v', 0);          // internal file attributes
+        $central .= pack('V', 0);          // external file attributes
+        $central .= pack('V', $offset);    // relative offset of local header
+        $central .= $nameB;                // file name
 
-4. Build for production:
-   npm run build
+        $centralDir .= $central;
 
-5. Upload the contents of the `dist/` folder to your web server root (public_html/)
+        // Local header (30) + name + data
+        $offset += 30 + $nameLen + $size;
+    }
 
-## Notes
-- VITE_PRO_MODE=true hides BOQ, model creation, and admin-only features
-- The site automatically enters catalog mode when credits run out
-- Models and prices are fetched from Sunbox main API using your token
-INST;
-$zip->addFromString('BUILD_INSTRUCTIONS.md', $buildInstructions);
+    $cdSize   = strlen($centralDir);
+    $cdOffset = $offset;
+    $numFiles = count($entries);
 
-$zip->close();
+    // End of central directory record
+    $eocd  = "\x50\x4b\x05\x06";   // signature
+    $eocd .= pack('v', 0);           // disk number
+    $eocd .= pack('v', 0);           // disk with start of central directory
+    $eocd .= pack('v', $numFiles);   // entries on this disk
+    $eocd .= pack('v', $numFiles);   // total entries
+    $eocd .= pack('V', $cdSize);     // size of central directory
+    $eocd .= pack('V', $cdOffset);   // offset of central directory
+    $eocd .= pack('v', 0);           // comment length
+
+    return $localHeaders . $centralDir . $eocd;
+}
+
+/**
+ * Returns current date/time packed as a DOS date-time DWORD (4 bytes little-endian).
+ * DOS time: bits 0-4 = seconds/2, 5-10 = minutes, 11-15 = hours
+ * DOS date: bits 0-4 = day, 5-8 = month, 9-15 = year-1980
+ */
+function dosDateTime(): int
+{
+    $t = getdate();
+    $time = ($t['hours'] << 11) | ($t['minutes'] << 5) | (int)($t['seconds'] / 2);
+    $date = (($t['year'] - 1980) << 9) | ($t['mon'] << 5) | $t['mday'];
+    // Pack as a single 32-bit DWORD: low word = time, high word = date
+    return ($date << 16) | $time;
+}
+
+$zipBytes = buildZip($files);
 
 // ── Stream ZIP to browser ─────────────────────────────────────────────────────
 $filename = 'sunbox-pro-' . preg_replace('/[^a-z0-9-]/', '-', strtolower($domain)) . '.zip';
 
 header('Content-Type: application/zip');
 header('Content-Disposition: attachment; filename="' . $filename . '"');
-header('Content-Length: ' . filesize($zipPath));
+header('Content-Length: ' . strlen($zipBytes));
 header('Cache-Control: no-cache, no-store');
 header('Pragma: no-cache');
 
-readfile($zipPath);
-@unlink($zipPath);
+echo $zipBytes;
 exit();
