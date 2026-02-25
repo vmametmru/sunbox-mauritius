@@ -2511,6 +2511,45 @@ try {
             break;
         }
 
+        case 'get_active_discounts': {
+            $modelId = isset($body['model_id']) ? (int)$body['model_id'] : null;
+            $today = date('Y-m-d');
+            if ($modelId) {
+                // Return discounts active today that apply to this model (global or explicitly associated)
+                $stmt = $db->prepare("
+                    SELECT d.*
+                    FROM discounts d
+                    WHERE d.is_active = 1
+                      AND d.start_date <= ? AND d.end_date >= ?
+                      AND (
+                          NOT EXISTS (SELECT 1 FROM discount_models dm WHERE dm.discount_id = d.id)
+                          OR EXISTS (SELECT 1 FROM discount_models dm WHERE dm.discount_id = d.id AND dm.model_id = ?)
+                      )
+                    ORDER BY d.discount_value DESC
+                ");
+                $stmt->execute([$today, $today, $modelId]);
+            } else {
+                $stmt = $db->prepare("
+                    SELECT d.*
+                    FROM discounts d
+                    WHERE d.is_active = 1
+                      AND d.start_date <= ? AND d.end_date >= ?
+                    ORDER BY d.discount_value DESC
+                ");
+                $stmt->execute([$today, $today]);
+            }
+            $discounts = $stmt->fetchAll();
+            foreach ($discounts as &$d) {
+                $mStmt = $db->prepare("SELECT model_id FROM discount_models WHERE discount_id = ?");
+                $mStmt->execute([$d['id']]);
+                $d['model_ids'] = array_column($mStmt->fetchAll(), 'model_id');
+                $d['discount_value'] = (float)$d['discount_value'];
+                $d['is_active'] = (bool)$d['is_active'];
+            }
+            ok($discounts);
+            break;
+        }
+
         default:
             fail('Invalid action', 400);
     }

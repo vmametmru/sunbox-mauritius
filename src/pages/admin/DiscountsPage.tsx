@@ -168,9 +168,9 @@ export default function DiscountsPage() {
   ====================================================== */
   const toggleModel = (modelId: number) => {
     if (!editingDiscount) return;
-    const ids = editingDiscount.model_ids.includes(modelId)
-      ? editingDiscount.model_ids.filter((id) => id !== modelId)
-      : [...editingDiscount.model_ids, modelId];
+    const ids = editingDiscount.model_ids.map(Number).includes(modelId)
+      ? editingDiscount.model_ids.filter((id) => Number(id) !== modelId)
+      : [...editingDiscount.model_ids.map(Number), modelId];
     setEditingDiscount({ ...editingDiscount, model_ids: ids });
   };
 

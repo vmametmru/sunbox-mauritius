@@ -79,6 +79,16 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
   const [boqOptions, setBOQOptions] = useState<ModelOption[]>([]);
   const [baseCategories, setBaseCategories] = useState<BOQBaseCategory[]>([]);
   const [lightbox, setLightbox] = useState<string | null>(null);
+
+  // Active discounts for the current model
+  const [activeDiscounts, setActiveDiscounts] = useState<Array<{
+    id: number;
+    name: string;
+    discount_type: 'percentage' | 'fixed';
+    discount_value: number;
+    apply_to: 'base_price' | 'options' | 'both';
+    end_date: string;
+  }>>([]);
   
   // Option quantities for qty_editable options (keyed by option id)
   const [optionQuantities, setOptionQuantities] = useState<Record<number, number>>({});
@@ -246,6 +256,10 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
       loadBOQOptions();
       loadBaseCategories();
       loadSavedClientInfo();
+      // Load active discounts for this model
+      api.getActiveDiscounts(model.id).then((data) => {
+        setActiveDiscounts(Array.isArray(data) ? data : []);
+      }).catch(() => setActiveDiscounts([]));
       // Load pool-specific data for pool models
       if (model.type === 'pool') {
         loadPoolData(model.id);
@@ -321,7 +335,8 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
     
     try {
       const optionsTotal = calculateOptionsTotalTTC();
-      const totalPrice = calculateTotalTTC();
+      const discountAmount = calculateDiscountTotal();
+      const totalPrice = Math.round(activeDiscounts.length > 0 ? calculateTotalAfterDiscounts() : calculateTotalTTC());
       const deviceId = getDeviceId();
       
       const result = await api.createQuote({
@@ -596,6 +611,37 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
       return calculateTTC(dynamicPrice, vatRate);
     }
     return calculateTTC(opt.price, vatRate);
+  };
+
+  // Calculate the total discount amount (in TTC) from all active discounts
+  const calculateDiscountTotal = () => {
+    const baseTTC = getEffectiveBasePrice();
+    const optionsTTC = calculateOptionsTotalTTC();
+    let total = 0;
+    for (const d of activeDiscounts) {
+      const value = Number(d.discount_value);
+      if (d.discount_type === 'percentage') {
+        if (d.apply_to === 'base_price') total += baseTTC * value / 100;
+        else if (d.apply_to === 'options') total += optionsTTC * value / 100;
+        else total += (baseTTC + optionsTTC) * value / 100;
+      } else {
+        // fixed amount — apply directly
+        total += value;
+      }
+    }
+    return total;
+  };
+
+  // Total after discounts
+  const calculateTotalAfterDiscounts = () => {
+    return Math.max(0, calculateTotalTTC() - calculateDiscountTotal());
+  };
+
+  // Format a date string (YYYY-MM-DD) to DD/MM/YYYY
+  const formatDate = (d: string) => {
+    if (!d) return '';
+    const [y, m, day] = d.split('-');
+    return `${day}/${m}/${y}`;
   };
 
   if (!model) return null;
@@ -974,10 +1020,39 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                     Rs {Math.round(calculateOptionsTotalTTC()).toLocaleString()}
                   </p>
                 </div>
+                {activeDiscounts.length > 0 && activeDiscounts.map((d) => {
+                  const baseTTC = getEffectiveBasePrice();
+                  const optTTC = calculateOptionsTotalTTC();
+                  let amount = 0;
+                  const value = Number(d.discount_value);
+                  if (d.discount_type === 'percentage') {
+                    if (d.apply_to === 'base_price') amount = baseTTC * value / 100;
+                    else if (d.apply_to === 'options') amount = optTTC * value / 100;
+                    else amount = (baseTTC + optTTC) * value / 100;
+                  } else {
+                    amount = value;
+                  }
+                  const label = d.discount_type === 'percentage'
+                    ? `${value}%`
+                    : `Rs ${value.toLocaleString()}`;
+                  return (
+                    <div key={d.id} className="flex justify-between items-center">
+                      <p className="text-sm text-green-700 font-medium">
+                        🏷 Remise {d.name} ({label})
+                        <span className="text-xs text-gray-400 font-normal ml-1">
+                          — valide jusqu'au {formatDate(d.end_date)}
+                        </span>
+                      </p>
+                      <p className="text-sm font-medium text-green-700">
+                        − Rs {Math.round(amount).toLocaleString()}
+                      </p>
+                    </div>
+                  );
+                })}
                 <div className="flex justify-between items-center pt-2 border-t border-gray-200">
                   <p className="text-sm text-gray-500">Total général TTC</p>
                   <p className="text-xl font-bold text-gray-800">
-                    Rs {Math.round(calculateTotalTTC()).toLocaleString()}
+                    Rs {Math.round(activeDiscounts.length > 0 ? calculateTotalAfterDiscounts() : calculateTotalTTC()).toLocaleString()}
                   </p>
                 </div>
               </div>

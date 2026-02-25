@@ -838,6 +838,10 @@ export const api = {
   deleteDiscount(id: number) {
     return this.query('delete_discount', { id });
   },
+
+  getActiveDiscounts(modelId?: number) {
+    return this.query('get_active_discounts', modelId ? { model_id: modelId } : {});
+  },
 };
 
 export default api;

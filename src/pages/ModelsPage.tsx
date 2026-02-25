@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import PublicLayout from '@/layouts/PublicLayout';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import {
@@ -34,8 +35,19 @@ interface Model {
   plan_url?: string;
 }
 
+interface ActiveDiscount {
+  id: number;
+  name: string;
+  discount_type: 'percentage' | 'fixed';
+  discount_value: number;
+  apply_to: 'base_price' | 'options' | 'both';
+  end_date: string;
+  model_ids: number[];
+}
+
 export default function ModelsPage() {
   const [models, setModels] = useState<Model[]>([]);
+  const [activeDiscounts, setActiveDiscounts] = useState<ActiveDiscount[]>([]);
   const [filterType, setFilterType] = useState<'all' | 'container' | 'pool'>('all');
   const [modalImage, setModalImage] = useState<string | null>(null);
   const { data: siteSettings } = useSiteSettings();
@@ -82,6 +94,9 @@ export default function ModelsPage() {
       setRangeLimits(r => ({ ...r, surface: [minSurface, maxSurface] }));
       setFilters(f => ({ ...f, surfaceMin: minSurface, surfaceMax: maxSurface }));
     });
+    api.getActiveDiscounts().then((data) => {
+      setActiveDiscounts(Array.isArray(data) ? data : []);
+    }).catch(() => {});
   }, []);
 
   // Recompute TTC price limits whenever models or vatRate changes
@@ -101,6 +116,20 @@ export default function ModelsPage() {
     };
     setSelectedModel(modelWithPrice);
     setShowConfigurator(true);
+  };
+
+  // Get applicable discounts for a model (global = no model_ids, or model in model_ids)
+  const getModelDiscounts = (modelId: number): ActiveDiscount[] => {
+    return activeDiscounts.filter(d =>
+      d.model_ids.length === 0 || d.model_ids.map(Number).includes(modelId)
+    );
+  };
+
+  // Format YYYY-MM-DD → DD/MM/YYYY
+  const formatDate = (d: string) => {
+    if (!d) return '';
+    const [y, m, day] = d.split('-');
+    return `${day}/${m}/${y}`;
   };
 
   const filtered = models
@@ -176,7 +205,9 @@ export default function ModelsPage() {
 
         {/* Grille modèles */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filtered.map((model) => (
+          {filtered.map((model) => {
+            const modelDiscounts = getModelDiscounts(model.id);
+            return (
             <div key={model.id} className="border rounded-lg overflow-hidden shadow-sm bg-white">
               <div className="relative">
                 <img
@@ -193,6 +224,15 @@ export default function ModelsPage() {
                     onClick={() => setModalImage(model.plan_url!)}
                   />
                 )}
+                {modelDiscounts.length > 0 && (
+                  <div className="absolute top-2 right-2 flex flex-col gap-1 items-end">
+                    {modelDiscounts.map(d => (
+                      <Badge key={d.id} className="bg-green-600 text-white text-xs px-2 py-0.5">
+                        🏷 {d.discount_type === 'percentage' ? `−${d.discount_value}%` : `−Rs ${Number(d.discount_value).toLocaleString()}`}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="p-4 space-y-1">
@@ -203,6 +243,15 @@ export default function ModelsPage() {
                 <p className="text-orange-600 font-semibold">
                   {model.type === 'pool' ? 'Cliquez sur configurer' : `A partir de ${Number(getDisplayPriceTTC(model)).toLocaleString(undefined, { maximumFractionDigits: 0 })} Rs TTC`}
                 </p>
+                {modelDiscounts.length > 0 && (
+                  <div className="space-y-0.5">
+                    {modelDiscounts.map(d => (
+                      <p key={d.id} className="text-green-700 text-xs font-medium">
+                        🏷 {d.name} — valide jusqu'au {formatDate(d.end_date)}
+                      </p>
+                    ))}
+                  </div>
+                )}
 
                 <div className="pt-3">
                   <Button variant="outline" onClick={() => openConfigurator(model)}>
@@ -211,7 +260,8 @@ export default function ModelsPage() {
                 </div>
               </div>
             </div>
-          ))}
+          );
+          })}
         </div>
       </div>
 
