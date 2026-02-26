@@ -2572,6 +2572,116 @@ try {
             break;
         }
 
+        // === ADMIN USERS MANAGEMENT
+        case 'get_users': {
+            requireAdmin();
+            $stmt = $db->query("SELECT id, email, name, role, is_active, last_login, created_at FROM users ORDER BY id ASC");
+            $users = $stmt->fetchAll();
+            foreach ($users as &$u) {
+                $u['id'] = (int)$u['id'];
+                $u['is_active'] = (bool)$u['is_active'];
+            }
+            ok($users);
+            break;
+        }
+
+        case 'create_user': {
+            requireAdmin();
+            validateRequired($body, ['email', 'name', 'password', 'role']);
+            $allowed = ['admin', 'manager', 'sales'];
+            if (!in_array($body['role'], $allowed, true)) {
+                fail('Rôle invalide');
+            }
+            $check = $db->prepare("SELECT id FROM users WHERE email = ?");
+            $check->execute([sanitize($body['email'])]);
+            if ($check->fetch()) {
+                fail('Cet email est déjà utilisé.');
+            }
+            $hash = password_hash((string)$body['password'], PASSWORD_BCRYPT);
+            $stmt = $db->prepare("INSERT INTO users (email, password_hash, name, role, is_active) VALUES (?, ?, ?, ?, ?)");
+            $stmt->execute([
+                sanitize($body['email']),
+                $hash,
+                sanitize($body['name']),
+                $body['role'],
+                isset($body['is_active']) ? (int)(bool)$body['is_active'] : 1,
+            ]);
+            ok(['id' => (int)$db->lastInsertId()]);
+            break;
+        }
+
+        case 'update_user': {
+            requireAdmin();
+            validateRequired($body, ['id']);
+            $id = (int)$body['id'];
+            $fields = [];
+            $params = [];
+            if (isset($body['email'])) {
+                $check = $db->prepare("SELECT id FROM users WHERE email = ? AND id != ?");
+                $check->execute([sanitize($body['email']), $id]);
+                if ($check->fetch()) {
+                    fail('Cet email est déjà utilisé.');
+                }
+                $fields[] = 'email = ?';
+                $params[] = sanitize($body['email']);
+            }
+            if (isset($body['name'])) {
+                $fields[] = 'name = ?';
+                $params[] = sanitize($body['name']);
+            }
+            if (isset($body['role'])) {
+                $allowed = ['admin', 'manager', 'sales'];
+                if (!in_array($body['role'], $allowed, true)) {
+                    fail('Rôle invalide');
+                }
+                $fields[] = 'role = ?';
+                $params[] = $body['role'];
+            }
+            if (isset($body['is_active'])) {
+                // Protect against deactivating the last active admin
+                if (!(bool)$body['is_active']) {
+                    $userRow = $db->prepare("SELECT role FROM users WHERE id = ?");
+                    $userRow->execute([$id]);
+                    $userRecord = $userRow->fetch();
+                    if ($userRecord && $userRecord['role'] === 'admin') {
+                        $adminCount = (int)$db->query("SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = 1")->fetchColumn();
+                        if ($adminCount <= 1) {
+                            fail("Impossible de désactiver le dernier administrateur actif.");
+                        }
+                    }
+                }
+                $fields[] = 'is_active = ?';
+                $params[] = (int)(bool)$body['is_active'];
+            }
+            if (!empty($body['password'])) {
+                $fields[] = 'password_hash = ?';
+                $params[] = password_hash((string)$body['password'], PASSWORD_BCRYPT);
+            }
+            if (!empty($fields)) {
+                $params[] = $id;
+                $db->prepare("UPDATE users SET " . implode(', ', $fields) . " WHERE id = ?")->execute($params);
+            }
+            ok();
+            break;
+        }
+
+        case 'delete_user': {
+            requireAdmin();
+            validateRequired($body, ['id']);
+            $id = (int)$body['id'];
+            // Protect against deleting the last admin
+            $adminCount = (int)$db->query("SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = 1")->fetchColumn();
+            $userRow = $db->prepare("SELECT role FROM users WHERE id = ?");
+            $userRow->execute([$id]);
+            $user = $userRow->fetch();
+            if ($user && $user['role'] === 'admin' && $adminCount <= 1) {
+                fail("Impossible de supprimer le dernier administrateur.");
+            }
+            $db->prepare("DELETE FROM users WHERE id = ?")->execute([$id]);
+            ok();
+            break;
+        }
+
         default:
             fail('Invalid action', 400);
     }
