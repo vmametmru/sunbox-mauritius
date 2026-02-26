@@ -73,6 +73,7 @@ const navItems: NavItem[] = [
     label: 'Paramètres',
     key: 'parametres',
     children: [
+      { icon: Users, label: 'Utilisateurs', path: '/admin/users' },
       { icon: Package, label: 'Modèles', path: '/admin/models' },
       { icon: Tag, label: 'Remises', path: '/admin/discounts' },
       { icon: ImageIcon, label: 'Photos', path: '/admin/media' },
@@ -93,7 +94,7 @@ const navItems: NavItem[] = [
 const groupPaths: Record<string, string[]> = {
   commerce: ['/admin/quotes'],
   contacts: ['/admin/contacts', '/admin/suppliers'],
-  parametres: ['/admin/models', '/admin/discounts', '/admin/media', '/admin/boq', '/admin/pool-prices', '/admin/pool-variables', '/admin/pool-template', '/admin/email', '/admin/payments', '/admin/site'],
+  parametres: ['/admin/users', '/admin/models', '/admin/discounts', '/admin/media', '/admin/boq', '/admin/pool-prices', '/admin/pool-variables', '/admin/pool-template', '/admin/email', '/admin/payments', '/admin/site'],
 };
 
 export default function AdminLayout() {

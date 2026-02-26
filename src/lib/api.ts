@@ -842,6 +842,25 @@ export const api = {
   getActiveDiscounts(modelId?: number) {
     return this.query('get_active_discounts', modelId ? { model_id: modelId } : {});
   },
+
+  /* =====================================================
+     ADMIN USERS MANAGEMENT
+  ===================================================== */
+  getUsers() {
+    return this.query('get_users');
+  },
+
+  createUser(user: { email: string; name: string; password: string; role: 'admin' | 'manager' | 'sales'; is_active?: boolean }) {
+    return this.query('create_user', user);
+  },
+
+  updateUser(user: { id: number; email?: string; name?: string; role?: 'admin' | 'manager' | 'sales'; is_active?: boolean; password?: string }) {
+    return this.query('update_user', user);
+  },
+
+  deleteUser(id: number) {
+    return this.query('delete_user', { id });
+  },
 };
 
 export default api;
