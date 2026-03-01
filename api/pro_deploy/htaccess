@@ -1,6 +1,6 @@
 Options -MultiViews
 RewriteEngine On
-RewriteBase /pros/{{DOMAIN}}/
+RewriteBase /
 
 # Deny .env access
 <Files ".env">

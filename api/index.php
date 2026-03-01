@@ -2755,6 +2755,18 @@ try {
                 if (file_exists($mainIndexPath)) {
                     $indexHtml = file_get_contents($mainIndexPath);
                     if ($indexHtml !== false) {
+                        // Rewrite root-relative asset paths to absolute Sunbox URLs so the browser
+                        // fetches JS/CSS from sunbox-mauritius.com (the pro site has no /assets/ folder).
+                        $sunboxBase = 'https://sunbox-mauritius.com';
+                        $indexHtml = str_replace('="/assets/', '="' . $sunboxBase . '/assets/', $indexHtml);
+                        $indexHtml = str_replace("='/assets/", "='" . $sunboxBase . "/assets/", $indexHtml);
+                        // Also rewrite favicon / manifest links that are root-relative
+                        $indexHtml = preg_replace(
+                            '#((?:href|src)=")(/(?!/)(?!#))#',
+                            '$1' . $sunboxBase . '$2',
+                            $indexHtml
+                        );
+
                         // Inject pro config script right before </head> (replace only first occurrence)
                         $apiUrlJson = json_encode($siteUrl . '/api', JSON_HEX_TAG | JSON_HEX_AMP);
                         $proConfig = '<script>window.__API_BASE_URL__=' . $apiUrlJson . ';window.__PRO_SITE__=true;</script>';
@@ -2762,7 +2774,7 @@ try {
                         if (file_put_contents($siteDir . '/index.html', $indexHtml) === false) {
                             $result['errors'][] = 'Avertissement: impossible d\'écrire index.html';
                         } else {
-                            $result['debug'][] = 'index.html déployé avec configuration API pro.';
+                            $result['debug'][] = 'index.html déployé avec chemins assets absolus + configuration API pro.';
                         }
                     } else {
                         $result['errors'][] = 'Avertissement: lecture de index.html échouée: ' . $mainIndexPath;
