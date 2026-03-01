@@ -2760,17 +2760,23 @@ try {
                         $sunboxBase = 'https://sunbox-mauritius.com';
                         $indexHtml = str_replace('="/assets/', '="' . $sunboxBase . '/assets/', $indexHtml);
                         $indexHtml = str_replace("='/assets/", "='" . $sunboxBase . "/assets/", $indexHtml);
-                        // Also rewrite favicon / manifest links that are root-relative
-                        $indexHtml = preg_replace(
-                            '#((?:href|src)=")(/(?!/)(?!#))#',
-                            '$1' . $sunboxBase . '$2',
-                            $indexHtml
-                        );
+                        // Rewrite common root-relative favicon/icon/manifest links using simple str_replace
+                        foreach (['/vite.svg', '/favicon.ico', '/favicon.png', '/apple-touch-icon.png', '/manifest.json', '/robots.txt'] as $rootFile) {
+                            $indexHtml = str_replace('="' . $rootFile . '"', '="' . $sunboxBase . $rootFile . '"', $indexHtml);
+                            $indexHtml = str_replace("='" . $rootFile . "'", "='" . $sunboxBase . $rootFile . "'", $indexHtml);
+                        }
 
-                        // Inject pro config script right before </head> (replace only first occurrence)
+                        // Inject pro config script right before </head> (str_replace, no regex)
                         $apiUrlJson = json_encode($siteUrl . '/api', JSON_HEX_TAG | JSON_HEX_AMP);
                         $proConfig = '<script>window.__API_BASE_URL__=' . $apiUrlJson . ';window.__PRO_SITE__=true;</script>';
-                        $indexHtml = preg_replace('#</head>#i', $proConfig . '</head>', $indexHtml, 1);
+                        $closeHead = '</head>';
+                        $closeHeadPos = stripos($indexHtml, $closeHead);
+                        if ($closeHeadPos !== false) {
+                            $indexHtml = substr($indexHtml, 0, $closeHeadPos) . $proConfig . substr($indexHtml, $closeHeadPos);
+                        } else {
+                            // Fallback: append config before </body> or at end
+                            $indexHtml .= $proConfig;
+                        }
                         if (file_put_contents($siteDir . '/index.html', $indexHtml) === false) {
                             $result['errors'][] = 'Avertissement: impossible d\'écrire index.html';
                         } else {
