@@ -37,3 +37,13 @@ export function useVatRate(): number {
 export function calculateTTC(priceHT: number, vatRate: number): number {
   return priceHT * (1 + vatRate / 100);
 }
+
+/**
+ * Calculate HT from TTC price using VAT rate from settings
+ * @param priceTTC - Price including taxes (TTC)
+ * @param vatRate - VAT rate as percentage (e.g., 15 for 15%)
+ * @returns Price excluding taxes (HT)
+ */
+export function calculateHT(priceTTC: number, vatRate: number): number {
+  return priceTTC / (1 + vatRate / 100);
+}
