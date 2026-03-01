@@ -111,10 +111,10 @@ export default function ModelsPage() {
   }, [models, vatRate]);
 
   const openConfigurator = (model: Model) => {
-    // Update the model with calculated TTC price before sending to configurator
+    // Pass the HT base price to the configurator (VAT is applied inside for display)
     const modelWithPrice = {
       ...model,
-      base_price: getDisplayPriceTTC(model),
+      base_price: getDisplayPriceHT(model),
     };
     setSelectedModel(modelWithPrice);
     setShowConfigurator(true);

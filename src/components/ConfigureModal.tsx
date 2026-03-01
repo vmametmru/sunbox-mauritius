@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useQuote, ModelOption } from '@/contexts/QuoteContext';
 import { api } from '@/lib/api';
-import { useSiteSettings, calculateTTC } from '@/hooks/use-site-settings';
+import { useSiteSettings, calculateTTC, calculateHT } from '@/hooks/use-site-settings';
 import { useToast } from '@/hooks/use-toast';
 import { evaluatePoolVariables, evaluateFormula, type PoolDimensions, type PoolVariable } from '@/lib/pool-formulas';
 
@@ -334,18 +334,23 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
     setIsSubmitting(true);
     
     try {
-      const optionsTotal = calculateOptionsTotalTTC();
-      const discountAmount = calculateDiscountTotal();
-      const totalPrice = Math.round(activeDiscounts.length > 0 ? calculateTotalAfterDiscounts() : calculateTotalTTC());
+      // Compute options total HT (raw prices without VAT, with quantity)
+      const optionsTotalHT = quoteData.selectedOptions.reduce(
+        (sum, opt) => sum + getOptionPriceHT(opt) * getOptionQty(opt.id),
+        0
+      );
+      // Total TTC after discounts, then convert back to HT for storage
+      const totalPriceTTC = Math.round(activeDiscounts.length > 0 ? calculateTotalAfterDiscounts() : calculateTotalTTC());
+      const totalPriceHT = Math.round(calculateHT(totalPriceTTC, vatRate));
       const deviceId = getDeviceId();
       
       const result = await api.createQuote({
         model_id: model.id,
         model_name: model.name,
         model_type: model.type,
-        base_price: Math.round(getEffectiveBasePrice()),
-        options_total: optionsTotal,
-        total_price: totalPrice,
+        base_price: Math.round(getEffectiveBasePriceHT()),
+        options_total: Math.round(optionsTotalHT),
+        total_price: totalPriceHT,
         customer_name: quoteData.customerName,
         customer_email: quoteData.customerEmail,
         customer_phone: quoteData.customerPhone,
@@ -355,7 +360,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
         selected_options: quoteData.selectedOptions.map(opt => ({
           option_id: opt.id,
           option_name: opt.name,
-          option_price: Math.round(getOptionDisplayPrice(opt)),
+          option_price: Math.round(getOptionPriceHT(opt) * getOptionQty(opt.id)),
           quantity: getOptionQty(opt.id),
         })),
         // Include pool dimensions in quote if pool model
@@ -527,15 +532,27 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
     }
   };
 
-  // Get the effective base price: for pool models use calculated price, otherwise use model base_price
-  const getEffectiveBasePrice = () => {
+  // Get the effective base price HT (for storage in DB)
+  const getEffectiveBasePriceHT = () => {
     if (isPoolModel && boqFullCategories.length > 0) {
-      // Apply unforeseen cost percentage to the base HT price
       const unforeseen = Number(model?.unforeseen_cost_percent ?? 10);
-      const basePriceHTWithUnforeseen = poolBasePrice * (1 + unforeseen / 100);
-      return calculateTTC(basePriceHTWithUnforeseen, vatRate);
+      return poolBasePrice * (1 + unforeseen / 100);
     }
+    // model.base_price is HT (set from ModelsPage)
     return Number(model?.base_price ?? 0);
+  };
+
+  // Get the effective base price TTC (for display)
+  const getEffectiveBasePrice = () => {
+    return calculateTTC(getEffectiveBasePriceHT(), vatRate);
+  };
+
+  // Get the unit HT price for an option (without quantity, used for DB storage)
+  const getOptionPriceHT = (opt: ModelOption): number => {
+    if (isPoolModel && opt.id >= BOQ_OPTION_ID_OFFSET) {
+      return getPoolOptionPrice(opt.id);
+    }
+    return Number(opt.price || 0);
   };
 
   // For pool models, BOQ options have dynamic prices based on dimensions
