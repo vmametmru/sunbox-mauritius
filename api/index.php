@@ -2679,7 +2679,7 @@ try {
             $userId = (int)$body['user_id'];
 
             $stmt = $db->prepare("
-                SELECT pp.domain, pp.api_token, pp.company_name, pp.db_name
+                SELECT pp.domain, pp.api_token, pp.company_name, pp.db_name, pp.logo_url
                 FROM professional_profiles pp WHERE pp.user_id = ?
             ");
             $stmt->execute([$userId]);
@@ -2779,8 +2779,16 @@ try {
                     if ($indexHtml !== false) {
                         // Inject pro config: point the React app to this pro site's own /api
                         // and flag it as a pro site (hides admin-only features).
-                        $apiUrlJson = json_encode($proBaseUrl . '/api', JSON_HEX_TAG | JSON_HEX_AMP);
-                        $proConfig  = '<script>window.__API_BASE_URL__=' . $apiUrlJson . ';window.__PRO_SITE__=true;</script>';
+                        $apiUrlJson  = json_encode($proBaseUrl . '/api', JSON_HEX_TAG | JSON_HEX_AMP);
+                        $logoUrl     = (string)($profile['logo_url'] ?? '');
+                        $logoJson    = json_encode($logoUrl,    JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE);
+                        $companyJson = json_encode($companyName, JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE);
+                        $proConfig   = '<script>'
+                            . 'window.__API_BASE_URL__='    . $apiUrlJson   . ';'
+                            . 'window.__PRO_SITE__=true;'
+                            . 'window.__PRO_LOGO_URL__='    . $logoJson    . ';'
+                            . 'window.__PRO_COMPANY_NAME__=' . $companyJson  . ';'
+                            . '</script>';
                         $closeHeadPos = stripos($indexHtml, '</head>');
                         if ($closeHeadPos !== false) {
                             $indexHtml = substr($indexHtml, 0, $closeHeadPos) . $proConfig . substr($indexHtml, $closeHeadPos);
@@ -2952,6 +2960,22 @@ try {
                 VALUES (?, ?, ?, ?)
                 ON DUPLICATE KEY UPDATE price_adjustment = ?, is_enabled = ?, updated_at = NOW()
             ")->execute([$uid, $mid, $adj, $enabled, $adj, $enabled]);
+            ok();
+            break;
+        }
+
+        case 'set_pro_model_enabled': {
+            // Updates is_enabled only; price_adjustment is 0 for new rows,
+            // preserved unchanged for existing rows (ON DUPLICATE KEY only updates is_enabled).
+            validateRequired($body, ['user_id', 'model_id']);
+            $uid     = (int)$body['user_id'];
+            $mid     = (int)$body['model_id'];
+            $enabled = isset($body['is_enabled']) ? (int)(bool)$body['is_enabled'] : 1;
+            $db->prepare("
+                INSERT INTO pro_model_overrides (user_id, model_id, price_adjustment, is_enabled)
+                VALUES (?, ?, 0, ?)
+                ON DUPLICATE KEY UPDATE is_enabled = ?, updated_at = NOW()
+            ")->execute([$uid, $mid, $enabled, $enabled]);
             ok();
             break;
         }

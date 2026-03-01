@@ -51,6 +51,7 @@ export default function ModelsPage() {
   const [allActiveDiscounts, setAllActiveDiscounts] = useState<ActiveDiscount[]>([]);
   const [filterType, setFilterType] = useState<'all' | 'container' | 'pool'>('all');
   const [modalImage, setModalImage] = useState<string | null>(null);
+  const [catalogMode, setCatalogMode] = useState(false);
   const { data: siteSettings } = useSiteSettings();
   const vatRate = Number(siteSettings?.vat_rate) || 15;
 
@@ -86,9 +87,14 @@ export default function ModelsPage() {
 
   useEffect(() => {
     api.getModels(undefined, true).then((data) => {
-      setModels(data);
+      // Pro site returns { models: [...], catalog_mode: bool, ... }
+      // Sunbox site returns a plain array
+      const modelList: Model[] = Array.isArray(data) ? data : (data?.models ?? []);
+      const isCatalog: boolean = Array.isArray(data) ? false : !!(data?.catalog_mode);
+      setCatalogMode(isCatalog);
+      setModels(modelList);
 
-      const surfaces = data.map((m: any) => Number(m.surface_m2) || 0);
+      const surfaces = modelList.map((m: any) => Number(m.surface_m2) || 0);
       const minSurface = Math.min(...surfaces);
       const maxSurface = Math.max(...surfaces);
 
@@ -311,9 +317,15 @@ export default function ModelsPage() {
                 )}
 
                 <div className="pt-3">
-                  <Button variant="outline" onClick={() => openConfigurator(model)}>
-                    Configurer
-                  </Button>
+                  {catalogMode ? (
+                    <p className="text-xs text-amber-600 font-medium">
+                      📋 Mode catalogue — crédits insuffisants
+                    </p>
+                  ) : (
+                    <Button variant="outline" onClick={() => openConfigurator(model)}>
+                      Configurer
+                    </Button>
+                  )}
                 </div>
               </div>
             </div>

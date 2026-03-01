@@ -93,6 +93,9 @@ export default function UsersPage() {
   const [deploying, setDeploying] = useState(false);
   const [initializingDb, setInitializingDb] = useState(false);
   const [provisionStatus, setProvisionStatus] = useState<{ ok: boolean; message: string } | null>(null);
+  const [allModels, setAllModels] = useState<{ id: number; name: string; type: string }[]>([]);
+  const [enabledModelIds, setEnabledModelIds] = useState<Set<number>>(new Set());
+  const [loadingModels, setLoadingModels] = useState(false);
   const logoInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
@@ -100,6 +103,13 @@ export default function UsersPage() {
 
   useEffect(() => {
     loadUsers();
+    // Load all active models once for the model-selection checkboxes
+    api.getModels(undefined, true).then((data: any) => {
+      const list = Array.isArray(data) ? data : (data?.models ?? []);
+      setAllModels(list.map((m: any) => ({ id: Number(m.id), name: m.name, type: m.type })));
+    }).catch((err: any) => {
+      console.error('Erreur chargement modèles:', err);
+    });
   }, []);
 
   /* ======================================================
@@ -124,12 +134,34 @@ export default function UsersPage() {
   const openNewUser = () => {
     setEditingUser({ ...emptyUser });
     setProvisionStatus(null);
+    // Default: all models enabled for a new user
+    setEnabledModelIds(new Set(allModels.map(m => m.id)));
     setIsDialogOpen(true);
   };
 
   const openEditUser = (user: ProUser) => {
     setEditingUser({ ...user, password: '' });
     setProvisionStatus(null);
+    // Start with all models enabled, then apply stored overrides
+    const allIds = new Set(allModels.map(m => m.id));
+    setEnabledModelIds(allIds);
+    if (user.id) {
+      setLoadingModels(true);
+      api.getProModelOverrides(user.id).then((overrides: any) => {
+        const list = Array.isArray(overrides) ? overrides : [];
+        setEnabledModelIds(prev => {
+          const next = new Set(prev);
+          for (const ov of list) {
+            const mid = Number(ov.model_id);
+            if (!ov.is_enabled) next.delete(mid);
+            else next.add(mid);
+          }
+          return next;
+        });
+      }).catch((err: any) => {
+        console.error('Erreur chargement des overrides modèles:', err);
+      }).finally(() => setLoadingModels(false));
+    }
     setIsDialogOpen(true);
   };
 
@@ -137,16 +169,28 @@ export default function UsersPage() {
     if (!editingUser) return;
     try {
       setSaving(true);
+      let userId: number;
       if (editingUser.id) {
         await api.updateProUser(editingUser as { id: number } & ProUser);
+        userId = editingUser.id;
         toast({ title: 'Succès', description: 'Utilisateur mis à jour.' });
       } else {
         if (!editingUser.password) {
           toast({ title: 'Erreur', description: 'Le mot de passe est requis.', variant: 'destructive' });
           return;
         }
-        await api.createProUser(editingUser as { name: string; email: string; password: string; company_name: string });
+        const result = await api.createProUser(editingUser as { name: string; email: string; password: string; company_name: string });
+        userId = Number(result.user_id ?? result.id);
+        if (!userId) throw new Error('ID utilisateur manquant dans la réponse du serveur.');
         toast({ title: 'Succès', description: 'Utilisateur professionnel créé.' });
+      }
+      // Save model visibility overrides (is_enabled only, preserving price_adjustment)
+      if (allModels.length > 0 && userId) {
+        await Promise.all(
+          allModels.map(m =>
+            api.setProModelEnabled(userId, m.id, enabledModelIds.has(m.id))
+          )
+        );
       }
       setIsDialogOpen(false);
       loadUsers();
@@ -534,6 +578,50 @@ export default function UsersPage() {
                   <Label>Compte actif</Label>
                 </div>
               )}
+
+              {/* Model Selection */}
+              <div className="border rounded-lg p-4 space-y-3 bg-gray-50">
+                <p className="text-sm font-semibold text-gray-700">
+                  🏠 Modèles disponibles sur le site pro
+                </p>
+                <p className="text-xs text-gray-500">
+                  Cochez les modèles à afficher sur le site du professionnel. Par défaut, tous les modèles actifs sont affichés.
+                </p>
+                {loadingModels ? (
+                  <p className="text-xs text-gray-400">Chargement des modèles...</p>
+                ) : allModels.length === 0 ? (
+                  <p className="text-xs text-gray-400">Aucun modèle actif trouvé.</p>
+                ) : (
+                  <div className="grid grid-cols-1 gap-1 max-h-48 overflow-y-auto pr-1">
+                    {allModels.map(model => (
+                      <label
+                        key={model.id}
+                        className="flex items-center gap-2 cursor-pointer hover:bg-gray-100 rounded px-2 py-1"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={enabledModelIds.has(model.id)}
+                          onChange={() =>
+                            setEnabledModelIds(prev => {
+                              const next = new Set(prev);
+                              if (next.has(model.id)) next.delete(model.id);
+                              else next.add(model.id);
+                              return next;
+                            })
+                          }
+                          className="rounded"
+                        />
+                        <span className="text-sm">
+                          {model.name}
+                          <span className="ml-1 text-xs text-gray-400">
+                            ({model.type === 'container' ? 'Conteneur' : 'Piscine'})
+                          </span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               {/* DB Config */}
               <div className="border rounded-lg p-4 space-y-3 bg-gray-50">

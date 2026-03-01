@@ -890,6 +890,10 @@ export const api = {
     return this.query('set_pro_model_override', override);
   },
 
+  setProModelEnabled(userId: number, modelId: number, isEnabled: boolean) {
+    return this.query('set_pro_model_enabled', { user_id: userId, model_id: modelId, is_enabled: isEnabled });
+  },
+
   /* =====================================================
      PROFESSIONAL MODEL REQUESTS
   ===================================================== */

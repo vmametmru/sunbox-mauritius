@@ -5,10 +5,16 @@ import { useSiteSettings } from "@/hooks/use-settings";
 export default function PublicLayout({ children }: { children: ReactNode }) {
   const { data: settings } = useSiteSettings();
 
-const siteLogo = settings?.site_logo || "/logo.png";
-const siteSlogan = settings?.site_slogan || "container home - swimming-pools";
-const siteUnderConstruction = settings?.site_under_construction === "true";
-const constructionMessage = settings?.under_construction_message || "";
+  const isProSite = typeof window !== 'undefined' && !!(window as any).__PRO_SITE__;
+  const siteLogo = isProSite
+    ? ((window as any).__PRO_LOGO_URL__ || '')
+    : (settings?.site_logo || '/logo.png');
+  const companyName = isProSite
+    ? ((window as any).__PRO_COMPANY_NAME__ || '')
+    : 'Sunbox';
+  const siteSlogan = isProSite ? '' : (settings?.site_slogan || 'container home - swimming-pools');
+  const siteUnderConstruction = !isProSite && settings?.site_under_construction === 'true';
+  const constructionMessage = settings?.under_construction_message || '';
 
   return (
     <div className="flex flex-col min-h-screen text-gray-800">
@@ -19,15 +25,15 @@ const constructionMessage = settings?.under_construction_message || "";
           {siteLogo && (
             <img
               src={siteLogo}
-              alt="Sunbox Mauritius"
+              alt={companyName}
               className="h-10 w-auto"
             />
           )}
           <div className="text-sm leading-tight">
-            <div className="text-lg font-bold text-[#1A365D]">Sunbox</div>
-            <div className="text-xs text-gray-500">
-              {siteSlogan || "container home - swimming-pools"}
-            </div>
+            <div className="text-lg font-bold text-[#1A365D]">{companyName}</div>
+            {siteSlogan && (
+              <div className="text-xs text-gray-500">{siteSlogan}</div>
+            )}
           </div>
         </Link>
 
@@ -63,7 +69,7 @@ const constructionMessage = settings?.under_construction_message || "";
 
       {/* ================= FOOTER ================= */}
       <footer className="bg-[#1A365D] text-white text-center text-sm py-6 mt-12">
-        © {new Date().getFullYear()} Sunbox Mauritius — Tous droits réservés
+        © {new Date().getFullYear()} {companyName} — Tous droits réservés
       </footer>
     </div>
   );
