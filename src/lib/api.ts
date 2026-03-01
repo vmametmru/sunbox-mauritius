@@ -1,7 +1,11 @@
 // API client for MySQL database operations via PHP backend on A2hosting
 // IMPORTANT: Update API_BASE_URL with your actual domain
 
-const API_BASE_URL = 'https://sunbox-mauritius.com/api';
+// Allow deployed pro sites to override the API base URL via window.__API_BASE_URL__
+const API_BASE_URL: string =
+  (typeof window !== 'undefined' && (window as any).__API_BASE_URL__)
+    ? String((window as any).__API_BASE_URL__)
+    : 'https://sunbox-mauritius.com/api';
 // const API_BASE_URL = 'http://localhost/sunbox/api';
 
 export const api = {

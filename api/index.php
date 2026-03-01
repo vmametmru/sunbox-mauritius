@@ -2750,6 +2750,27 @@ try {
                 }
                 $result['debug'][] = 'Fichiers PHP déployés.';
 
+                // Deploy index.html — read from main site's built dist, inject pro API config
+                $mainIndexPath = dirname(__DIR__) . '/index.html';
+                if (file_exists($mainIndexPath)) {
+                    $indexHtml = file_get_contents($mainIndexPath);
+                    if ($indexHtml !== false) {
+                        // Inject pro config script right before </head> (replace only first occurrence)
+                        $apiUrlJson = json_encode($siteUrl . '/api', JSON_HEX_TAG | JSON_HEX_AMP);
+                        $proConfig = '<script>window.__API_BASE_URL__=' . $apiUrlJson . ';window.__PRO_SITE__=true;</script>';
+                        $indexHtml = preg_replace('#</head>#i', $proConfig . '</head>', $indexHtml, 1);
+                        if (file_put_contents($siteDir . '/index.html', $indexHtml) === false) {
+                            $result['errors'][] = 'Avertissement: impossible d\'écrire index.html';
+                        } else {
+                            $result['debug'][] = 'index.html déployé avec configuration API pro.';
+                        }
+                    } else {
+                        $result['errors'][] = 'Avertissement: lecture de index.html échouée: ' . $mainIndexPath;
+                    }
+                } else {
+                    $result['errors'][] = 'Avertissement: index.html introuvable (' . $mainIndexPath . '). Le site doit être compilé (npm run build) et déployé sur le serveur d\'abord.';
+                }
+
                 // Write .env with Sunbox's DB credentials (protected by .htaccess)
                 $envLines = [
                     'APP_ENV=production',
