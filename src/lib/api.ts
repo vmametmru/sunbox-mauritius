@@ -2,7 +2,7 @@
 // IMPORTANT: Update API_BASE_URL with your actual domain
 
 // Allow deployed pro sites to override the API base URL via window.__API_BASE_URL__
-const API_BASE_URL: string =
+export const API_BASE_URL: string =
   (typeof window !== 'undefined' && (window as any).__API_BASE_URL__)
     ? String((window as any).__API_BASE_URL__)
     : 'https://sunbox-mauritius.com/api';

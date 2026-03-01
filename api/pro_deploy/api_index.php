@@ -13,7 +13,6 @@ function ok($data = null): void { successResponse($data); }
 function fail(string $msg, int $code = 400): void { errorResponse($msg, $code); }
 
 try {
-    $db = getDB();
 
     switch ($action) {
 
@@ -57,6 +56,7 @@ try {
 
         // ── SITE SETTINGS (own DB) ─────────────────────────────────────────────
         case 'get_settings': {
+            $db = getDB();
             $group = $body['group'] ?? ($_GET['group'] ?? '');
             if ($group) {
                 $stmt = $db->prepare("SELECT setting_key, setting_value FROM pro_settings WHERE setting_group = ?");
@@ -73,6 +73,7 @@ try {
 
         case 'update_settings_bulk': {
             requireAdmin();
+            $db = getDB();
             $items = $body['settings'] ?? $body;
             if (!is_array($items)) fail('Invalid settings format');
             $stmt = $db->prepare("
@@ -92,6 +93,7 @@ try {
         // ── CONTACTS (own DB) ──────────────────────────────────────────────────
         case 'get_contacts': {
             requireAdmin();
+            $db = getDB();
             $stmt = $db->query("SELECT * FROM pro_contacts ORDER BY name ASC");
             ok($stmt->fetchAll());
             break;
@@ -99,6 +101,7 @@ try {
 
         case 'create_contact': {
             requireAdmin();
+            $db = getDB();
             validateRequired($body, ['name']);
             $stmt = $db->prepare("
                 INSERT INTO pro_contacts (name, email, phone, address, company)
@@ -111,6 +114,7 @@ try {
 
         case 'update_contact': {
             requireAdmin();
+            $db = getDB();
             validateRequired($body, ['id']);
             $id = (int)$body['id'];
             $sets = [];
@@ -128,6 +132,7 @@ try {
 
         case 'delete_contact': {
             requireAdmin();
+            $db = getDB();
             validateRequired($body, ['id']);
             $db->prepare("DELETE FROM pro_contacts WHERE id = ?")->execute([(int)$body['id']]);
             ok();
@@ -137,6 +142,7 @@ try {
         // ── QUOTES (own DB) ────────────────────────────────────────────────────
         case 'get_quotes': {
             requireAdmin();
+            $db = getDB();
             $stmt = $db->query("
                 SELECT q.*, c.name AS contact_name, c.email AS contact_email
                 FROM pro_quotes q
@@ -149,6 +155,7 @@ try {
 
         case 'get_quote': {
             requireAdmin();
+            $db = getDB();
             validateRequired($body, ['id']);
             $stmt = $db->prepare("SELECT q.*, c.name AS contact_name, c.email AS contact_email, c.phone AS contact_phone FROM pro_quotes q LEFT JOIN pro_contacts c ON c.id = q.contact_id WHERE q.id = ?");
             $stmt->execute([(int)$body['id']]);
@@ -160,6 +167,7 @@ try {
 
         case 'create_quote': {
             requireAdmin();
+            $db = getDB();
             validateRequired($body, ['model_id', 'model_name', 'total_price']);
 
             // Deduct credits from Sunbox
@@ -193,6 +201,7 @@ try {
 
         case 'update_quote_status': {
             requireAdmin();
+            $db = getDB();
             validateRequired($body, ['id', 'status']);
             $id     = (int)$body['id'];
             $status = $body['status'];
@@ -212,6 +221,7 @@ try {
 
         case 'delete_quote': {
             requireAdmin();
+            $db = getDB();
             validateRequired($body, ['id']);
             $db->prepare("DELETE FROM pro_quotes WHERE id = ?")->execute([(int)$body['id']]);
             ok();
@@ -221,6 +231,7 @@ try {
         // ── DASHBOARD STATS ────────────────────────────────────────────────────
         case 'get_dashboard_stats': {
             requireAdmin();
+            $db = getDB();
             $totalQuotes   = (int)$db->query("SELECT COUNT(*) FROM pro_quotes")->fetchColumn();
             $pendingQuotes = (int)$db->query("SELECT COUNT(*) FROM pro_quotes WHERE status = 'pending'")->fetchColumn();
             $approvedQuotes = (int)$db->query("SELECT COUNT(*) FROM pro_quotes WHERE status = 'approved'")->fetchColumn();

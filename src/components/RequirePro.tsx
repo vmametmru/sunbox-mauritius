@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
+import { API_BASE_URL } from '@/lib/api';
 
 export default function RequirePro() {
   const [loading, setLoading] = useState(true);
@@ -9,7 +10,7 @@ export default function RequirePro() {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch('/api/pro_auth.php?action=me', {
+        const r = await fetch(`${API_BASE_URL}/pro_auth.php?action=me`, {
           method: 'GET',
           credentials: 'include',
         });

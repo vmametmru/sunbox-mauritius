@@ -5,8 +5,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
+import { API_BASE_URL } from '@/lib/api';
 
 export default function ProLoginPage() {
+  const isProSite = typeof window !== 'undefined' && !!(window as any).__PRO_SITE__;
+  const companyName: string = isProSite ? ((window as any).__PRO_COMPANY_NAME__ || '') : '';
+  const logoUrl: string = isProSite ? ((window as any).__PRO_LOGO_URL__ || '') : '';
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -18,17 +23,18 @@ export default function ProLoginPage() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !password) {
+    if (!password || (!isProSite && !email)) {
       toast({ title: 'Erreur', description: 'Veuillez remplir tous les champs.', variant: 'destructive' });
       return;
     }
     try {
       setLoading(true);
-      const r = await fetch('/api/pro_auth.php?action=login', {
+      const body = isProSite ? { password } : { email, password };
+      const r = await fetch(`${API_BASE_URL}/pro_auth.php?action=login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify(body),
       });
       const j = await r.json();
       if (!r.ok || j.error) throw new Error(j.error || 'Connexion échouée');
@@ -44,8 +50,11 @@ export default function ProLoginPage() {
     <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
+          {isProSite && logoUrl ? (
+            <img src={logoUrl} alt={companyName} className="h-16 w-auto mx-auto mb-2" />
+          ) : null}
           <span className="text-3xl font-bold text-gray-800">
-            Sun<span className="text-orange-500">box</span>
+            {isProSite && companyName ? companyName : <><span>Sun</span><span className="text-orange-500">box</span></>}
           </span>
           <p className="text-gray-500 mt-1">Portail Professionnel</p>
         </div>
@@ -56,17 +65,19 @@ export default function ProLoginPage() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleLogin} className="space-y-4">
-              <div>
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="votre@email.com"
-                  autoComplete="email"
-                />
-              </div>
+              {!isProSite && (
+                <div>
+                  <Label htmlFor="email">Email</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="votre@email.com"
+                    autoComplete="email"
+                  />
+                </div>
+              )}
               <div>
                 <Label htmlFor="password">Mot de passe</Label>
                 <Input

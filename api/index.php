@@ -2679,8 +2679,11 @@ try {
             $userId = (int)$body['user_id'];
 
             $stmt = $db->prepare("
-                SELECT pp.domain, pp.api_token, pp.company_name, pp.db_name, pp.logo_url
-                FROM professional_profiles pp WHERE pp.user_id = ?
+                SELECT pp.domain, pp.api_token, pp.company_name, pp.db_name, pp.logo_url,
+                       u.password_hash
+                FROM professional_profiles pp
+                JOIN users u ON u.id = pp.user_id
+                WHERE pp.user_id = ?
             ");
             $stmt->execute([$userId]);
             $profile = $stmt->fetch();
@@ -2688,15 +2691,17 @@ try {
                 fail('Domaine non configuré pour cet utilisateur. Enregistrez d\'abord le domaine.');
             }
 
-            $domain      = (string)$profile['domain'];
-            $apiToken    = (string)$profile['api_token'];
-            $companyName = (string)$profile['company_name'];
-            $dbName      = (string)($profile['db_name'] ?? '');
+            $domain       = (string)$profile['domain'];
+            $apiToken     = (string)$profile['api_token'];
+            $companyName  = (string)$profile['company_name'];
+            $dbName       = (string)($profile['db_name'] ?? '');
+            $passwordHash = (string)($profile['password_hash'] ?? '');
 
-            $siteDir     = proSiteDir($domain);
+            $siteDir      = proSiteDir($domain);
             // The pro site is an addon domain pointing to siteDir, so its public URL
             // IS the domain itself (not a Sunbox subdirectory).
-            $proBaseUrl  = 'https://' . $domain;
+            $proBaseUrl   = 'https://' . $domain;
+            $sunboxBaseUrl = rtrim((string)env('APP_URL', 'https://sunbox-mauritius.com'), '/');
             $result      = [
                 'deployed'  => false,
                 'site_dir'  => $siteDir,
@@ -2729,14 +2734,15 @@ try {
                     '{{API_TOKEN}}'      => $apiToken,
                     '{{DOMAIN}}'         => $domain,
                     '{{COMPANY_NAME}}'   => $companyName,
-                    '{{SUNBOX_API_URL}}' => 'https://sunbox-mauritius.com/api',
+                    '{{SUNBOX_API_URL}}' => $sunboxBaseUrl . '/api',
                 ];
 
                 $filesToDeploy = [
-                    'api_config.php' => $siteDir . '/api/config.php',
-                    'api_index.php'  => $siteDir . '/api/index.php',
-                    'api_htaccess'   => $siteDir . '/api/.htaccess',
-                    'htaccess'       => $siteDir . '/.htaccess',
+                    'api_config.php'   => $siteDir . '/api/config.php',
+                    'api_index.php'    => $siteDir . '/api/index.php',
+                    'api_pro_auth.php' => $siteDir . '/api/pro_auth.php',
+                    'api_htaccess'     => $siteDir . '/api/.htaccess',
+                    'htaccess'         => $siteDir . '/.htaccess',
                 ];
                 foreach ($filesToDeploy as $tpl => $dest) {
                     $tplPath = $templateDir . '/' . $tpl;
@@ -2780,8 +2786,12 @@ try {
                         // Inject pro config: point the React app to this pro site's own /api
                         // and flag it as a pro site (hides admin-only features).
                         $apiUrlJson  = json_encode($proBaseUrl . '/api', JSON_HEX_TAG | JSON_HEX_AMP);
+                        // Make logo URL absolute (logo is stored on Sunbox server)
                         $logoUrl     = (string)($profile['logo_url'] ?? '');
-                        $logoJson    = json_encode($logoUrl,    JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE);
+                        if ($logoUrl !== '' && str_starts_with($logoUrl, '/')) {
+                            $logoUrl = $sunboxBaseUrl . $logoUrl;
+                        }
+                        $logoJson    = json_encode($logoUrl,     JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE);
                         $companyJson = json_encode($companyName, JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE);
                         $proConfig   = '<script>'
                             . 'window.__API_BASE_URL__='    . $apiUrlJson   . ';'
@@ -2813,7 +2823,7 @@ try {
                     'APP_URL=' . $proBaseUrl,
                     'API_DEBUG=false',
                     '',
-                    'SUNBOX_API_URL=https://sunbox-mauritius.com/api',
+                    'SUNBOX_API_URL=' . $sunboxBaseUrl . '/api',
                     'SUNBOX_API_TOKEN=' . $apiToken,
                     'SUNBOX_DOMAIN=' . $domain,
                     '',
@@ -2821,6 +2831,8 @@ try {
                     'DB_NAME=' . $dbName,
                     'DB_USER=' . DB_USER,
                     'DB_PASS=' . DB_PASS,
+                    '',
+                    'ADMIN_PASSWORD_HASH=' . $passwordHash,
                     '',
                     'COMPANY_NAME=' . $companyName,
                     'VAT_RATE=15',

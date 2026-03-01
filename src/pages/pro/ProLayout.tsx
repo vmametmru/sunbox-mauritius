@@ -15,6 +15,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
+import { API_BASE_URL } from '@/lib/api';
 
 interface ProUser {
   id: number;
@@ -41,7 +42,7 @@ export default function ProLayout() {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch('/api/pro_auth.php?action=me', { credentials: 'include' });
+        const r = await fetch(`${API_BASE_URL}/pro_auth.php?action=me`, { credentials: 'include' });
         const j = await r.json();
         if (j?.data?.is_pro) setUser(j.data as ProUser);
       } catch { /* ignore */ }
@@ -50,7 +51,7 @@ export default function ProLayout() {
 
   const handleLogout = async () => {
     try {
-      await fetch('/api/pro_auth.php?action=logout', { method: 'POST', credentials: 'include' });
+      await fetch(`${API_BASE_URL}/pro_auth.php?action=logout`, { method: 'POST', credentials: 'include' });
     } catch { /* ignore */ }
     navigate('/pro-login');
   };
