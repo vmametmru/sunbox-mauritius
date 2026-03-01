@@ -1,9 +1,29 @@
--- Pro DB Config Migration
--- Adds encrypted database credentials to professional_profiles
--- These are managed on Sunbox and fetched at runtime by the pro site.
+-- Cleanup Migration: Remove encrypted DB credential columns from professional_profiles
+--
+-- The previous approach stored DB credentials encrypted in professional_profiles.
+-- The new approach auto-provisions a database named mauriti2_sunbox_mauritius_<domain>
+-- using the same server credentials — no per-user DB config stored in main DB.
+--
+-- Run this migration if you applied the previous pro_db_config_migration.sql.
 
-ALTER TABLE professional_profiles
-    ADD COLUMN db_host    VARCHAR(255) NOT NULL DEFAULT 'localhost' COMMENT 'Pro site DB host' AFTER api_token,
-    ADD COLUMN db_name    VARCHAR(255) NOT NULL DEFAULT '' COMMENT 'Pro site DB name' AFTER db_host,
-    ADD COLUMN db_user    VARCHAR(255) NOT NULL DEFAULT '' COMMENT 'Pro site DB username' AFTER db_name,
-    ADD COLUMN db_pass_enc TEXT COMMENT 'AES-256-CBC encrypted DB password (key=PRO_DB_ENCRYPTION_KEY)' AFTER db_user;
+SET @db = DATABASE();
+
+-- Drop db_host if it exists
+SET @col = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'professional_profiles' AND COLUMN_NAME = 'db_host');
+SET @sql = IF(@col > 0, 'ALTER TABLE professional_profiles DROP COLUMN db_host', 'SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
+
+-- Drop db_name if it exists
+SET @col = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'professional_profiles' AND COLUMN_NAME = 'db_name');
+SET @sql = IF(@col > 0, 'ALTER TABLE professional_profiles DROP COLUMN db_name', 'SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
+
+-- Drop db_user if it exists
+SET @col = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'professional_profiles' AND COLUMN_NAME = 'db_user');
+SET @sql = IF(@col > 0, 'ALTER TABLE professional_profiles DROP COLUMN db_user', 'SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;
+
+-- Drop db_pass_enc if it exists
+SET @col = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'professional_profiles' AND COLUMN_NAME = 'db_pass_enc');
+SET @sql = IF(@col > 0, 'ALTER TABLE professional_profiles DROP COLUMN db_pass_enc', 'SELECT 1');
+PREPARE _s FROM @sql; EXECUTE _s; DEALLOCATE PREPARE _s;

@@ -239,28 +239,6 @@ switch ($action) {
         break;
     }
 
-    // ── GET DB CONFIG (server-side call only — fetches encrypted DB credentials) ─
-    case 'get_db_config': {
-        $dbPassEnc = (string)($profile['db_pass_enc'] ?? '');
-        $dbName    = (string)($profile['db_name'] ?? '');
-        if (!$dbName || !$dbPassEnc) {
-            pub_fail('Config DB non configurée pour ce compte professionnel.', 404);
-        }
-        try {
-            $dbPass = proDbDecrypt($dbPassEnc);
-        } catch (Throwable $e) {
-            pub_fail(API_DEBUG ? $e->getMessage() : 'Erreur déchiffrement DB.', 500);
-        }
-        pub_ok([
-            'host'    => $profile['db_host'] ?: 'localhost',
-            'name'    => $dbName,
-            'user'    => (string)($profile['db_user'] ?? ''),
-            'pass'    => $dbPass,
-            'charset' => 'utf8mb4',
-        ]);
-        break;
-    }
-
     default:
         pub_fail('Action inconnue.', 400);
 }

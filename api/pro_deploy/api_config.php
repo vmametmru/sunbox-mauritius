@@ -3,9 +3,8 @@ declare(strict_types=1);
 
 /**
  * Pro Site API config
- * DB credentials are NOT stored locally.
- * They are fetched at runtime from Sunbox (encrypted at rest) via the API token.
- * Only SUNBOX_API_URL and SUNBOX_API_TOKEN are needed in .env.
+ * DB credentials are read from the local .env file (auto-provisioned by Sunbox).
+ * Only SUNBOX_API_URL and SUNBOX_API_TOKEN are needed for the Sunbox bridge.
  */
 
 function loadEnvFile(): void
@@ -65,54 +64,22 @@ define('SUNBOX_DOMAIN',    (string)env('SUNBOX_DOMAIN', ''));
 define('VAT_RATE',         (float)env('VAT_RATE', 15));
 
 /**
- * Fetch DB credentials from Sunbox main API (server-to-server, encrypted at rest).
- * Result is cached in a static variable for the duration of this PHP request.
- */
-function getDbConfig(): array
-{
-    static $cfg = null;
-    if ($cfg !== null) return $cfg;
-
-    $url  = SUNBOX_API_URL . '/pro_public.php?action=get_db_config&token=' . urlencode(SUNBOX_API_TOKEN);
-    $opts = [
-        'http' => [
-            'method'  => 'GET',
-            'header'  => "Accept: application/json\r\nUser-Agent: ProSite/1.0\r\n",
-            'timeout' => 5,
-        ],
-        'ssl' => ['verify_peer' => true, 'verify_peer_name' => true],
-    ];
-
-    $raw = @file_get_contents($url, false, stream_context_create($opts));
-    if ($raw === false) {
-        throw new \Exception('Impossible de récupérer la configuration de la base de données depuis Sunbox.');
-    }
-    $json = json_decode($raw, true);
-    if (!$json || !($json['success'] ?? false)) {
-        throw new \Exception($json['error'] ?? 'Erreur de configuration DB Sunbox.');
-    }
-    $cfg = $json['data'];
-    return $cfg;
-}
-
-/**
  * Get PDO connection to the pro site's own database.
- * Credentials are fetched from Sunbox — no local DB config needed.
+ * Credentials come from the local .env file (auto-filled during provisioning).
  */
 function getDB(): PDO
 {
     static $pdo = null;
     if ($pdo !== null) return $pdo;
 
-    $cfg = getDbConfig();
-    $host    = $cfg['host']    ?? 'localhost';
-    $name    = $cfg['name']    ?? '';
-    $user    = $cfg['user']    ?? '';
-    $pass    = $cfg['pass']    ?? '';
-    $charset = $cfg['charset'] ?? 'utf8mb4';
+    $host    = (string)env('DB_HOST', 'localhost');
+    $name    = (string)env('DB_NAME', '');
+    $user    = (string)env('DB_USER', '');
+    $pass    = (string)env('DB_PASS', '');
+    $charset = 'utf8mb4';
 
     if (!$name || !$user) {
-        throw new \Exception('Configuration DB incomplète.');
+        throw new \Exception('Configuration DB manquante. Reconfigurez le site via sunbox-mauritius.com.');
     }
 
     $dsn = "mysql:host={$host};dbname={$name};charset={$charset}";
@@ -126,15 +93,19 @@ function getDB(): PDO
 
 function handleCORS(): void
 {
-    $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
     $domain = SUNBOX_DOMAIN;
     $allowed = [
         'http://localhost:3000',
         'http://localhost:5173',
         'http://localhost:8080',
-        "https://$domain",
-        "https://www.$domain",
+        'https://sunbox-mauritius.com',
+        'https://www.sunbox-mauritius.com',
     ];
+    if ($domain) {
+        $allowed[] = "https://{$domain}";
+        $allowed[] = "https://www.{$domain}";
+    }
+    $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
     if ($origin && in_array($origin, $allowed, true)) {
         header("Access-Control-Allow-Origin: $origin");
         header("Access-Control-Allow-Credentials: true");
@@ -175,9 +146,7 @@ function generateReference(): string
 }
 
 /**
- * Fetch models from Sunbox main API.
- * Returns an array of models with pro-adjusted pricing already applied.
- * Also returns catalog_mode (true if credits = 0).
+ * Fetch models from Sunbox main API (with pro margin + overrides already applied).
  */
 function fetchSunboxModels(): array
 {
@@ -197,9 +166,7 @@ function fetchSunboxModels(): array
     return $json['data'];
 }
 
-/**
- * Check credits from Sunbox main API.
- */
+/** Check remaining credits from Sunbox. */
 function checkSunboxCredits(): array
 {
     $url = SUNBOX_API_URL . '/pro_public.php?action=check_credits&token=' . urlencode(SUNBOX_API_TOKEN);
@@ -211,9 +178,7 @@ function checkSunboxCredits(): array
     return $json['data'];
 }
 
-/**
- * Deduct credits from Sunbox main API.
- */
+/** Deduct credits from Sunbox. */
 function deductSunboxCredits(float $amount, string $reason, ?int $quoteId = null): array
 {
     $url = SUNBOX_API_URL . '/pro_public.php?action=deduct_credits&token=' . urlencode(SUNBOX_API_TOKEN);

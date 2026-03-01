@@ -14,6 +14,8 @@ import {
   Globe,
   KeyRound,
   Upload,
+  FolderOpen,
+  Database,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -49,10 +51,6 @@ interface ProUser {
   domain?: string;
   api_token?: string;
   logo_url?: string;
-  db_host?: string;
-  db_name?: string;
-  db_user?: string;
-  db_pass?: string; // write-only, never returned from API
 }
 
 const emptyUser: ProUser = {
@@ -67,12 +65,20 @@ const emptyUser: ProUser = {
   sunbox_margin_percent: 0,
   domain: '',
   logo_url: '',
-  db_host: 'localhost',
-  db_name: '',
-  db_user: '',
-  db_pass: '',
   is_active: true,
 };
+
+/** Convert domain to DB slug (mirrors PHP proDbSlug). */
+function domainToSlug(domain: string): string {
+  return domain
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/^www\./, '')
+    .replace(/[^a-z0-9.]/g, '_')
+    .replace(/\./g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_|_$/g, '');
+}
 
 /* ======================================================
    COMPONENT
@@ -87,6 +93,9 @@ export default function UsersPage() {
   const [buyingPack, setBuyingPack] = useState<number | null>(null);
   const [regenerating, setRegenerating] = useState<number | null>(null);
   const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [deploying, setDeploying] = useState(false);
+  const [initializingDb, setInitializingDb] = useState(false);
+  const [provisionStatus, setProvisionStatus] = useState<{ ok: boolean; message: string } | null>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
@@ -117,11 +126,13 @@ export default function UsersPage() {
   ====================================================== */
   const openNewUser = () => {
     setEditingUser({ ...emptyUser });
+    setProvisionStatus(null);
     setIsDialogOpen(true);
   };
 
   const openEditUser = (user: ProUser) => {
     setEditingUser({ ...user, password: '' });
+    setProvisionStatus(null);
     setIsDialogOpen(true);
   };
 
@@ -216,6 +227,54 @@ export default function UsersPage() {
 
   const downloadZip = (userId: number) => {
     window.open(`${API_BASE}/download_pro_zip.php?user_id=${userId}`, '_blank');
+  };
+
+  const deployProSite = async (userId: number) => {
+    setDeploying(true);
+    setProvisionStatus(null);
+    try {
+      const data = await api.deployProSite(userId);
+      const errors = data.errors ?? [];
+      if (data.deployed) {
+        setProvisionStatus({
+          ok: true,
+          message: `✅ Fichiers déployés dans ${data.site_dir}${errors.length ? ' — Avertissements: ' + errors.join(', ') : ''}`,
+        });
+        toast({ title: 'Site déployé', description: `URL: ${data.site_url}` });
+      } else {
+        setProvisionStatus({ ok: false, message: '❌ Échec: ' + (errors.join(', ') || 'Erreur inconnue') });
+      }
+    } catch (err: any) {
+      setProvisionStatus({ ok: false, message: '❌ ' + err.message });
+    } finally {
+      setDeploying(false);
+    }
+  };
+
+  const initProDb = async (userId: number) => {
+    setInitializingDb(true);
+    setProvisionStatus(null);
+    try {
+      const data = await api.initProDb(userId);
+      const errors = data.errors ?? [];
+      const parts = [];
+      if (data.db_created) parts.push('BD créée');
+      if (data.schema_initialized) parts.push('tables créées');
+      if (!data.db_created && data.schema_initialized) parts.push('tables mises à jour (BD existante)');
+      if (parts.length > 0) {
+        setProvisionStatus({
+          ok: true,
+          message: `✅ ${parts.join(', ')} — BD: ${data.db_name}${errors.length ? ' — Avertissements: ' + errors.join(', ') : ''}`,
+        });
+        toast({ title: 'Base de données initialisée', description: data.db_name });
+      } else {
+        setProvisionStatus({ ok: false, message: '❌ ' + (errors.join(', ') || 'Erreur inconnue') });
+      }
+    } catch (err: any) {
+      setProvisionStatus({ ok: false, message: '❌ ' + err.message });
+    } finally {
+      setInitializingDb(false);
+    }
   };
 
   /* ======================================================
@@ -546,56 +605,75 @@ export default function UsersPage() {
                 </div>
               )}
 
-              {/* DB Config */}
-              <div className="border rounded-lg p-4 space-y-3 bg-gray-50">
-                <p className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                  🗄️ Configuration de la base de données
+              {/* Site Deployment */}
+              <div className="border rounded-lg p-4 space-y-3 bg-blue-50">
+                <p className="text-sm font-semibold text-blue-700 flex items-center gap-2">
+                  🚀 Déploiement du site professionnel
                 </p>
-                <p className="text-xs text-gray-500">
-                  Créez la base de données sur le serveur, puis renseignez les identifiants ici.
-                  Ils seront stockés chiffrés et transmis de façon sécurisée au site pro.
-                </p>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label>Hôte DB</Label>
-                    <Input
-                      value={editingUser.db_host ?? 'localhost'}
-                      onChange={(e) => setEditingUser({ ...editingUser, db_host: e.target.value })}
-                      placeholder="localhost"
-                    />
+
+                {editingUser.domain ? (
+                  <div className="space-y-1">
+                    <p className="text-xs text-gray-600">
+                      📁 Répertoire :{' '}
+                      <code className="bg-white border rounded px-1">
+                        sunbox-mauritius.com/pros/{editingUser.domain}
+                      </code>
+                    </p>
+                    <p className="text-xs text-gray-600">
+                      🗄️ Base de données :{' '}
+                      <code className="bg-white border rounded px-1">
+                        mauriti2_sunbox_mauritius_{domainToSlug(editingUser.domain)}
+                      </code>
+                    </p>
                   </div>
-                  <div>
-                    <Label>Nom de la base de données</Label>
-                    <Input
-                      value={editingUser.db_name ?? ''}
-                      onChange={(e) => setEditingUser({ ...editingUser, db_name: e.target.value })}
-                      placeholder="mauriti2_pro_poolbuilder"
-                    />
-                  </div>
-                  <div>
-                    <Label>Utilisateur DB</Label>
-                    <Input
-                      value={editingUser.db_user ?? ''}
-                      onChange={(e) => setEditingUser({ ...editingUser, db_user: e.target.value })}
-                      placeholder="mauriti2_poolbuilder"
-                    />
-                  </div>
-                  <div>
-                    <Label>
-                      Mot de passe DB
-                      {editingUser.id && (
-                        <span className="text-xs text-gray-400 ml-1">(laisser vide = inchangé)</span>
-                      )}
-                    </Label>
-                    <Input
-                      type="password"
-                      value={editingUser.db_pass ?? ''}
-                      onChange={(e) => setEditingUser({ ...editingUser, db_pass: e.target.value })}
-                      placeholder="••••••••"
-                      autoComplete="new-password"
-                    />
-                  </div>
+                ) : (
+                  <p className="text-xs text-amber-600">
+                    ⚠️ Renseignez le domaine ci-dessus avant de déployer.
+                  </p>
+                )}
+
+                {!editingUser.id && (
+                  <p className="text-xs text-amber-600">
+                    ⚠️ Enregistrez d'abord l'utilisateur pour activer le déploiement.
+                  </p>
+                )}
+
+                <div className="grid grid-cols-1 gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={!editingUser.id || !editingUser.domain || deploying}
+                    onClick={() => deployProSite(editingUser.id!)}
+                    className="text-blue-700 border-blue-300 hover:bg-blue-100 justify-start"
+                  >
+                    <FolderOpen className="h-4 w-4 mr-2" />
+                    {deploying ? 'Déploiement en cours...' : 'Déployer les fichiers du site du professionnel'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={!editingUser.id || !editingUser.domain || initializingDb}
+                    onClick={() => initProDb(editingUser.id!)}
+                    className="text-green-700 border-green-300 hover:bg-green-100 justify-start"
+                  >
+                    <Database className="h-4 w-4 mr-2" />
+                    {initializingDb ? 'Initialisation en cours...' : 'Créer la Base de données et créer les tables'}
+                  </Button>
                 </div>
+
+                {provisionStatus && (
+                  <div
+                    className={`text-xs p-2 rounded border ${
+                      provisionStatus.ok
+                        ? 'bg-green-50 border-green-200 text-green-800'
+                        : 'bg-red-50 border-red-200 text-red-800'
+                    }`}
+                  >
+                    {provisionStatus.message}
+                  </div>
+                )}
               </div>
 
               <div className="flex justify-end gap-2 pt-4">

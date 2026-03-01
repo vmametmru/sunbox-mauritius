@@ -102,42 +102,42 @@ define('ALLOWED_ORIGINS', [
 
 /**
  * ------------------------------------------------------------
- * 3b) Pro DB credential encryption helpers
- * Key stored in .env as PRO_DB_ENCRYPTION_KEY (base64-encoded 32 bytes).
- * Generate once: php -r "echo base64_encode(random_bytes(32)) . PHP_EOL;"
+ * 3b) Pro site helpers (server-side deployment)
  * ------------------------------------------------------------
  */
-function proDbEncrypt(string $plaintext): string
+
+/** Sanitise a domain into a safe DB/directory slug. */
+function proDbSlug(string $domain): string
 {
-    $rawKey = base64_decode((string)env('PRO_DB_ENCRYPTION_KEY', ''));
-    if (!$rawKey || strlen($rawKey) !== 32) {
-        throw new \Exception('PRO_DB_ENCRYPTION_KEY manquant ou invalide (32 bytes requis, encodé en base64).');
-    }
-    $iv = random_bytes(16);
-    $ciphertext = openssl_encrypt($plaintext, 'aes-256-cbc', $rawKey, OPENSSL_RAW_DATA, $iv);
-    if ($ciphertext === false) {
-        throw new \Exception('Chiffrement DB échoué.');
-    }
-    return base64_encode($iv . $ciphertext);
+    $domain = preg_replace('#^https?://#', '', strtolower(trim($domain)));
+    $domain = preg_replace('#^www\.#', '', $domain);
+    $domain = preg_replace('/[^a-z0-9.]/', '_', $domain);
+    $domain = str_replace('.', '_', $domain);
+    $domain = preg_replace('/_+/', '_', $domain);
+    return trim($domain, '_');
 }
 
-function proDbDecrypt(string $encoded): string
+/** Full MySQL database name for a pro domain (same prefix as main DB). */
+function proDbName(string $domain): string
 {
-    $rawKey = base64_decode((string)env('PRO_DB_ENCRYPTION_KEY', ''));
-    if (!$rawKey || strlen($rawKey) !== 32) {
-        throw new \Exception('PRO_DB_ENCRYPTION_KEY manquant ou invalide.');
-    }
-    $data = base64_decode($encoded);
-    if (strlen($data) < 17) {
-        throw new \Exception('Données chiffrées corrompues.');
-    }
-    $iv         = substr($data, 0, 16);
-    $ciphertext = substr($data, 16);
-    $plain = openssl_decrypt($ciphertext, 'aes-256-cbc', $rawKey, OPENSSL_RAW_DATA, $iv);
-    if ($plain === false) {
-        throw new \Exception('Déchiffrement DB échoué.');
-    }
-    return $plain;
+    $slug   = proDbSlug($domain);
+    $prefix = DB_NAME . '_';
+    return $prefix . substr($slug, 0, 64 - strlen($prefix));
+}
+
+/** Absolute filesystem path to the pro site directory. */
+function proSiteDir(string $domain): string
+{
+    $safeDomain = preg_replace('/[^a-z0-9._-]/i', '_', strtolower($domain));
+    $docRoot    = rtrim($_SERVER['DOCUMENT_ROOT'] ?? realpath(__DIR__ . '/..') ?: dirname(__DIR__), '/');
+    return $docRoot . '/pros/' . $safeDomain;
+}
+
+/** Public URL of the pro site. */
+function proSiteUrl(string $domain): string
+{
+    $safeDomain = preg_replace('/[^a-z0-9._-]/i', '_', strtolower($domain));
+    return 'https://sunbox-mauritius.com/pros/' . $safeDomain;
 }
 
 /**

@@ -1,5 +1,6 @@
 Options -MultiViews
 RewriteEngine On
+RewriteBase /pros/{{DOMAIN}}/
 
 # Deny .env access
 <Files ".env">
@@ -12,4 +13,4 @@ RewriteRule ^api/ - [L]
 # Everything else → index.html (React SPA)
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule . /index.html [L]
+RewriteRule . index.html [L]

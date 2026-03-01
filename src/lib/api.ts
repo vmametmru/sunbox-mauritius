@@ -850,11 +850,11 @@ export const api = {
     return this.query('get_pro_users');
   },
 
-  createProUser(user: { name: string; email: string; password: string; company_name: string; address?: string; vat_number?: string; brn_number?: string; phone?: string; domain?: string; db_host?: string; db_name?: string; db_user?: string; db_pass?: string }) {
+  createProUser(user: { name: string; email: string; password: string; company_name: string; address?: string; vat_number?: string; brn_number?: string; phone?: string; domain?: string }) {
     return this.query('create_pro_user', user);
   },
 
-  updateProUser(user: { id: number; name?: string; email?: string; password?: string; is_active?: boolean; company_name?: string; address?: string; vat_number?: string; brn_number?: string; phone?: string; sunbox_margin_percent?: number; domain?: string; logo_url?: string; db_host?: string; db_name?: string; db_user?: string; db_pass?: string }) {
+  updateProUser(user: { id: number; name?: string; email?: string; password?: string; is_active?: boolean; company_name?: string; address?: string; vat_number?: string; brn_number?: string; phone?: string; sunbox_margin_percent?: number; domain?: string; logo_url?: string }) {
     return this.query('update_pro_user', user);
   },
 
@@ -864,6 +864,14 @@ export const api = {
 
   regenerateProToken(id: number) {
     return this.query('regenerate_pro_token', { id });
+  },
+
+  deployProSite(userId: number) {
+    return this.query('deploy_pro_site', { user_id: userId });
+  },
+
+  initProDb(userId: number) {
+    return this.query('init_pro_db', { user_id: userId });
   },
 
   buyProPack(userId: number) {
