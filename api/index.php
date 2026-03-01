@@ -2693,12 +2693,14 @@ try {
             $companyName = (string)$profile['company_name'];
             $dbName      = (string)($profile['db_name'] ?? '');
 
-            $siteDir  = proSiteDir($domain);
-            $siteUrl  = proSiteUrl($domain);
-            $result   = [
+            $siteDir     = proSiteDir($domain);
+            // The pro site is an addon domain pointing to siteDir, so its public URL
+            // IS the domain itself (not a Sunbox subdirectory).
+            $proBaseUrl  = 'https://' . $domain;
+            $result      = [
                 'deployed'  => false,
                 'site_dir'  => $siteDir,
-                'site_url'  => $siteUrl,
+                'site_url'  => $proBaseUrl,
                 'db_name'   => $dbName,
                 'errors'    => [],
                 'debug'     => [],
@@ -2750,49 +2752,57 @@ try {
                 }
                 $result['debug'][] = 'Fichiers PHP déployés.';
 
-                // Deploy index.html — read from main site's built dist, inject pro API config
+                // Create symlink siteDir/assets → main site's /assets (same server, avoids CORS).
+                // Apache mod_rewrite follows symlinks, so the JS/CSS will be served from the
+                // pro's own domain (https://mrbcreativecontracting.com/assets/...) with no CORS issue.
+                $mainAssetsDir = dirname(__DIR__) . '/assets';
+                $proAssetsLink = $siteDir . '/assets';
+                if (!file_exists($proAssetsLink) && !is_link($proAssetsLink)) {
+                    if (is_dir($mainAssetsDir)) {
+                        if (!symlink($mainAssetsDir, $proAssetsLink)) {
+                            $result['errors'][] = 'Avertissement: symlink assets échoué. Créez-le manuellement via SSH: ln -s {sunbox_root}/assets {pro_site_dir}/assets';
+                        } else {
+                            $result['debug'][] = 'Symlink assets créé: ' . $proAssetsLink . ' → ' . $mainAssetsDir;
+                        }
+                    } else {
+                        $result['errors'][] = 'Avertissement: dossier assets principal introuvable. Compilez le site (npm run build) d\'abord.';
+                    }
+                } else {
+                    $result['debug'][] = 'Symlink/dossier assets déjà présent.';
+                }
+
+                // Deploy index.html — read from main site's built index.html, inject pro API config.
+                // Asset paths stay as /assets/... (served locally via the symlink above, no CORS).
                 $mainIndexPath = dirname(__DIR__) . '/index.html';
                 if (file_exists($mainIndexPath)) {
                     $indexHtml = file_get_contents($mainIndexPath);
                     if ($indexHtml !== false) {
-                        // Rewrite root-relative asset paths to absolute Sunbox URLs so the browser
-                        // fetches JS/CSS from sunbox-mauritius.com (the pro site has no /assets/ folder).
-                        $sunboxBase = 'https://sunbox-mauritius.com';
-                        $indexHtml = str_replace('="/assets/', '="' . $sunboxBase . '/assets/', $indexHtml);
-                        $indexHtml = str_replace("='/assets/", "='" . $sunboxBase . "/assets/", $indexHtml);
-                        // Rewrite common root-relative favicon/icon/manifest links using simple str_replace
-                        foreach (['/vite.svg', '/favicon.ico', '/favicon.png', '/apple-touch-icon.png', '/manifest.json', '/robots.txt'] as $rootFile) {
-                            $indexHtml = str_replace('="' . $rootFile . '"', '="' . $sunboxBase . $rootFile . '"', $indexHtml);
-                            $indexHtml = str_replace("='" . $rootFile . "'", "='" . $sunboxBase . $rootFile . "'", $indexHtml);
-                        }
-
-                        // Inject pro config script right before </head> (str_replace, no regex)
-                        $apiUrlJson = json_encode($siteUrl . '/api', JSON_HEX_TAG | JSON_HEX_AMP);
-                        $proConfig = '<script>window.__API_BASE_URL__=' . $apiUrlJson . ';window.__PRO_SITE__=true;</script>';
-                        $closeHead = '</head>';
-                        $closeHeadPos = stripos($indexHtml, $closeHead);
+                        // Inject pro config: point the React app to this pro site's own /api
+                        // and flag it as a pro site (hides admin-only features).
+                        $apiUrlJson = json_encode($proBaseUrl . '/api', JSON_HEX_TAG | JSON_HEX_AMP);
+                        $proConfig  = '<script>window.__API_BASE_URL__=' . $apiUrlJson . ';window.__PRO_SITE__=true;</script>';
+                        $closeHeadPos = stripos($indexHtml, '</head>');
                         if ($closeHeadPos !== false) {
                             $indexHtml = substr($indexHtml, 0, $closeHeadPos) . $proConfig . substr($indexHtml, $closeHeadPos);
                         } else {
-                            // Fallback: append config before </body> or at end
                             $indexHtml .= $proConfig;
                         }
                         if (file_put_contents($siteDir . '/index.html', $indexHtml) === false) {
                             $result['errors'][] = 'Avertissement: impossible d\'écrire index.html';
                         } else {
-                            $result['debug'][] = 'index.html déployé avec chemins assets absolus + configuration API pro.';
+                            $result['debug'][] = 'index.html déployé avec configuration API pro (' . $proBaseUrl . '/api).';
                         }
                     } else {
                         $result['errors'][] = 'Avertissement: lecture de index.html échouée: ' . $mainIndexPath;
                     }
                 } else {
-                    $result['errors'][] = 'Avertissement: index.html introuvable (' . $mainIndexPath . '). Le site doit être compilé (npm run build) et déployé sur le serveur d\'abord.';
+                    $result['errors'][] = 'Avertissement: index.html introuvable (' . $mainIndexPath . '). Compilez et déployez le site (npm run build) d\'abord.';
                 }
 
                 // Write .env with Sunbox's DB credentials (protected by .htaccess)
                 $envLines = [
                     'APP_ENV=production',
-                    'APP_URL=' . $siteUrl,
+                    'APP_URL=' . $proBaseUrl,
                     'API_DEBUG=false',
                     '',
                     'SUNBOX_API_URL=https://sunbox-mauritius.com/api',
