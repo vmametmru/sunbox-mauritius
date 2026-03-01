@@ -138,33 +138,6 @@ function proSiteUrl(string $domain): string
 }
 
 /**
- * Encrypt a DB password for storage.
- * Uses AES-256-CBC with a key derived from the main site's own DB password.
- * No additional env variable needed.
- */
-function proDbEncrypt(string $plaintext): string
-{
-    $key = substr(hash('sha256', DB_PASS . DB_NAME, true), 0, 32);
-    $iv  = random_bytes(16);
-    $enc = openssl_encrypt($plaintext, 'aes-256-cbc', $key, OPENSSL_RAW_DATA, $iv);
-    if ($enc === false) throw new \Exception('Encryption failed');
-    return base64_encode($iv . $enc);
-}
-
-/** Decrypt a stored DB password. */
-function proDbDecrypt(string $encoded): string
-{
-    $key  = substr(hash('sha256', DB_PASS . DB_NAME, true), 0, 32);
-    $raw  = base64_decode($encoded);
-    if (strlen($raw) < 17) throw new \Exception('Invalid ciphertext');
-    $iv   = substr($raw, 0, 16);
-    $enc  = substr($raw, 16);
-    $plain = openssl_decrypt($enc, 'aes-256-cbc', $key, OPENSSL_RAW_DATA, $iv);
-    if ($plain === false) throw new \Exception('Decryption failed');
-    return $plain;
-}
-
-/**
  * ------------------------------------------------------------
  * 3) DB connection
  * ------------------------------------------------------------

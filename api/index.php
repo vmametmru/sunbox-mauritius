@@ -2581,8 +2581,7 @@ try {
                 SELECT u.id, u.name, u.email, u.role,
                        pp.company_name, pp.address, pp.vat_number, pp.brn_number,
                        pp.phone, pp.logo_url, pp.sunbox_margin_percent, pp.credits, pp.is_active,
-                       pp.domain, pp.api_token,
-                       pp.db_host, pp.db_name, pp.db_user
+                       pp.domain, pp.api_token, pp.db_name
                 FROM users u
                 LEFT JOIN professional_profiles pp ON pp.user_id = u.id
                 WHERE u.role = 'professional'
@@ -2597,11 +2596,6 @@ try {
             $passwordHash = password_hash((string)$body['password'], PASSWORD_BCRYPT);
             $apiToken = bin2hex(random_bytes(32));
 
-            $dbPassEnc = '';
-            if (!empty($body['db_pass'])) {
-                $dbPassEnc = proDbEncrypt((string)$body['db_pass']);
-            }
-
             $db->beginTransaction();
             try {
                 $stmt = $db->prepare("
@@ -2613,8 +2607,8 @@ try {
                 $stmt = $db->prepare("
                     INSERT INTO professional_profiles
                         (user_id, company_name, address, vat_number, brn_number, phone, domain, api_token,
-                         db_host, db_name, db_user, db_pass_enc, is_active)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                         db_name, is_active)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                 ");
                 $stmt->execute([
                     $userId,
@@ -2625,10 +2619,7 @@ try {
                     $body['phone'] ?? '',
                     $body['domain'] ?? '',
                     $apiToken,
-                    $body['db_host'] ?? 'localhost',
                     $body['db_name'] ?? '',
-                    $body['db_user'] ?? '',
-                    $dbPassEnc,
                 ]);
                 $db->commit();
                 ok(['id' => $userId, 'api_token' => $apiToken]);
@@ -2662,10 +2653,7 @@ try {
             if (array_key_exists('phone', $body)) { $profSets[] = 'phone = ?'; $profParams[] = $body['phone']; }
             if (array_key_exists('domain', $body)) { $profSets[] = 'domain = ?'; $profParams[] = strtolower(trim($body['domain'])); }
             if (array_key_exists('logo_url', $body)) { $profSets[] = 'logo_url = ?'; $profParams[] = $body['logo_url']; }
-            if (array_key_exists('db_host', $body)) { $profSets[] = 'db_host = ?'; $profParams[] = $body['db_host']; }
             if (array_key_exists('db_name', $body)) { $profSets[] = 'db_name = ?'; $profParams[] = $body['db_name']; }
-            if (array_key_exists('db_user', $body)) { $profSets[] = 'db_user = ?'; $profParams[] = $body['db_user']; }
-            if (!empty($body['db_pass'])) { $profSets[] = 'db_pass_enc = ?'; $profParams[] = proDbEncrypt((string)$body['db_pass']); }
             if (array_key_exists('sunbox_margin_percent', $body)) { $profSets[] = 'sunbox_margin_percent = ?'; $profParams[] = (float)$body['sunbox_margin_percent']; }
             if (array_key_exists('is_active', $body)) { $profSets[] = 'is_active = ?'; $profParams[] = (int)(bool)$body['is_active']; }
             if (!empty($profSets)) {
@@ -2691,8 +2679,7 @@ try {
             $userId = (int)$body['user_id'];
 
             $stmt = $db->prepare("
-                SELECT pp.domain, pp.api_token, pp.company_name,
-                       pp.db_host, pp.db_name, pp.db_user, pp.db_pass_enc
+                SELECT pp.domain, pp.api_token, pp.company_name, pp.db_name
                 FROM professional_profiles pp WHERE pp.user_id = ?
             ");
             $stmt->execute([$userId]);
@@ -2704,13 +2691,7 @@ try {
             $domain      = (string)$profile['domain'];
             $apiToken    = (string)$profile['api_token'];
             $companyName = (string)$profile['company_name'];
-            $dbHost      = (string)($profile['db_host'] ?: 'localhost');
             $dbName      = (string)($profile['db_name'] ?? '');
-            $dbUser      = (string)($profile['db_user'] ?? '');
-            $dbPass      = '';
-            if (!empty($profile['db_pass_enc'])) {
-                try { $dbPass = proDbDecrypt((string)$profile['db_pass_enc']); } catch (Throwable $ignored) {}
-            }
 
             $siteDir  = proSiteDir($domain);
             $siteUrl  = proSiteUrl($domain);
@@ -2769,7 +2750,7 @@ try {
                 }
                 $result['debug'][] = 'Fichiers PHP déployés.';
 
-                // Write .env with stored DB credentials (protected by .htaccess)
+                // Write .env with Sunbox's DB credentials (protected by .htaccess)
                 $envLines = [
                     'APP_ENV=production',
                     'APP_URL=' . $siteUrl,
@@ -2779,10 +2760,10 @@ try {
                     'SUNBOX_API_TOKEN=' . $apiToken,
                     'SUNBOX_DOMAIN=' . $domain,
                     '',
-                    'DB_HOST=' . $dbHost,
+                    'DB_HOST=' . DB_HOST,
                     'DB_NAME=' . $dbName,
-                    'DB_USER=' . $dbUser,
-                    'DB_PASS=' . $dbPass,
+                    'DB_USER=' . DB_USER,
+                    'DB_PASS=' . DB_PASS,
                     '',
                     'COMPANY_NAME=' . $companyName,
                     'VAT_RATE=15',
@@ -2807,7 +2788,7 @@ try {
             $userId = (int)$body['user_id'];
 
             $stmt = $db->prepare("
-                SELECT pp.company_name, pp.db_host, pp.db_name, pp.db_user, pp.db_pass_enc
+                SELECT pp.company_name, pp.db_name
                 FROM professional_profiles pp WHERE pp.user_id = ?
             ");
             $stmt->execute([$userId]);
@@ -2815,16 +2796,10 @@ try {
             if (!$profile) fail('Utilisateur professionnel introuvable.');
 
             $companyName = (string)$profile['company_name'];
-            $dbHost      = (string)($profile['db_host'] ?: 'localhost');
             $dbName      = (string)($profile['db_name'] ?? '');
-            $dbUser      = (string)($profile['db_user'] ?? '');
-            $dbPass      = '';
-            if (!empty($profile['db_pass_enc'])) {
-                try { $dbPass = proDbDecrypt((string)$profile['db_pass_enc']); } catch (Throwable $ignored) {}
-            }
 
-            if (!$dbName || !$dbUser) {
-                fail('Configuration de la base de données manquante. Renseignez le nom de la BD, l\'utilisateur et le mot de passe dans le formulaire puis enregistrez.');
+            if (!$dbName) {
+                fail('Nom de la base de données manquant. Renseignez-le dans le formulaire puis enregistrez.');
             }
 
             $result = [
@@ -2834,10 +2809,10 @@ try {
             ];
 
             try {
-                // Connect directly to the pre-created database with its own credentials
+                // Connect using Sunbox's own server credentials with the pro database name
                 $proPdo = new PDO(
-                    "mysql:host={$dbHost};dbname={$dbName};charset=utf8mb4",
-                    $dbUser, $dbPass,
+                    "mysql:host=" . DB_HOST . ";dbname={$dbName};charset=utf8mb4",
+                    DB_USER, DB_PASS,
                     [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_EMULATE_PREPARES => false]
                 );
 

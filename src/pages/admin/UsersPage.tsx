@@ -47,10 +47,7 @@ interface ProUser {
   domain?: string;
   api_token?: string;
   logo_url?: string;
-  db_host?: string;
   db_name?: string;
-  db_user?: string;
-  db_pass?: string; // write-only, never returned from API
 }
 
 const emptyUser: ProUser = {
@@ -65,10 +62,7 @@ const emptyUser: ProUser = {
   sunbox_margin_percent: 0,
   domain: '',
   logo_url: '',
-  db_host: 'localhost',
   db_name: '',
-  db_user: '',
-  db_pass: '',
   is_active: true,
 };
 
@@ -547,49 +541,16 @@ export default function UsersPage() {
                   🗄️ Base de données du site professionnel
                 </p>
                 <p className="text-xs text-gray-500">
-                  Créez d'abord la base de données manuellement dans cPanel, puis renseignez ses identifiants ici.
-                  Le bouton <strong>Créer les tables</strong> ci-dessous s'y connectera et créera le schéma.
+                  Créez d'abord la base de données manuellement dans cPanel, puis renseignez son nom ici.
+                  Les identifiants du serveur Sunbox seront utilisés pour s'y connecter.
                 </p>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label>Hôte DB</Label>
-                    <Input
-                      value={editingUser?.db_host ?? 'localhost'}
-                      onChange={(e) => setEditingUser(editingUser ? { ...editingUser, db_host: e.target.value } : editingUser)}
-                      placeholder="localhost"
-                    />
-                  </div>
-                  <div>
-                    <Label>Nom de la base de données</Label>
-                    <Input
-                      value={editingUser?.db_name ?? ''}
-                      onChange={(e) => setEditingUser(editingUser ? { ...editingUser, db_name: e.target.value } : editingUser)}
-                      placeholder="mauriti2_pro_poolbuilder"
-                    />
-                  </div>
-                  <div>
-                    <Label>Utilisateur DB</Label>
-                    <Input
-                      value={editingUser?.db_user ?? ''}
-                      onChange={(e) => setEditingUser(editingUser ? { ...editingUser, db_user: e.target.value } : editingUser)}
-                      placeholder="mauriti2_poolbuilder"
-                    />
-                  </div>
-                  <div>
-                    <Label>
-                      Mot de passe DB
-                      {editingUser?.id && (
-                        <span className="text-xs text-gray-400 ml-1">(laisser vide = inchangé)</span>
-                      )}
-                    </Label>
-                    <Input
-                      type="password"
-                      value={editingUser?.db_pass ?? ''}
-                      onChange={(e) => setEditingUser(editingUser ? { ...editingUser, db_pass: e.target.value } : editingUser)}
-                      placeholder="••••••••"
-                      autoComplete="new-password"
-                    />
-                  </div>
+                <div>
+                  <Label>Nom de la base de données</Label>
+                  <Input
+                    value={editingUser?.db_name ?? ''}
+                    onChange={(e) => setEditingUser(editingUser ? { ...editingUser, db_name: e.target.value } : editingUser)}
+                    placeholder="mauriti2_pro_poolbuilder"
+                  />
                 </div>
               </div>
 
@@ -642,7 +603,7 @@ export default function UsersPage() {
                     type="button"
                     variant="outline"
                     size="sm"
-                    disabled={!editingUser.id || !editingUser.domain || initializingDb || !editingUser.db_name || !editingUser.db_user}
+                    disabled={!editingUser.id || !editingUser.domain || initializingDb || !editingUser.db_name}
                     onClick={() => initProDb(editingUser.id!)}
                     className="text-green-700 border-green-300 hover:bg-green-100 justify-start"
                   >
