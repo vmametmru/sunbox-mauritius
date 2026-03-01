@@ -2581,7 +2581,8 @@ try {
                 SELECT u.id, u.name, u.email, u.role,
                        pp.company_name, pp.address, pp.vat_number, pp.brn_number,
                        pp.phone, pp.logo_url, pp.sunbox_margin_percent, pp.credits, pp.is_active,
-                       pp.domain, pp.api_token
+                       pp.domain, pp.api_token,
+                       pp.db_host, pp.db_name, pp.db_user
                 FROM users u
                 LEFT JOIN professional_profiles pp ON pp.user_id = u.id
                 WHERE u.role = 'professional'
@@ -2596,6 +2597,11 @@ try {
             $passwordHash = password_hash((string)$body['password'], PASSWORD_BCRYPT);
             $apiToken = bin2hex(random_bytes(32));
 
+            $dbPassEnc = '';
+            if (!empty($body['db_pass'])) {
+                $dbPassEnc = proDbEncrypt((string)$body['db_pass']);
+            }
+
             $db->beginTransaction();
             try {
                 $stmt = $db->prepare("
@@ -2606,8 +2612,9 @@ try {
 
                 $stmt = $db->prepare("
                     INSERT INTO professional_profiles
-                        (user_id, company_name, address, vat_number, brn_number, phone, domain, api_token, is_active)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+                        (user_id, company_name, address, vat_number, brn_number, phone, domain, api_token,
+                         db_host, db_name, db_user, db_pass_enc, is_active)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                 ");
                 $stmt->execute([
                     $userId,
@@ -2618,6 +2625,10 @@ try {
                     $body['phone'] ?? '',
                     $body['domain'] ?? '',
                     $apiToken,
+                    $body['db_host'] ?? 'localhost',
+                    $body['db_name'] ?? '',
+                    $body['db_user'] ?? '',
+                    $dbPassEnc,
                 ]);
                 $db->commit();
                 ok(['id' => $userId, 'api_token' => $apiToken]);
@@ -2651,6 +2662,10 @@ try {
             if (array_key_exists('phone', $body)) { $profSets[] = 'phone = ?'; $profParams[] = $body['phone']; }
             if (array_key_exists('domain', $body)) { $profSets[] = 'domain = ?'; $profParams[] = strtolower(trim($body['domain'])); }
             if (array_key_exists('logo_url', $body)) { $profSets[] = 'logo_url = ?'; $profParams[] = $body['logo_url']; }
+            if (array_key_exists('db_host', $body)) { $profSets[] = 'db_host = ?'; $profParams[] = $body['db_host']; }
+            if (array_key_exists('db_name', $body)) { $profSets[] = 'db_name = ?'; $profParams[] = $body['db_name']; }
+            if (array_key_exists('db_user', $body)) { $profSets[] = 'db_user = ?'; $profParams[] = $body['db_user']; }
+            if (!empty($body['db_pass'])) { $profSets[] = 'db_pass_enc = ?'; $profParams[] = proDbEncrypt((string)$body['db_pass']); }
             if (array_key_exists('sunbox_margin_percent', $body)) { $profSets[] = 'sunbox_margin_percent = ?'; $profParams[] = (float)$body['sunbox_margin_percent']; }
             if (array_key_exists('is_active', $body)) { $profSets[] = 'is_active = ?'; $profParams[] = (int)(bool)$body['is_active']; }
             if (!empty($profSets)) {
@@ -2675,7 +2690,11 @@ try {
             validateRequired($body, ['user_id']);
             $userId = (int)$body['user_id'];
 
-            $stmt = $db->prepare("SELECT pp.domain, pp.api_token, pp.company_name FROM professional_profiles pp WHERE pp.user_id = ?");
+            $stmt = $db->prepare("
+                SELECT pp.domain, pp.api_token, pp.company_name,
+                       pp.db_host, pp.db_name, pp.db_user, pp.db_pass_enc
+                FROM professional_profiles pp WHERE pp.user_id = ?
+            ");
             $stmt->execute([$userId]);
             $profile = $stmt->fetch();
             if (!$profile || empty($profile['domain'])) {
@@ -2685,24 +2704,48 @@ try {
             $domain      = (string)$profile['domain'];
             $apiToken    = (string)$profile['api_token'];
             $companyName = (string)$profile['company_name'];
-            $dbName      = proDbName($domain);
-            $siteDir     = proSiteDir($domain);
-            $siteUrl     = proSiteUrl($domain);
-            $result      = ['deployed' => false, 'site_dir' => $siteDir, 'site_url' => $siteUrl, 'db_name' => $dbName, 'errors' => []];
+            $dbHost      = (string)($profile['db_host'] ?: 'localhost');
+            $dbName      = (string)($profile['db_name'] ?? '');
+            $dbUser      = (string)($profile['db_user'] ?? '');
+            $dbPass      = '';
+            if (!empty($profile['db_pass_enc'])) {
+                try { $dbPass = proDbDecrypt((string)$profile['db_pass_enc']); } catch (Throwable $ignored) {}
+            }
+
+            $siteDir  = proSiteDir($domain);
+            $siteUrl  = proSiteUrl($domain);
+            $result   = [
+                'deployed'  => false,
+                'site_dir'  => $siteDir,
+                'site_url'  => $siteUrl,
+                'db_name'   => $dbName,
+                'errors'    => [],
+                'debug'     => [],
+            ];
+
+            $result['debug'][] = 'api/__DIR__: ' . __DIR__;
+            $result['debug'][] = 'siteDir: ' . $siteDir;
 
             try {
                 // Create directories
                 foreach ([$siteDir, $siteDir . '/api'] as $dir) {
-                    if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
-                        throw new \Exception("Impossible de créer le répertoire: $dir");
+                    if (!is_dir($dir)) {
+                        if (!mkdir($dir, 0755, true)) {
+                            throw new \Exception("mkdir échoué pour: $dir — vérifiez les permissions.");
+                        }
                     }
                 }
+                $result['debug'][] = 'Répertoires créés.';
 
                 $templateDir = __DIR__ . '/pro_deploy';
+                if (!is_dir($templateDir)) {
+                    throw new \Exception("Dossier templates introuvable: $templateDir");
+                }
+
                 $replacements = [
-                    '{{API_TOKEN}}'    => $apiToken,
-                    '{{DOMAIN}}'       => $domain,
-                    '{{COMPANY_NAME}}' => $companyName,
+                    '{{API_TOKEN}}'      => $apiToken,
+                    '{{DOMAIN}}'         => $domain,
+                    '{{COMPANY_NAME}}'   => $companyName,
                     '{{SUNBOX_API_URL}}' => 'https://sunbox-mauritius.com/api',
                 ];
 
@@ -2713,33 +2756,42 @@ try {
                     'htaccess'       => $siteDir . '/.htaccess',
                 ];
                 foreach ($filesToDeploy as $tpl => $dest) {
-                    $content = file_get_contents($templateDir . '/' . $tpl);
-                    if ($content === false) throw new \Exception("Template introuvable: $tpl");
+                    $tplPath = $templateDir . '/' . $tpl;
+                    if (!file_exists($tplPath)) {
+                        throw new \Exception("Template introuvable: $tplPath");
+                    }
+                    $content = file_get_contents($tplPath);
+                    if ($content === false) throw new \Exception("Lecture échouée: $tplPath");
                     $content = str_replace(array_keys($replacements), array_values($replacements), $content);
                     if (file_put_contents($dest, $content) === false) {
-                        throw new \Exception("Impossible d'écrire: $dest");
+                        throw new \Exception("Écriture échouée: $dest — vérifiez les permissions.");
                     }
                 }
+                $result['debug'][] = 'Fichiers PHP déployés.';
 
-                // Write the .env with real credentials (protected by .htaccess)
+                // Write .env with stored DB credentials (protected by .htaccess)
                 $envLines = [
                     'APP_ENV=production',
-                    'APP_URL=https://sunbox-mauritius.com/pros/' . rawurlencode($domain),
+                    'APP_URL=' . $siteUrl,
                     'API_DEBUG=false',
                     '',
                     'SUNBOX_API_URL=https://sunbox-mauritius.com/api',
                     'SUNBOX_API_TOKEN=' . $apiToken,
                     'SUNBOX_DOMAIN=' . $domain,
                     '',
-                    'DB_HOST=' . DB_HOST,
+                    'DB_HOST=' . $dbHost,
                     'DB_NAME=' . $dbName,
-                    'DB_USER=' . DB_USER,
-                    'DB_PASS=' . DB_PASS,
+                    'DB_USER=' . $dbUser,
+                    'DB_PASS=' . $dbPass,
                     '',
                     'COMPANY_NAME=' . $companyName,
                     'VAT_RATE=15',
                 ];
-                file_put_contents($siteDir . '/.env', implode("\n", $envLines) . "\n");
+                if (file_put_contents($siteDir . '/.env', implode("\n", $envLines) . "\n") === false) {
+                    $result['errors'][] = 'Avertissement: impossible d\'écrire .env';
+                } else {
+                    $result['debug'][] = '.env écrit.';
+                }
 
                 $result['deployed'] = true;
             } catch (Throwable $e) {
@@ -2749,42 +2801,43 @@ try {
             break;
         }
 
-        // ── Create pro database and initialize schema ───────────────────────────
+        // ── Initialize schema in an already-created pro database ───────────────
         case 'init_pro_db': {
             validateRequired($body, ['user_id']);
             $userId = (int)$body['user_id'];
 
-            $stmt = $db->prepare("SELECT pp.domain, pp.company_name FROM professional_profiles pp WHERE pp.user_id = ?");
+            $stmt = $db->prepare("
+                SELECT pp.company_name, pp.db_host, pp.db_name, pp.db_user, pp.db_pass_enc
+                FROM professional_profiles pp WHERE pp.user_id = ?
+            ");
             $stmt->execute([$userId]);
             $profile = $stmt->fetch();
-            if (!$profile || empty($profile['domain'])) {
-                fail('Domaine non configuré pour cet utilisateur. Enregistrez d\'abord le domaine.');
-            }
+            if (!$profile) fail('Utilisateur professionnel introuvable.');
 
-            $domain      = (string)$profile['domain'];
             $companyName = (string)$profile['company_name'];
-            $dbName      = proDbName($domain);
-            $result      = ['db_name' => $dbName, 'db_created' => false, 'schema_initialized' => false, 'errors' => []];
-
-            // 1. Try to CREATE DATABASE
-            try {
-                $rootPdo = new PDO(
-                    "mysql:host=" . DB_HOST . ";charset=utf8mb4",
-                    DB_USER, DB_PASS,
-                    [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_EMULATE_PREPARES => false]
-                );
-                $safeDbName = '`' . str_replace('`', '', $dbName) . '`';
-                $rootPdo->exec("CREATE DATABASE IF NOT EXISTS {$safeDbName} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
-                $result['db_created'] = true;
-            } catch (Throwable $e) {
-                $result['errors'][] = 'Création BD: ' . $e->getMessage();
+            $dbHost      = (string)($profile['db_host'] ?: 'localhost');
+            $dbName      = (string)($profile['db_name'] ?? '');
+            $dbUser      = (string)($profile['db_user'] ?? '');
+            $dbPass      = '';
+            if (!empty($profile['db_pass_enc'])) {
+                try { $dbPass = proDbDecrypt((string)$profile['db_pass_enc']); } catch (Throwable $ignored) {}
             }
 
-            // 2. Connect to new DB and create schema
+            if (!$dbName || !$dbUser) {
+                fail('Configuration de la base de données manquante. Renseignez le nom de la BD, l\'utilisateur et le mot de passe dans le formulaire puis enregistrez.');
+            }
+
+            $result = [
+                'db_name'            => $dbName,
+                'schema_initialized' => false,
+                'errors'             => [],
+            ];
+
             try {
+                // Connect directly to the pre-created database with its own credentials
                 $proPdo = new PDO(
-                    "mysql:host=" . DB_HOST . ";dbname={$dbName};charset=utf8mb4",
-                    DB_USER, DB_PASS,
+                    "mysql:host={$dbHost};dbname={$dbName};charset=utf8mb4",
+                    $dbUser, $dbPass,
                     [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_EMULATE_PREPARES => false]
                 );
 
@@ -2829,9 +2882,12 @@ try {
                     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 
-                // Default settings
-                $ins = $proPdo->prepare("INSERT INTO `pro_settings` (`setting_key`, `setting_value`, `setting_group`)
-                    VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE `setting_value` = VALUES(`setting_value`)");
+                // Seed default settings
+                $ins = $proPdo->prepare("
+                    INSERT INTO `pro_settings` (`setting_key`, `setting_value`, `setting_group`)
+                    VALUES (?, ?, ?)
+                    ON DUPLICATE KEY UPDATE `setting_value` = VALUES(`setting_value`)
+                ");
                 foreach ([
                     ['vat_rate', '15', 'general'],
                     ['company_name', $companyName, 'company'],
@@ -2846,7 +2902,7 @@ try {
 
                 $result['schema_initialized'] = true;
             } catch (Throwable $e) {
-                $result['errors'][] = 'Init schéma: ' . $e->getMessage();
+                $result['errors'][] = $e->getMessage();
             }
 
             ok($result);

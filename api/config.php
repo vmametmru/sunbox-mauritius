@@ -106,7 +106,7 @@ define('ALLOWED_ORIGINS', [
  * ------------------------------------------------------------
  */
 
-/** Sanitise a domain into a safe DB/directory slug. */
+/** Sanitise a domain into a safe directory/slug name. */
 function proDbSlug(string $domain): string
 {
     $domain = preg_replace('#^https?://#', '', strtolower(trim($domain)));
@@ -117,20 +117,17 @@ function proDbSlug(string $domain): string
     return trim($domain, '_');
 }
 
-/** Full MySQL database name for a pro domain (same prefix as main DB). */
-function proDbName(string $domain): string
-{
-    $slug   = proDbSlug($domain);
-    $prefix = DB_NAME . '_';
-    return $prefix . substr($slug, 0, 64 - strlen($prefix));
-}
-
-/** Absolute filesystem path to the pro site directory. */
+/**
+ * Absolute filesystem path to the pro site directory.
+ * Always derived from __DIR__ (api/) going one level up to public_html root.
+ * More reliable than DOCUMENT_ROOT on cPanel.
+ */
 function proSiteDir(string $domain): string
 {
     $safeDomain = preg_replace('/[^a-z0-9._-]/i', '_', strtolower($domain));
-    $docRoot    = rtrim($_SERVER['DOCUMENT_ROOT'] ?? realpath(__DIR__ . '/..') ?: dirname(__DIR__), '/');
-    return $docRoot . '/pros/' . $safeDomain;
+    // __DIR__ = public_html/api  →  dirname(__DIR__) = public_html
+    $webRoot = rtrim(dirname(__DIR__), '/');
+    return $webRoot . '/pros/' . $safeDomain;
 }
 
 /** Public URL of the pro site. */
@@ -138,6 +135,33 @@ function proSiteUrl(string $domain): string
 {
     $safeDomain = preg_replace('/[^a-z0-9._-]/i', '_', strtolower($domain));
     return 'https://sunbox-mauritius.com/pros/' . $safeDomain;
+}
+
+/**
+ * Encrypt a DB password for storage.
+ * Uses AES-256-CBC with a key derived from the main site's own DB password.
+ * No additional env variable needed.
+ */
+function proDbEncrypt(string $plaintext): string
+{
+    $key = substr(hash('sha256', DB_PASS . DB_NAME, true), 0, 32);
+    $iv  = random_bytes(16);
+    $enc = openssl_encrypt($plaintext, 'aes-256-cbc', $key, OPENSSL_RAW_DATA, $iv);
+    if ($enc === false) throw new \Exception('Encryption failed');
+    return base64_encode($iv . $enc);
+}
+
+/** Decrypt a stored DB password. */
+function proDbDecrypt(string $encoded): string
+{
+    $key  = substr(hash('sha256', DB_PASS . DB_NAME, true), 0, 32);
+    $raw  = base64_decode($encoded);
+    if (strlen($raw) < 17) throw new \Exception('Invalid ciphertext');
+    $iv   = substr($raw, 0, 16);
+    $enc  = substr($raw, 16);
+    $plain = openssl_decrypt($enc, 'aes-256-cbc', $key, OPENSSL_RAW_DATA, $iv);
+    if ($plain === false) throw new \Exception('Decryption failed');
+    return $plain;
 }
 
 /**

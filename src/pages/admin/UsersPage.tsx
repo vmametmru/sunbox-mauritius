@@ -8,11 +8,7 @@ import {
   CreditCard,
   Building2,
   TrendingUp,
-  Download,
-  Copy,
-  RefreshCw,
   Globe,
-  KeyRound,
   Upload,
   FolderOpen,
   Database,
@@ -51,6 +47,10 @@ interface ProUser {
   domain?: string;
   api_token?: string;
   logo_url?: string;
+  db_host?: string;
+  db_name?: string;
+  db_user?: string;
+  db_pass?: string; // write-only, never returned from API
 }
 
 const emptyUser: ProUser = {
@@ -65,6 +65,10 @@ const emptyUser: ProUser = {
   sunbox_margin_percent: 0,
   domain: '',
   logo_url: '',
+  db_host: 'localhost',
+  db_name: '',
+  db_user: '',
+  db_pass: '',
   is_active: true,
 };
 
@@ -91,7 +95,6 @@ export default function UsersPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [buyingPack, setBuyingPack] = useState<number | null>(null);
-  const [regenerating, setRegenerating] = useState<number | null>(null);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [deploying, setDeploying] = useState(false);
   const [initializingDb, setInitializingDb] = useState(false);
@@ -185,26 +188,6 @@ export default function UsersPage() {
     }
   };
 
-  const regenerateToken = async (userId: number) => {
-    if (!confirm('Régénérer le token API ? L\'ancien token sera immédiatement invalidé.')) return;
-    try {
-      setRegenerating(userId);
-      const data = await api.regenerateProToken(userId);
-      toast({ title: 'Token régénéré', description: 'Le nouveau token a été généré.' });
-      setUsers(users.map((u) => u.id === userId ? { ...u, api_token: data.api_token } : u));
-    } catch (err: any) {
-      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
-    } finally {
-      setRegenerating(null);
-    }
-  };
-
-  const copyToClipboard = (text: string, label: string) => {
-    navigator.clipboard.writeText(text).then(() => {
-      toast({ title: `${label} copié` });
-    });
-  };
-
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !editingUser) return;
@@ -225,16 +208,13 @@ export default function UsersPage() {
     }
   };
 
-  const downloadZip = (userId: number) => {
-    window.open(`${API_BASE}/download_pro_zip.php?user_id=${userId}`, '_blank');
-  };
-
   const deployProSite = async (userId: number) => {
     setDeploying(true);
     setProvisionStatus(null);
     try {
       const data = await api.deployProSite(userId);
       const errors = data.errors ?? [];
+      const debugInfo = data.debug ? ` [${(data.debug as string[]).join(' | ')}]` : '';
       if (data.deployed) {
         setProvisionStatus({
           ok: true,
@@ -242,7 +222,7 @@ export default function UsersPage() {
         });
         toast({ title: 'Site déployé', description: `URL: ${data.site_url}` });
       } else {
-        setProvisionStatus({ ok: false, message: '❌ Échec: ' + (errors.join(', ') || 'Erreur inconnue') });
+        setProvisionStatus({ ok: false, message: `❌ Échec: ${errors.join(', ') || 'Erreur inconnue'}${debugInfo}` });
       }
     } catch (err: any) {
       setProvisionStatus({ ok: false, message: '❌ ' + err.message });
@@ -257,14 +237,10 @@ export default function UsersPage() {
     try {
       const data = await api.initProDb(userId);
       const errors = data.errors ?? [];
-      const parts = [];
-      if (data.db_created) parts.push('BD créée');
-      if (data.schema_initialized) parts.push('tables créées');
-      if (!data.db_created && data.schema_initialized) parts.push('tables mises à jour (BD existante)');
-      if (parts.length > 0) {
+      if (data.schema_initialized) {
         setProvisionStatus({
           ok: true,
-          message: `✅ ${parts.join(', ')} — BD: ${data.db_name}${errors.length ? ' — Avertissements: ' + errors.join(', ') : ''}`,
+          message: `✅ Tables créées — BD: ${data.db_name}${errors.length ? ' — Avertissements: ' + errors.join(', ') : ''}`,
         });
         toast({ title: 'Base de données initialisée', description: data.db_name });
       } else {
@@ -377,39 +353,8 @@ export default function UsersPage() {
                   )}
                 </div>
 
-                {/* API Token */}
-                {user.api_token && (
-                  <div className="bg-gray-50 rounded-lg p-2">
-                    <p className="text-xs text-gray-500 mb-1 flex items-center gap-1">
-                      <KeyRound className="h-3 w-3" /> Token API
-                    </p>
-                    <div className="flex items-center gap-1">
-                      <code className="text-xs text-gray-700 flex-1 truncate bg-white border rounded px-2 py-1">
-                        {user.api_token}
-                      </code>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 w-7 p-0"
-                        onClick={() => copyToClipboard(user.api_token!, 'Token')}
-                      >
-                        <Copy className="h-3 w-3" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 w-7 p-0 text-orange-600"
-                        onClick={() => regenerateToken(user.id!)}
-                        disabled={regenerating === user.id}
-                      >
-                        <RefreshCw className={`h-3 w-3 ${regenerating === user.id ? 'animate-spin' : ''}`} />
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
                 {/* Actions */}
-                <div className="grid grid-cols-2 gap-2">
+                <div className="flex gap-2">
                   <Button
                     size="sm"
                     variant="outline"
@@ -419,15 +364,6 @@ export default function UsersPage() {
                   >
                     <TrendingUp className="h-4 w-4 mr-1" />
                     {buyingPack === user.id ? 'Ajout...' : 'Pack +10 000 Rs'}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="text-blue-600 border-blue-300 hover:bg-blue-50"
-                    onClick={() => downloadZip(user.id!)}
-                  >
-                    <Download className="h-4 w-4 mr-1" />
-                    Télécharger ZIP
                   </Button>
                 </div>
               </CardContent>
@@ -605,6 +541,58 @@ export default function UsersPage() {
                 </div>
               )}
 
+              {/* DB Config */}
+              <div className="border rounded-lg p-4 space-y-3 bg-gray-50">
+                <p className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                  🗄️ Base de données du site professionnel
+                </p>
+                <p className="text-xs text-gray-500">
+                  Créez d'abord la base de données manuellement dans cPanel, puis renseignez ses identifiants ici.
+                  Le bouton <strong>Créer les tables</strong> ci-dessous s'y connectera et créera le schéma.
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label>Hôte DB</Label>
+                    <Input
+                      value={editingUser?.db_host ?? 'localhost'}
+                      onChange={(e) => setEditingUser(editingUser ? { ...editingUser, db_host: e.target.value } : editingUser)}
+                      placeholder="localhost"
+                    />
+                  </div>
+                  <div>
+                    <Label>Nom de la base de données</Label>
+                    <Input
+                      value={editingUser?.db_name ?? ''}
+                      onChange={(e) => setEditingUser(editingUser ? { ...editingUser, db_name: e.target.value } : editingUser)}
+                      placeholder="mauriti2_pro_poolbuilder"
+                    />
+                  </div>
+                  <div>
+                    <Label>Utilisateur DB</Label>
+                    <Input
+                      value={editingUser?.db_user ?? ''}
+                      onChange={(e) => setEditingUser(editingUser ? { ...editingUser, db_user: e.target.value } : editingUser)}
+                      placeholder="mauriti2_poolbuilder"
+                    />
+                  </div>
+                  <div>
+                    <Label>
+                      Mot de passe DB
+                      {editingUser?.id && (
+                        <span className="text-xs text-gray-400 ml-1">(laisser vide = inchangé)</span>
+                      )}
+                    </Label>
+                    <Input
+                      type="password"
+                      value={editingUser?.db_pass ?? ''}
+                      onChange={(e) => setEditingUser(editingUser ? { ...editingUser, db_pass: e.target.value } : editingUser)}
+                      placeholder="••••••••"
+                      autoComplete="new-password"
+                    />
+                  </div>
+                </div>
+              </div>
+
               {/* Site Deployment */}
               <div className="border rounded-lg p-4 space-y-3 bg-blue-50">
                 <p className="text-sm font-semibold text-blue-700 flex items-center gap-2">
@@ -654,7 +642,7 @@ export default function UsersPage() {
                     type="button"
                     variant="outline"
                     size="sm"
-                    disabled={!editingUser.id || !editingUser.domain || initializingDb}
+                    disabled={!editingUser.id || !editingUser.domain || initializingDb || !editingUser.db_name || !editingUser.db_user}
                     onClick={() => initProDb(editingUser.id!)}
                     className="text-green-700 border-green-300 hover:bg-green-100 justify-start"
                   >
