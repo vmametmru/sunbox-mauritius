@@ -2679,7 +2679,7 @@ try {
             $userId = (int)$body['user_id'];
 
             $stmt = $db->prepare("
-                SELECT pp.domain, pp.api_token, pp.company_name, pp.db_name, pp.logo_url,
+                SELECT pp.domain, pp.company_name, pp.db_name, pp.logo_url,
                        u.password_hash
                 FROM professional_profiles pp
                 JOIN users u ON u.id = pp.user_id
@@ -2692,14 +2692,6 @@ try {
             }
 
             $domain       = (string)$profile['domain'];
-            $apiToken     = (string)$profile['api_token'];
-            // Ensure the pro user always has a valid API token before deploying.
-            // This handles users created before the api_token column was added.
-            if ($apiToken === '') {
-                $apiToken = bin2hex(random_bytes(32));
-                $db->prepare("UPDATE professional_profiles SET api_token = ? WHERE user_id = ?")
-                   ->execute([$apiToken, $userId]);
-            }
             $companyName  = (string)$profile['company_name'];
             $dbName       = (string)($profile['db_name'] ?? '');
             $passwordHash = (string)($profile['password_hash'] ?? '');
@@ -2738,10 +2730,8 @@ try {
                 }
 
                 $replacements = [
-                    '{{API_TOKEN}}'      => $apiToken,
-                    '{{DOMAIN}}'         => $domain,
-                    '{{COMPANY_NAME}}'   => $companyName,
-                    '{{SUNBOX_API_URL}}' => $sunboxBaseUrl . '/api',
+                    '{{DOMAIN}}'       => $domain,
+                    '{{COMPANY_NAME}}' => $companyName,
                 ];
 
                 $filesToDeploy = [
@@ -2825,20 +2815,21 @@ try {
                     $result['errors'][] = 'Avertissement: index.html introuvable (' . $mainIndexPath . '). Compilez et déployez le site (npm run build) d\'abord.';
                 }
 
-                // Write .env with Sunbox's DB credentials (protected by .htaccess)
+                // Write a minimal pro-specific .env.
+                // DB credentials (DB_HOST, DB_USER, DB_PASS) and the main Sunbox DB_NAME
+                // are NOT written here — the pro site's api_config.php loads them
+                // automatically from the Sunbox root .env (3 levels up).
+                // Only pro-specific overrides are stored here.
                 $envLines = [
-                    'APP_ENV=production',
+                    '# Pro site config — DB credentials come from Sunbox root .env automatically.',
                     'APP_URL=' . $proBaseUrl,
                     'API_DEBUG=false',
                     '',
-                    'SUNBOX_API_URL=' . $sunboxBaseUrl . '/api',
-                    'SUNBOX_API_TOKEN=' . $apiToken,
-                    'SUNBOX_DOMAIN=' . $domain,
+                    '# Pro user identifier in Sunbox DB (used for direct DB queries)',
+                    'SUNBOX_USER_ID=' . $userId,
                     '',
-                    'DB_HOST=' . DB_HOST,
+                    '# Pro site own database (overrides DB_NAME from Sunbox root .env)',
                     'DB_NAME=' . $dbName,
-                    'DB_USER=' . DB_USER,
-                    'DB_PASS=' . DB_PASS,
                     '',
                     'ADMIN_PASSWORD_HASH=' . $passwordHash,
                     '',
@@ -2849,6 +2840,18 @@ try {
                     $result['errors'][] = 'Avertissement: impossible d\'écrire .env';
                 } else {
                     $result['debug'][] = '.env écrit.';
+                }
+
+                // Verify Sunbox root .env is reachable from the pro site's api/config.php
+                // (i.e., 3 levels up from siteDir/api/ == sunbox root).
+                // siteDir = sunbox-root/pros/<domain>  →  dirname($siteDir, 2) = sunbox-root
+                $sunboxRootDir = dirname($siteDir, 2);
+                $sunboxEnvPath = $sunboxRootDir . '/.env';
+                if (is_file($sunboxEnvPath) && is_readable($sunboxEnvPath)) {
+                    $result['debug'][] = 'Sunbox root .env accessible depuis le site pro (' . $sunboxEnvPath . ').';
+                } else {
+                    $result['errors'][] = 'Avertissement: Sunbox root .env introuvable à ' . $sunboxEnvPath
+                        . '. Vérifiez que le site pro est bien sous sunbox-root/pros/<domaine>/.';
                 }
 
                 $result['deployed'] = true;

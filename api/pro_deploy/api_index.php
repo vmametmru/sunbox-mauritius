@@ -41,15 +41,15 @@ try {
             break;
         }
 
-        // ── MODELS (from Sunbox main API) ──────────────────────────────────────
+        // ── MODELS (direct from Sunbox DB — no HTTP) ──────────────────────────
         case 'get_models': {
-            $result = fetchSunboxModels();
+            $result = fetchModels();
             ok($result);
             break;
         }
 
         case 'check_credits': {
-            $result = checkSunboxCredits();
+            $result = checkCredits();
             ok($result);
             break;
         }
@@ -213,7 +213,7 @@ try {
             validateRequired($body, ['model_id', 'model_name', 'total_price']);
 
             // Deduct credits from Sunbox
-            $creditResult = deductSunboxCredits(500, 'quote_created');
+            $creditResult = deductCredits(500, 'quote_created');
             if (!($creditResult['success'] ?? false)) {
                 fail($creditResult['error'] ?? 'Crédits insuffisants', 402);
             }
@@ -250,7 +250,7 @@ try {
 
             // Validate quote
             if ($status === 'approved') {
-                $creditResult = deductSunboxCredits(1000, 'quote_validated', $id);
+                $creditResult = deductCredits(1000, 'quote_validated', $id);
                 if (!($creditResult['success'] ?? false)) {
                     fail($creditResult['error'] ?? 'Crédits insuffisants', 402);
                 }
@@ -476,7 +476,7 @@ try {
             $totalRevenue  = (float)$db->query("SELECT COALESCE(SUM(total_price),0) FROM pro_quotes WHERE status IN ('approved','completed')")->fetchColumn();
             $totalContacts = (int)$db->query("SELECT COUNT(*) FROM pro_contacts")->fetchColumn();
 
-            $credits = checkSunboxCredits();
+            $credits = checkCredits();
 
             $recentStmt = $db->query("
                 SELECT q.*, c.name AS customer_name FROM pro_quotes q
