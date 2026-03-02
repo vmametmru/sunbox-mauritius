@@ -6,8 +6,8 @@ handleCORS();
 
 // Pro site deployment versions — increment these when templates or DB schema change.
 // PRO_FILE_VERSION must match define('PRO_FILE_VERSION', ...) in api/pro_deploy/api_config.php
-define('PRO_FILE_VERSION',      '1.4.0');
-define('PRO_DB_SCHEMA_VERSION', '1.3.0');
+define('PRO_FILE_VERSION',      '1.5.0');
+define('PRO_DB_SCHEMA_VERSION', '1.4.0');
 
 $action = $_GET['action'] ?? '';
 $body   = getRequestBody();
@@ -3002,13 +3002,15 @@ try {
                     `phone` VARCHAR(50) DEFAULT '',
                     `address` TEXT,
                     `company` VARCHAR(255) DEFAULT '',
+                    `device_id` VARCHAR(255) DEFAULT NULL,
                     `notes` TEXT,
                     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
                 // Safe column additions for contacts (upgrade path)
-                $addCol('pro_contacts', 'company', "VARCHAR(255) DEFAULT '' AFTER `address`");
-                $addCol('pro_contacts', 'notes',   "TEXT AFTER `company`");
+                $addCol('pro_contacts', 'company',   "VARCHAR(255) DEFAULT '' AFTER `address`");
+                $addCol('pro_contacts', 'device_id', "VARCHAR(255) DEFAULT NULL AFTER `company`");
+                $addCol('pro_contacts', 'notes',     "TEXT AFTER `device_id`");
 
                 $proPdo->exec("CREATE TABLE IF NOT EXISTS `pro_quotes` (
                     `id` INT AUTO_INCREMENT PRIMARY KEY,
@@ -3017,8 +3019,11 @@ try {
                     `customer_name` VARCHAR(255) DEFAULT '',
                     `customer_email` VARCHAR(255) DEFAULT '',
                     `customer_phone` VARCHAR(50) DEFAULT '',
+                    `customer_address` TEXT,
+                    `customer_message` TEXT,
                     `model_id` INT NOT NULL,
                     `model_name` VARCHAR(255) NOT NULL,
+                    `model_type` VARCHAR(20) DEFAULT 'container',
                     `base_price` DECIMAL(12,2) DEFAULT 0,
                     `options_total` DECIMAL(12,2) DEFAULT 0,
                     `total_price` DECIMAL(12,2) NOT NULL,
@@ -3029,8 +3034,22 @@ try {
                     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
                 // Safe column additions for quotes (upgrade path)
-                $addCol('pro_quotes', 'notes',       "TEXT AFTER `total_price`");
-                $addCol('pro_quotes', 'valid_until',  "DATE DEFAULT NULL AFTER `status`");
+                $addCol('pro_quotes', 'customer_address', "TEXT AFTER `customer_phone`");
+                $addCol('pro_quotes', 'customer_message', "TEXT AFTER `customer_address`");
+                $addCol('pro_quotes', 'model_type',       "VARCHAR(20) DEFAULT 'container' AFTER `model_name`");
+                $addCol('pro_quotes', 'notes',            "TEXT AFTER `total_price`");
+                $addCol('pro_quotes', 'valid_until',      "DATE DEFAULT NULL AFTER `status`");
+
+                // ── Quote options (v1.4.0) ─────────────────────────────────────
+                $proPdo->exec("CREATE TABLE IF NOT EXISTS `pro_quote_options` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `quote_id` INT NOT NULL,
+                    `option_id` INT DEFAULT NULL,
+                    `option_name` VARCHAR(500) NOT NULL,
+                    `option_price` DECIMAL(12,2) DEFAULT 0,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (`quote_id`) REFERENCES `pro_quotes`(`id`) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 
                 // ── New tables (v1.2.0) ────────────────────────────────────────
                 $proPdo->exec("CREATE TABLE IF NOT EXISTS `pro_discounts` (

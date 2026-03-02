@@ -16,7 +16,7 @@ declare(strict_types=1);
  */
 
 /** Deployed file version — must match PRO_FILE_VERSION in sunbox api/index.php. */
-define('PRO_FILE_VERSION', '1.4.0');
+define('PRO_FILE_VERSION', '1.5.0');
 
 /**
  * Parse a single .env file from disk, bypassing getenv() entirely.
@@ -526,7 +526,13 @@ function validateRequired($data, $fields): void {
     if (!empty($missing)) errorResponse("Missing: " . implode(', ', $missing));
 }
 
+function sanitize($value) {
+    if (is_string($value)) return strip_tags(trim($value));
+    return $value;
+}
+
 function generateReference(): string
 {
-    return 'PRO-' . date('Ymd') . '-' . strtoupper(substr(md5(uniqid(mt_rand(), true)), 0, 4));
+    // uniqid() needs a string prefix (PHP 8 strict); use empty string for entropy from microsecond clock
+    return 'PRO-' . date('Ymd') . '-' . strtoupper(substr(md5(uniqid('', true)), 0, 6));
 }

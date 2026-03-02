@@ -402,37 +402,115 @@ try {
             break;
         }
 
-        case 'create_quote': {
-            requireAdmin();
+        case 'get_contact_by_device': {
+            // Public — no auth needed (pre-fills visitor form with saved info)
             $db = getDB();
-            validateRequired($body, ['model_id', 'model_name', 'total_price']);
+            validateRequired($body, ['device_id']);
+            $stmt = $db->prepare("
+                SELECT id, name, email, phone, address
+                FROM pro_contacts
+                WHERE device_id = ?
+                ORDER BY updated_at DESC
+                LIMIT 1
+            ");
+            $stmt->execute([sanitize($body['device_id'])]);
+            ok($stmt->fetch() ?: null);
+            break;
+        }
 
-            // Deduct credits from Sunbox
+        case 'create_quote': {
+            // Public — visitor submitting a quote from the configurator (no admin auth required)
+            $db = getDB();
+            validateRequired($body, ['model_id', 'model_name', 'model_type', 'base_price', 'total_price',
+                                     'customer_name', 'customer_email', 'customer_phone']);
+
+            // Deduct 500 Rs credits from Sunbox for each quote created
             $creditResult = deductCredits(500, 'quote_created');
             if (!($creditResult['success'] ?? false)) {
                 fail($creditResult['error'] ?? 'Crédits insuffisants', 402);
             }
 
-            $stmt = $db->prepare("
-                INSERT INTO pro_quotes
-                    (reference_number, contact_id, customer_name, customer_email, customer_phone,
-                     model_id, model_name, base_price, options_total, total_price, notes, status, valid_until)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', DATE_ADD(NOW(), INTERVAL 30 DAY))
-            ");
-            $stmt->execute([
-                generateReference(),
-                $body['contact_id'] ?? null,
-                $body['customer_name'] ?? '',
-                $body['customer_email'] ?? '',
-                $body['customer_phone'] ?? '',
-                (int)$body['model_id'],
-                $body['model_name'],
-                (float)($body['base_price'] ?? 0),
-                (float)($body['options_total'] ?? 0),
-                (float)$body['total_price'],
-                $body['notes'] ?? '',
-            ]);
-            ok(['id' => (int)$db->lastInsertId(), 'credits_after' => $creditResult['data']['credits'] ?? null]);
+            $db->beginTransaction();
+            try {
+                $yearMonth  = date('Ym');
+                $modelType  = $body['model_type'];
+                $refPrefix  = ($modelType === 'container') ? 'PCQ' : 'PPQ';
+                $maxNext    = (int)$db->query("SELECT COALESCE(MAX(id),0)+1 FROM pro_quotes")->fetchColumn();
+                $reference  = sprintf('%s-%s-%06d', $refPrefix, $yearMonth, $maxNext);
+                $validUntil = date('Y-m-d', strtotime('+30 days'));
+
+                $customerEmail   = sanitize($body['customer_email']);
+                $customerName    = sanitize($body['customer_name']);
+                $customerPhone   = sanitize($body['customer_phone']);
+                $customerAddress = sanitize($body['customer_address'] ?? '');
+                $deviceId        = isset($body['device_id']) ? sanitize($body['device_id']) : null;
+
+                // Create or update pro_contacts
+                $cStmt = $db->prepare("SELECT id FROM pro_contacts WHERE email = ?");
+                $cStmt->execute([$customerEmail]);
+                $existing = $cStmt->fetch();
+                if ($existing) {
+                    $contactId = $existing['id'];
+                    $db->prepare("UPDATE pro_contacts SET name=?, phone=?, address=?,
+                                  device_id=COALESCE(?,device_id), updated_at=NOW() WHERE id=?")
+                       ->execute([$customerName, $customerPhone, $customerAddress, $deviceId, $contactId]);
+                } else {
+                    $db->prepare("INSERT INTO pro_contacts (name,email,phone,address,device_id) VALUES (?,?,?,?,?)")
+                       ->execute([$customerName, $customerEmail, $customerPhone, $customerAddress, $deviceId]);
+                    $contactId = (int)$db->lastInsertId();
+                }
+
+                // Insert quote
+                $db->prepare("
+                    INSERT INTO pro_quotes
+                        (reference_number, contact_id, customer_name, customer_email, customer_phone,
+                         customer_address, customer_message, model_id, model_name, model_type,
+                         base_price, options_total, total_price, status, valid_until)
+                    VALUES (?,?,?,?,?, ?,?,?,?,?, ?,?,?,'pending',?)
+                ")->execute([
+                    $reference,
+                    $contactId,
+                    $customerName, $customerEmail, $customerPhone,
+                    $customerAddress,
+                    sanitize($body['customer_message'] ?? ''),
+                    (int)$body['model_id'],
+                    sanitize($body['model_name']),
+                    $modelType,
+                    (float)$body['base_price'],
+                    (float)($body['options_total'] ?? 0),
+                    (float)$body['total_price'],
+                    $validUntil,
+                ]);
+                $quoteId = (int)$db->lastInsertId();
+
+                // Update reference with actual quote ID for uniqueness guarantee
+                $reference = sprintf('%s-%s-%06d', $refPrefix, $yearMonth, $quoteId);
+                $db->prepare("UPDATE pro_quotes SET reference_number=? WHERE id=?")->execute([$reference, $quoteId]);
+
+                // Store selected options in pro_quote_options
+                if (!empty($body['selected_options']) && is_array($body['selected_options'])) {
+                    $oStmt = $db->prepare("INSERT INTO pro_quote_options
+                                           (quote_id, option_id, option_name, option_price)
+                                           VALUES (?,?,?,?)");
+                    $OFFSET = 1000000;
+                    foreach ($body['selected_options'] as $opt) {
+                        $oid = (int)($opt['option_id'] ?? 0);
+                        $oStmt->execute([
+                            $quoteId,
+                            $oid >= $OFFSET ? null : $oid,
+                            sanitize($opt['option_name']),
+                            (float)$opt['option_price'],
+                        ]);
+                    }
+                }
+
+                $db->commit();
+                ok(['id' => $quoteId, 'reference_number' => $reference, 'contact_id' => $contactId,
+                    'credits_after' => $creditResult['data']['credits'] ?? null]);
+            } catch (Exception $e) {
+                $db->rollBack();
+                throw $e;
+            }
             break;
         }
 

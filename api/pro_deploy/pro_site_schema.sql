@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS `pro_contacts` (
     `phone` VARCHAR(50) DEFAULT '',
     `address` TEXT,
     `company` VARCHAR(255) DEFAULT '',
+    `device_id` VARCHAR(255) DEFAULT NULL,
     `notes` TEXT,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -37,8 +38,11 @@ CREATE TABLE IF NOT EXISTS `pro_quotes` (
     `customer_name` VARCHAR(255) DEFAULT '',
     `customer_email` VARCHAR(255) DEFAULT '',
     `customer_phone` VARCHAR(50) DEFAULT '',
+    `customer_address` TEXT,
+    `customer_message` TEXT,
     `model_id` INT NOT NULL,
     `model_name` VARCHAR(255) NOT NULL,
+    `model_type` VARCHAR(20) DEFAULT 'container',
     `base_price` DECIMAL(12,2) DEFAULT 0,
     `options_total` DECIMAL(12,2) DEFAULT 0,
     `total_price` DECIMAL(12,2) NOT NULL,
@@ -47,6 +51,17 @@ CREATE TABLE IF NOT EXISTS `pro_quotes` (
     `valid_until` DATE DEFAULT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ── Quote options (selected options per pro quote) ─────────────────────────────
+CREATE TABLE IF NOT EXISTS `pro_quote_options` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `quote_id` INT NOT NULL,
+    `option_id` INT DEFAULT NULL,
+    `option_name` VARCHAR(500) NOT NULL,
+    `option_price` DECIMAL(12,2) DEFAULT 0,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (`quote_id`) REFERENCES `pro_quotes`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ── Upgrade block: add columns to existing tables if they are missing ──────────
@@ -72,6 +87,36 @@ SET @col_exists = (
 SET @sql = IF(@col_exists > 0, 'SELECT 1', 'ALTER TABLE `pro_quotes` ADD COLUMN `valid_until` DATE DEFAULT NULL AFTER `status`');
 PREPARE _stmt FROM @sql; EXECUTE _stmt; DEALLOCATE PREPARE _stmt;
 
+-- Add 'customer_address' to pro_quotes if missing
+SET @col_exists = (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'pro_quotes'
+      AND COLUMN_NAME = 'customer_address'
+);
+SET @sql = IF(@col_exists > 0, 'SELECT 1', 'ALTER TABLE `pro_quotes` ADD COLUMN `customer_address` TEXT AFTER `customer_phone`');
+PREPARE _stmt FROM @sql; EXECUTE _stmt; DEALLOCATE PREPARE _stmt;
+
+-- Add 'customer_message' to pro_quotes if missing
+SET @col_exists = (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'pro_quotes'
+      AND COLUMN_NAME = 'customer_message'
+);
+SET @sql = IF(@col_exists > 0, 'SELECT 1', 'ALTER TABLE `pro_quotes` ADD COLUMN `customer_message` TEXT AFTER `customer_address`');
+PREPARE _stmt FROM @sql; EXECUTE _stmt; DEALLOCATE PREPARE _stmt;
+
+-- Add 'model_type' to pro_quotes if missing
+SET @col_exists = (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'pro_quotes'
+      AND COLUMN_NAME = 'model_type'
+);
+SET @sql = IF(@col_exists > 0, 'SELECT 1', 'ALTER TABLE `pro_quotes` ADD COLUMN `model_type` VARCHAR(20) DEFAULT ''container'' AFTER `model_name`');
+PREPARE _stmt FROM @sql; EXECUTE _stmt; DEALLOCATE PREPARE _stmt;
+
 -- Add 'company' to pro_contacts if missing
 SET @col_exists = (
     SELECT COUNT(*) FROM information_schema.COLUMNS
@@ -79,7 +124,17 @@ SET @col_exists = (
       AND TABLE_NAME = 'pro_contacts'
       AND COLUMN_NAME = 'company'
 );
-SET @sql = IF(@col_exists > 0, 'SELECT 1', 'ALTER TABLE `pro_contacts` ADD COLUMN `company` VARCHAR(255) DEFAULT `""` AFTER `address`');
+SET @sql = IF(@col_exists > 0, 'SELECT 1', 'ALTER TABLE `pro_contacts` ADD COLUMN `company` VARCHAR(255) DEFAULT '' AFTER `address`');
+PREPARE _stmt FROM @sql; EXECUTE _stmt; DEALLOCATE PREPARE _stmt;
+
+-- Add 'device_id' to pro_contacts if missing
+SET @col_exists = (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'pro_contacts'
+      AND COLUMN_NAME = 'device_id'
+);
+SET @sql = IF(@col_exists > 0, 'SELECT 1', 'ALTER TABLE `pro_contacts` ADD COLUMN `device_id` VARCHAR(255) DEFAULT NULL AFTER `company`');
 PREPARE _stmt FROM @sql; EXECUTE _stmt; DEALLOCATE PREPARE _stmt;
 
 -- ── Discounts (pro's own promotional discounts) ───────────────────────────────
@@ -150,5 +205,5 @@ CREATE TABLE IF NOT EXISTS `pro_schema_version` (
     PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-INSERT INTO `pro_schema_version` (`id`, `version`) VALUES (1, '1.2.0')
+INSERT INTO `pro_schema_version` (`id`, `version`) VALUES (1, '1.4.0')
 ON DUPLICATE KEY UPDATE `version` = VALUES(`version`), `applied_at` = NOW();
