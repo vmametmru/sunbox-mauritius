@@ -6,8 +6,8 @@ handleCORS();
 
 // Pro site deployment versions — increment these when templates or DB schema change.
 // PRO_FILE_VERSION must match define('PRO_FILE_VERSION', ...) in api/pro_deploy/api_config.php
-define('PRO_FILE_VERSION',      '1.2.0');
-define('PRO_DB_SCHEMA_VERSION', '1.2.0');
+define('PRO_FILE_VERSION',      '1.3.0');
+define('PRO_DB_SCHEMA_VERSION', '1.3.0');
 
 $action = $_GET['action'] ?? '';
 $body   = getRequestBody();
@@ -2891,7 +2891,7 @@ try {
                 $envLines = [
                     '# Pro site config — DB credentials come from Sunbox root .env automatically.',
                     'APP_URL=' . $proBaseUrl,
-                    'API_DEBUG=false',
+                    'API_DEBUG=true',
                     '',
                     '# Pro user identifier in Sunbox DB (used for direct DB queries)',
                     'SUNBOX_USER_ID=' . $userId,

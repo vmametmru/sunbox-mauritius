@@ -52,6 +52,7 @@ export default function ModelsPage() {
   const [filterType, setFilterType] = useState<'all' | 'container' | 'pool'>('all');
   const [modalImage, setModalImage] = useState<string | null>(null);
   const [catalogMode, setCatalogMode] = useState(false);
+  const [apiError, setApiError] = useState<string | null>(null);
   const { data: siteSettings } = useSiteSettings();
   const vatRate = Number(siteSettings?.vat_rate) || 15;
 
@@ -87,12 +88,17 @@ export default function ModelsPage() {
 
   useEffect(() => {
     api.getModels(undefined, true).then((data) => {
-      // Pro site returns { models: [...], catalog_mode: bool, ... }
+      // Pro site returns { models: [...], catalog_mode: bool, _error?: string, ... }
       // Sunbox site returns a plain array
       const modelList: Model[] = Array.isArray(data) ? data : (data?.models ?? []);
       const isCatalog: boolean = Array.isArray(data) ? false : !!(data?.catalog_mode);
       setCatalogMode(isCatalog);
       setModels(modelList);
+      // Surface error message for pro site debugging (_error only set on failure)
+      if (!Array.isArray(data) && data?._error) {
+        console.error('Pro site models error:', data._error);
+        if (modelList.length === 0) setApiError(data._error);
+      }
 
       const surfaces = modelList.map((m: any) => Number(m.surface_m2) || 0);
       const minSurface = Math.min(...surfaces);
@@ -100,6 +106,9 @@ export default function ModelsPage() {
 
       setRangeLimits(r => ({ ...r, surface: [minSurface, maxSurface] }));
       setFilters(f => ({ ...f, surfaceMin: minSurface, surfaceMax: maxSurface }));
+    }).catch((err) => {
+      console.error('getModels failed:', err);
+      setApiError(String(err?.message || err));
     });
     // Fetch all active discounts as fallback (in case server hasn't embedded them in get_models)
     api.getActiveDiscounts().then((data) => {
@@ -242,6 +251,17 @@ export default function ModelsPage() {
                 <span>{Number(rangeLimits.price[1]).toLocaleString(undefined, { maximumFractionDigits: 0 })} Rs</span>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* API error banner — only visible when models failed to load (pro site debugging) */}
+        {apiError && models.length === 0 && (typeof window !== 'undefined' && (window as any).__PRO_SITE__) && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">
+            <strong>Erreur de chargement des modèles:</strong><br />
+            <code className="text-xs break-all">{apiError}</code>
+            <p className="mt-1 text-xs text-red-600">
+              Vérifiez que les fichiers sont déployés (version à jour) et que la base de données est initialisée.
+            </p>
           </div>
         )}
 

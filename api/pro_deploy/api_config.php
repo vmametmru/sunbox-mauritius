@@ -16,36 +16,65 @@ declare(strict_types=1);
  */
 
 /** Deployed file version — must match PRO_FILE_VERSION in sunbox api/index.php. */
-define('PRO_FILE_VERSION', '1.2.0');
+define('PRO_FILE_VERSION', '1.3.0');
 
 /**
- * Read the Sunbox root .env directly from disk — bypasses getenv() entirely.
- * Immune to cPanel/Apache pre-set environment variables.
- *
- * Path: api/config.php is at sunbox-root/pros/<domain>/api/config.php
- *       dirname(__DIR__, 3): api → domain → pros → sunbox-root
+ * Parse a single .env file from disk, bypassing getenv() entirely.
+ * Returns an associative array of key → value.
+ * PHP 7.4 compatible (no str_contains / str_starts_with).
  */
-function parseSunboxRootEnv(): array
+function parseEnvFile(string $path): array
 {
-    static $cache = null;
-    if ($cache !== null) return $cache;
-    $path = dirname(__DIR__, 3) . '/.env';
-    $cache = [];
-    if (!is_file($path) || !is_readable($path)) return $cache;
-    foreach (file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
+    $result = [];
+    if (!is_file($path) || !is_readable($path)) return $result;
+    $lines = file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    if (!$lines) return $result;
+    foreach ($lines as $line) {
         $line = trim($line);
         if ($line === '' || $line[0] === '#' || $line[0] === ';') continue;
-        if (!str_contains($line, '=')) continue;
-        [$k, $v] = explode('=', $line, 2);
-        $k = trim($k);
-        $v = trim($v);
+        if (strpos($line, '=') === false) continue;
+        $parts = explode('=', $line, 2);
+        $k = trim($parts[0]);
+        $v = trim($parts[1]);
         if (strlen($v) >= 2 && (
             ($v[0] === '"'  && substr($v, -1) === '"')  ||
             ($v[0] === "'" && substr($v, -1) === "'")
         )) {
             $v = substr($v, 1, -1);
         }
-        $cache[$k] = $v;
+        $result[$k] = $v;
+    }
+    return $result;
+}
+
+/**
+ * Read the Sunbox root .env directly from disk — bypasses getenv() entirely.
+ * Tries the same candidate paths as Sunbox's loadEnvFile() so we find the .env
+ * regardless of whether it lives at the web-root level or one level above.
+ *
+ * Layout:  sunbox-root/pros/<domain>/api/config.php
+ *   dirname(__DIR__, 3) = sunbox-root
+ *   dirname(__DIR__, 4) = parent of sunbox-root (home dir)
+ */
+function parseSunboxRootEnv(): array
+{
+    static $cache = null;
+    if ($cache !== null) return $cache;
+
+    // Mirror Sunbox loadEnvFile() candidate list:
+    $sunboxRoot = dirname(__DIR__, 3);           // sunbox-root/
+    $candidates = [
+        $sunboxRoot . '/.env',                   // sunbox-root/.env  (most common)
+        $sunboxRoot . '/api/.env',               // sunbox-root/api/.env
+        dirname(__DIR__, 4) . '/.env',           // parent of sunbox-root (cPanel home)
+    ];
+    $cache = [];
+    foreach ($candidates as $path) {
+        $parsed = parseEnvFile($path);
+        if (!empty($parsed)) {
+            $cache = $parsed;
+            break;
+        }
     }
     return $cache;
 }
@@ -54,20 +83,8 @@ function parseSunboxRootEnv(): array
 function loadEnvFiles(): void
 {
     $path = dirname(__DIR__) . '/.env';
-    if (!is_file($path) || !is_readable($path)) return;
-    foreach (file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
-        $line = trim($line);
-        if ($line === '' || str_starts_with($line, '#') || str_starts_with($line, ';')) continue;
-        if (!str_contains($line, '=')) continue;
-        [$key, $val] = explode('=', $line, 2);
-        $key = trim($key);
-        $val = trim($val);
-        if (strlen($val) >= 2 && (
-            ($val[0] === '"'  && substr($val, -1) === '"')  ||
-            ($val[0] === "'" && substr($val, -1) === "'")
-        )) {
-            $val = substr($val, 1, -1);
-        }
+    $parsed = parseEnvFile($path);
+    foreach ($parsed as $key => $val) {
         @putenv("$key=$val");
         $_ENV[$key]    = $val;
         $_SERVER[$key] = $val;
@@ -138,11 +155,15 @@ function getSunboxDB(): PDO
     $user = $e['DB_USER'] ?? '';
     $pass = $e['DB_PASS'] ?? '';
     if (!$name || !$user) {
-        $envPath = dirname(__DIR__, 3) . '/.env';
+        // Report which candidates were tried
+        $sunboxRoot = dirname(__DIR__, 3);
+        $tried = implode(', ', [
+            $sunboxRoot . '/.env',
+            $sunboxRoot . '/api/.env',
+            dirname(__DIR__, 4) . '/.env',
+        ]);
         throw new \Exception(
-            "Sunbox DB inaccessible: DB_NAME='{$name}', DB_USER='{$user}'. "
-            . "Fichier .env lu: {$envPath}. "
-            . "Vérifiez que le site pro est dans sunbox-root/pros/<domaine>/."
+            "Sunbox DB: DB_NAME='{$name}', DB_USER='{$user}'. .env cherché dans: {$tried}."
         );
     }
     $pdo = new PDO("mysql:host={$host};dbname={$name};charset=utf8mb4", $user, $pass, [
@@ -173,7 +194,18 @@ function getProProfile(): array
 
 /**
  * Fetch models from the Sunbox DB with this pro's price overrides applied.
- * Returns: { models: [...], catalog_mode: bool, credits: float, logo_url: string, company_name: string }
+ *
+ * Returns:
+ *   { models: [...], catalog_mode: bool, credits: float,
+ *     logo_url: string, company_name: string, _error?: string }
+ *
+ * Design:
+ *  - The pro_model_overrides query is wrapped in its own try/catch.
+ *    If the table doesn't exist yet, all models are shown unfiltered.
+ *  - image_url and plan_url are made absolute (prefixed with Sunbox base URL)
+ *    so the pro site browser can load them from sunbox-mauritius.com.
+ *  - On outer failure the error text is always returned as `_error` so the
+ *    React app can surface a diagnostic message.
  */
 function fetchModels(): array
 {
@@ -181,55 +213,119 @@ function fetchModels(): array
     try {
         $db      = getSunboxDB();
         $profile = getProProfile();
-        if (!$profile) return $empty;
+
+        // Derive Sunbox base URL from root .env (not the pro .env which has the pro domain)
+        $sunboxEnv    = parseSunboxRootEnv();
+        $sunboxAppUrl = isset($sunboxEnv['APP_URL']) ? rtrim($sunboxEnv['APP_URL'], '/') : 'https://sunbox-mauritius.com';
+
+        if (!$profile) {
+            // No profile: return all Sunbox models without pro adjustments
+            // (allows the site to work as a catalogue even before pro profile is set up)
+            $stmt = $db->query("SELECT * FROM models WHERE is_active = 1 ORDER BY display_order ASC, id ASC");
+            $rawModels = $stmt ? $stmt->fetchAll() : [];
+            $result = [];
+            foreach ($rawModels as $model) {
+                $model = makeModelUrlsAbsolute($model, $sunboxAppUrl);
+                $result[] = $model;
+            }
+            $err = SUNBOX_USER_ID === 0
+                ? 'SUNBOX_USER_ID=0: pro .env non chargé ou manquant'
+                : 'Profil pro non trouvé pour user_id=' . SUNBOX_USER_ID;
+            return array_merge($empty, ['models' => $result, 'catalog_mode' => true, '_error' => $err]);
+        }
 
         $userId  = SUNBOX_USER_ID;
         $margin  = (float)($profile['sunbox_margin_percent'] ?? 0);
         $credits = (float)($profile['credits'] ?? 0);
 
-        // Active models with BOQ-calculated base price
+        // Fetch active models with BOQ price (mirrors Sunbox get_models logic)
         $stmt = $db->prepare("
-            SELECT m.*,
-                COALESCE((
-                    SELECT SUM(bl.sale_price_ht * bl.qty)
-                    FROM boq_lines bl
-                    JOIN boq_categories bc ON bc.id = bl.category_id
-                    WHERE bc.model_id = m.id AND bc.is_option = 0 AND bl.is_active = 1
-                ), 0) AS calculated_base_price
-            FROM models m
+            SELECT m.* FROM models m
             WHERE m.is_active = 1
             ORDER BY m.display_order ASC, m.id ASC
         ");
         $stmt->execute();
         $models = $stmt->fetchAll();
 
-        // Per-pro model overrides (price adjustment + enable/disable)
-        $ovStmt = $db->prepare("
-            SELECT model_id, price_adjustment, is_enabled
-            FROM pro_model_overrides
-            WHERE user_id = ?
-        ");
-        $ovStmt->execute([$userId]);
+        // Per-pro model overrides — non-fatal: missing table = no overrides
         $overrides = [];
-        foreach ($ovStmt->fetchAll() as $ov) {
-            $overrides[(int)$ov['model_id']] = $ov;
+        try {
+            $ovStmt = $db->prepare(
+                "SELECT model_id, price_adjustment, is_enabled FROM pro_model_overrides WHERE user_id = ?"
+            );
+            $ovStmt->execute([$userId]);
+            foreach ($ovStmt->fetchAll() as $ov) {
+                $overrides[(int)$ov['model_id']] = $ov;
+            }
+        } catch (\Throwable $ovErr) {
+            // Table missing or query error — show all models without filtering
+            error_log('ProSite: pro_model_overrides unavailable: ' . $ovErr->getMessage());
         }
+
+        // Active discounts from Sunbox (non-fatal)
+        $today = date('Y-m-d');
+        $allDiscounts = [];
+        try {
+            $dStmt = $db->prepare("
+                SELECT d.id, d.name, d.discount_type, d.discount_value, d.apply_to, d.end_date,
+                       GROUP_CONCAT(dm.model_id) AS model_ids_csv
+                FROM discounts d
+                LEFT JOIN discount_models dm ON dm.discount_id = d.id
+                WHERE d.is_active = 1 AND d.start_date <= ? AND d.end_date >= ?
+                GROUP BY d.id
+                ORDER BY d.discount_value DESC
+            ");
+            $dStmt->execute([$today, $today]);
+            foreach ($dStmt->fetchAll() as $disc) {
+                $disc['discount_value'] = (float)$disc['discount_value'];
+                $disc['id']             = (int)$disc['id'];
+                $disc['model_ids']      = $disc['model_ids_csv']
+                    ? array_map('intval', explode(',', $disc['model_ids_csv']))
+                    : [];
+                unset($disc['model_ids_csv']);
+                $allDiscounts[] = $disc;
+            }
+        } catch (\Throwable $ignored) {}
 
         $result = [];
         foreach ($models as $model) {
             $mid = (int)$model['id'];
 
             // Skip models explicitly disabled for this pro
-            if (isset($overrides[$mid]) && !(bool)$overrides[$mid]['is_enabled']) {
+            if (isset($overrides[$mid]) && !(int)$overrides[$mid]['is_enabled']) {
                 continue;
             }
 
-            // Calculate effective price: BOQ or manual → apply margin → apply adjustment
-            $boqPrice  = (float)($model['calculated_base_price'] ?? 0);
-            $basePrice = $boqPrice > 0 ? $boqPrice : (float)($model['base_price'] ?? 0);
+            // BOQ base price: use boq_categories/boq_lines if available
+            $boqPrice = 0.0;
+            try {
+                $bStmt = $db->prepare("
+                    SELECT COALESCE(SUM(
+                        ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)
+                    ), 0) AS boq_price
+                    FROM boq_categories bc
+                    LEFT JOIN boq_lines bl ON bc.id = bl.category_id
+                    LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
+                    WHERE bc.model_id = ? AND bc.is_option = FALSE
+                ");
+                $bStmt->execute([$mid]);
+                $boqPrice = (float)($bStmt->fetchColumn() ?? 0);
+            } catch (\Throwable $ignored) {}
+
+            $unforeseen = (float)($model['unforeseen_cost_percent'] ?? 10);
+            if ($boqPrice > 0) {
+                $basePrice = $boqPrice * (1 + $unforeseen / 100);
+                $model['price_source'] = 'boq';
+            } else {
+                $basePrice = (float)($model['base_price'] ?? 0);
+                $model['price_source'] = 'manual';
+            }
+
+            // Apply pro margin
             if ($margin > 0) {
                 $basePrice *= (1 + $margin / 100);
             }
+            // Apply pro override price adjustment
             if (isset($overrides[$mid])) {
                 $basePrice = max(0, $basePrice + (float)$overrides[$mid]['price_adjustment']);
             }
@@ -237,8 +333,8 @@ function fetchModels(): array
             $model['id']                    = $mid;
             $model['base_price']            = round($basePrice, 2);
             $model['calculated_base_price'] = round($basePrice, 2);
-            $model['price_source']          = 'pro_adjusted';
             $model['base_price_ht']         = round($basePrice, 2);
+            $model['boq_base_price_ht']     = round($boqPrice, 2);
             $model['is_active']             = (bool)$model['is_active'];
             $model['has_overflow']          = (bool)($model['has_overflow'] ?? false);
             $model['surface_m2']            = (float)($model['surface_m2'] ?? 0);
@@ -247,29 +343,38 @@ function fetchModels(): array
             $model['container_20ft_count']  = (int)($model['container_20ft_count'] ?? 0);
             $model['container_40ft_count']  = (int)($model['container_40ft_count'] ?? 0);
             $model['display_order']         = (int)($model['display_order'] ?? 0);
+            $model['features']              = isset($model['features']) && $model['features']
+                ? json_decode($model['features'], true)
+                : [];
+
+            // Fetch photo and plan URLs from model_images table
+            try {
+                $planRow  = $db->prepare("SELECT file_path FROM model_images WHERE model_id = ? AND media_type='plan'  ORDER BY is_primary DESC, id DESC LIMIT 1");
+                $photoRow = $db->prepare("SELECT file_path FROM model_images WHERE model_id = ? AND media_type='photo' ORDER BY is_primary DESC, id DESC LIMIT 1");
+                $planRow->execute([$mid]);
+                $photoRow->execute([$mid]);
+                $plan  = $planRow->fetch();
+                $photo = $photoRow->fetch();
+                if ($plan  && $plan['file_path'])  $model['plan_url']  = '/' . ltrim($plan['file_path'],  '/');
+                if ($photo && $photo['file_path']) $model['image_url'] = '/' . ltrim($photo['file_path'], '/');
+                elseif (!empty($model['image_url'])) $model['image_url'] = '/' . ltrim($model['image_url'], '/');
+            } catch (\Throwable $ignored) {}
+
+            // Make image/plan URLs absolute so pro site browser fetches from Sunbox server
+            $model = makeModelUrlsAbsolute($model, $sunboxAppUrl);
+
+            // Embed active discounts for this model (global or model-specific)
+            $modelDiscs = array_values(array_filter($allDiscounts, function ($d) use ($mid) {
+                return empty($d['model_ids']) || in_array($mid, $d['model_ids'], true);
+            }));
+            $model['active_discounts'] = $modelDiscs;
+
             $result[] = $model;
         }
 
-        // Make logo URL absolute if it's a relative Sunbox path
-        $logoUrl    = (string)($profile['logo_url'] ?? '');
-        $sunboxBase = rtrim((string)env('APP_URL', ''), '/');
-        // APP_URL from Sunbox root .env is sunbox-mauritius.com; pro .env overrides it.
-        // Use SUNBOX_DB_NAME as a proxy: reconstruct Sunbox base from the pro .env's APP_URL
-        // which may be mrbcreativecontracting.com. Instead, derive from the Sunbox root .env
-        // APP_URL loaded first before the override.
-        // We stored SUNBOX_DB_NAME; derive sunbox base URL another way — use the .env path.
-        $sunboxRootEnvPath = dirname(__DIR__, 3) . '/.env';
-        $sunboxAppUrl = '';
-        if (is_file($sunboxRootEnvPath)) {
-            foreach (file($sunboxRootEnvPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $l) {
-                if (str_starts_with(trim($l), 'APP_URL=')) {
-                    $sunboxAppUrl = rtrim(trim(substr(trim($l), 8), '"\''), '/');
-                    break;
-                }
-            }
-        }
-        if (!$sunboxAppUrl) $sunboxAppUrl = 'https://sunbox-mauritius.com';
-        if ($logoUrl !== '' && str_starts_with($logoUrl, '/')) {
+        // Make logo URL absolute
+        $logoUrl = (string)($profile['logo_url'] ?? '');
+        if ($logoUrl !== '' && $logoUrl[0] === '/') {
             $logoUrl = $sunboxAppUrl . $logoUrl;
         }
 
@@ -282,9 +387,28 @@ function fetchModels(): array
         ];
     } catch (\Throwable $e) {
         error_log('ProSite fetchModels error: ' . $e->getMessage());
-        if (API_DEBUG) return array_merge(['error' => $e->getMessage()], ['models' => [], 'catalog_mode' => true, 'credits' => 0, 'logo_url' => '', 'company_name' => '']);
-        return $empty;
+        return array_merge($empty, ['_error' => $e->getMessage()]);
     }
+}
+
+/**
+ * Prefix relative image_url / plan_url with the Sunbox base URL.
+ * The pro site browser requests images from the pro domain by default —
+ * they must point to sunbox-mauritius.com where the uploads live.
+ */
+function makeModelUrlsAbsolute(array $model, string $sunboxBase): array
+{
+    foreach (['image_url', 'plan_url'] as $key) {
+        if (!isset($model[$key]) || $model[$key] === '' || $model[$key] === null) continue;
+        $url = (string)$model[$key];
+        // Already absolute (http/https) — leave as-is
+        if (strpos($url, '://') !== false) continue;
+        // Root-relative path: prepend Sunbox base
+        if (strlen($url) > 0 && $url[0] === '/') {
+            $model[$key] = rtrim($sunboxBase, '/') . $url;
+        }
+    }
+    return $model;
 }
 
 /** Get credit balance directly from Sunbox DB. */
