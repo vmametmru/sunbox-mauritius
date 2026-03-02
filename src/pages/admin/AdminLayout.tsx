@@ -25,6 +25,7 @@ import {
   ChevronRight,
   LogOut,
   Tag,
+  ClipboardList,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -56,7 +57,8 @@ const navItems: NavItem[] = [
     label: 'Commerce',
     key: 'commerce',
     children: [
-      { icon: FileText, label: 'Devis', path: '/admin/quotes' },
+      { icon: FileText,      label: 'Devis',              path: '/admin/quotes' },
+      { icon: ClipboardList, label: "Rapports d'Achat",   path: '/admin/reports' },
     ],
   },
   {
@@ -73,6 +75,7 @@ const navItems: NavItem[] = [
     label: 'Paramètres',
     key: 'parametres',
     children: [
+      { icon: Users, label: 'Utilisateurs', path: '/admin/users' },
       { icon: Package, label: 'Modèles', path: '/admin/models' },
       { icon: Tag, label: 'Remises', path: '/admin/discounts' },
       { icon: ImageIcon, label: 'Photos', path: '/admin/media' },
@@ -91,9 +94,9 @@ const navItems: NavItem[] = [
 
 // All paths that belong to each group (for auto-expand)
 const groupPaths: Record<string, string[]> = {
-  commerce: ['/admin/quotes'],
+  commerce: ['/admin/quotes', '/admin/reports'],
   contacts: ['/admin/contacts', '/admin/suppliers'],
-  parametres: ['/admin/models', '/admin/discounts', '/admin/media', '/admin/boq', '/admin/pool-prices', '/admin/pool-variables', '/admin/pool-template', '/admin/email', '/admin/payments', '/admin/site'],
+  parametres: ['/admin/users', '/admin/models', '/admin/discounts', '/admin/media', '/admin/boq', '/admin/pool-prices', '/admin/pool-variables', '/admin/pool-template', '/admin/email', '/admin/payments', '/admin/site'],
 };
 
 export default function AdminLayout() {

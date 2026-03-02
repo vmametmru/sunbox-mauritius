@@ -8,7 +8,11 @@ import {
   Users,
   Mail,
   RefreshCw,
-  AlertTriangle
+  AlertTriangle,
+  Database,
+  Loader2,
+  Upload,
+  HardDrive,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -33,15 +37,110 @@ interface EmailSettings {
   smtp_port?: string;
 }
 
+interface DbVersionStatus {
+  current_version: string;
+  latest_version: string;
+  is_up_to_date: boolean;
+}
+
+interface ProVersionStatus {
+  user_id: number;
+  files_up_to_date: boolean;
+  db_up_to_date: boolean;
+  current_file_version: string;
+  latest_file_version: string;
+  current_db_version: string;
+  latest_db_version: string;
+  error?: string;
+}
+
+interface ProUserRow {
+  id: number;
+  name: string;
+  company_name: string;
+  domain: string;
+  is_active: boolean;
+  // version state (loaded async)
+  versions?: ProVersionStatus | null;
+  deploying?: boolean;
+  initingDb?: boolean;
+}
+
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [emailSettings, setEmailSettings] = useState<EmailSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [dbVersion, setDbVersion]   = useState<DbVersionStatus | null>(null);
+  const [dbUpdating, setDbUpdating] = useState(false);
+  const [proUsers, setProUsers]     = useState<ProUserRow[]>([]);
 
   useEffect(() => {
     loadStats();
+    loadDbVersion();
+    loadProUsers();
   }, []);
+
+  const loadDbVersion = async () => {
+    try {
+      const v = await api.checkDbVersion();
+      setDbVersion(v);
+    } catch { /* non-fatal — DB might not have version table yet */ }
+  };
+
+  const loadProUsers = async () => {
+    try {
+      const users: any[] = await api.getProUsers();
+      const withDomain = users.filter(u => u.domain);
+      setProUsers(withDomain.map(u => ({ ...u, versions: undefined, deploying: false, initingDb: false })));
+      // load versions in parallel
+      withDomain.forEach(async (u) => {
+        try {
+          const v = await api.checkProVersions(u.id);
+          setProUsers(prev => prev.map(p => p.id === u.id ? { ...p, versions: v } : p));
+        } catch (e: any) {
+          setProUsers(prev => prev.map(p => p.id === u.id ? { ...p, versions: { user_id: u.id, files_up_to_date: false, db_up_to_date: false, current_file_version: '?', latest_file_version: '?', current_db_version: '?', latest_db_version: '?', error: e.message } } : p));
+        }
+      });
+    } catch { /* non-fatal */ }
+  };
+
+  const handleUpdateDb = async () => {
+    setDbUpdating(true);
+    try {
+      await api.updateDbSchema();
+      const v = await api.checkDbVersion();
+      setDbVersion(v);
+    } catch (err: any) {
+      alert('Erreur lors de la mise à jour : ' + err.message);
+    } finally {
+      setDbUpdating(false);
+    }
+  };
+
+  const handleDeployPro = async (userId: number) => {
+    setProUsers(prev => prev.map(p => p.id === userId ? { ...p, deploying: true } : p));
+    try {
+      await api.deployProSite(userId);
+      const v = await api.checkProVersions(userId);
+      setProUsers(prev => prev.map(p => p.id === userId ? { ...p, deploying: false, versions: v } : p));
+    } catch (err: any) {
+      alert('Erreur déploiement : ' + err.message);
+      setProUsers(prev => prev.map(p => p.id === userId ? { ...p, deploying: false } : p));
+    }
+  };
+
+  const handleInitProDb = async (userId: number) => {
+    setProUsers(prev => prev.map(p => p.id === userId ? { ...p, initingDb: true } : p));
+    try {
+      await api.initProDb(userId);
+      const v = await api.checkProVersions(userId);
+      setProUsers(prev => prev.map(p => p.id === userId ? { ...p, initingDb: false, versions: v } : p));
+    } catch (err: any) {
+      alert('Erreur mise à jour BD : ' + err.message);
+      setProUsers(prev => prev.map(p => p.id === userId ? { ...p, initingDb: false } : p));
+    }
+  };
 
   const loadStats = async () => {
     try {
@@ -204,6 +303,137 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* DB Version Status — Sunbox */}
+      {dbVersion && (
+        dbVersion.is_up_to_date ? (
+          <Card className="border-green-200 bg-green-50">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <Database className="h-5 w-5 text-green-600 flex-shrink-0" />
+                <p className="text-sm text-green-800 font-medium">
+                  ✅ Base de données Sunbox à jour <span className="font-mono">(v{dbVersion.current_version})</span>
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card className="border-amber-200 bg-amber-50">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between gap-4 flex-wrap">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 bg-amber-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <Database className="h-5 w-5 text-amber-600" />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-amber-900 text-sm">Mise à jour de la base de données disponible</p>
+                    <p className="text-xs text-amber-700 mt-0.5">
+                      Version actuelle&nbsp;:&nbsp;<span className="font-mono">{dbVersion.current_version}</span>
+                      &nbsp;→&nbsp;Version disponible&nbsp;:&nbsp;<span className="font-mono">{dbVersion.latest_version}</span>
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  className="bg-amber-600 hover:bg-amber-700 text-white"
+                  onClick={handleUpdateDb}
+                  disabled={dbUpdating}
+                >
+                  {dbUpdating
+                    ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Mise à jour…</>
+                    : <><Database className="h-4 w-4 mr-2" />Mettre à jour la BD</>}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )
+      )}
+
+      {/* Pro Users Update Status */}
+      {proUsers.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Users className="h-5 w-5 text-orange-500" />
+              Mise à jour des sites professionnels
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="divide-y">
+              {proUsers.map(user => {
+                const v = user.versions;
+                const loading = v === undefined;
+                const filesOk = v?.files_up_to_date ?? false;
+                const dbOk    = v?.db_up_to_date ?? false;
+                const allOk   = filesOk && dbOk;
+                return (
+                  <div key={user.id} className="px-4 py-3 flex flex-wrap items-center gap-3">
+                    {/* Identity */}
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-sm text-gray-800 truncate">{user.company_name || user.name}</p>
+                      <p className="text-xs text-gray-400 font-mono truncate">{user.domain}</p>
+                    </div>
+
+                    {/* Version chips */}
+                    {loading ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-gray-400" />
+                    ) : v?.error ? (
+                      <span className="text-xs text-red-500">⚠ {v.error}</span>
+                    ) : (
+                      <div className="flex gap-2 flex-wrap">
+                        {filesOk ? (
+                          <span className="inline-flex items-center gap-1 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
+                            ✅ Fichiers <span className="font-mono">v{v?.current_file_version}</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">
+                            ⚠ Fichiers <span className="font-mono">{v?.current_file_version} → {v?.latest_file_version}</span>
+                          </span>
+                        )}
+                        {dbOk ? (
+                          <span className="inline-flex items-center gap-1 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
+                            ✅ BD <span className="font-mono">v{v?.current_db_version}</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">
+                            ⚠ BD <span className="font-mono">{v?.current_db_version} → {v?.latest_db_version}</span>
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Action buttons — only shown when update needed */}
+                    {!loading && !allOk && (
+                      <div className="flex gap-2">
+                        {!filesOk && (
+                          <Button size="sm" variant="outline"
+                            className="text-blue-700 border-blue-300 hover:bg-blue-50 text-xs h-7 px-2"
+                            onClick={() => handleDeployPro(user.id)}
+                            disabled={user.deploying}>
+                            {user.deploying
+                              ? <><Loader2 className="h-3 w-3 mr-1 animate-spin" />Déploiement…</>
+                              : <><Upload className="h-3 w-3 mr-1" />Déployer fichiers</>}
+                          </Button>
+                        )}
+                        {!dbOk && (
+                          <Button size="sm" variant="outline"
+                            className="text-purple-700 border-purple-300 hover:bg-purple-50 text-xs h-7 px-2"
+                            onClick={() => handleInitProDb(user.id)}
+                            disabled={user.initingDb}>
+                            {user.initingDb
+                              ? <><Loader2 className="h-3 w-3 mr-1 animate-spin" />Mise à jour…</>
+                              : <><HardDrive className="h-3 w-3 mr-1" />Mettre à jour BD</>}
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Quick Actions */}
       {(stats?.pending_quotes || 0) > 0 && (

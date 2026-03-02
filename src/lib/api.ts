@@ -1,7 +1,11 @@
 // API client for MySQL database operations via PHP backend on A2hosting
 // IMPORTANT: Update API_BASE_URL with your actual domain
 
-const API_BASE_URL = 'https://sunbox-mauritius.com/api';
+// Allow deployed pro sites to override the API base URL via window.__API_BASE_URL__
+export const API_BASE_URL: string =
+  (typeof window !== 'undefined' && (window as any).__API_BASE_URL__)
+    ? String((window as any).__API_BASE_URL__)
+    : 'https://sunbox-mauritius.com/api';
 // const API_BASE_URL = 'http://localhost/sunbox/api';
 
 export const api = {
@@ -27,6 +31,14 @@ export const api = {
   ===================================================== */
   getDashboardStats() {
     return this.query('get_dashboard_stats');
+  },
+
+  checkDbVersion() {
+    return this.query('check_db_version');
+  },
+
+  updateDbSchema() {
+    return this.query('update_db_schema');
   },
 
   /* =====================================================
@@ -841,6 +853,126 @@ export const api = {
 
   getActiveDiscounts(modelId?: number) {
     return this.query('get_active_discounts', modelId ? { model_id: modelId } : {});
+  },
+
+  /* =====================================================
+     PROFESSIONAL USERS (admin)
+  ===================================================== */
+  getProUsers() {
+    return this.query('get_pro_users');
+  },
+
+  createProUser(user: { name: string; email: string; password: string; company_name: string; address?: string; vat_number?: string; brn_number?: string; phone?: string; domain?: string; db_name?: string }) {
+    return this.query('create_pro_user', user);
+  },
+
+  updateProUser(user: { id: number; name?: string; email?: string; password?: string; is_active?: boolean; company_name?: string; address?: string; vat_number?: string; brn_number?: string; phone?: string; sunbox_margin_percent?: number; domain?: string; logo_url?: string; db_name?: string }) {
+    return this.query('update_pro_user', user);
+  },
+
+  deleteProUser(id: number) {
+    return this.query('delete_pro_user', { id });
+  },
+
+  regenerateProToken(id: number) {
+    return this.query('regenerate_pro_token', { id });
+  },
+
+  deployProSite(userId: number) {
+    return this.query('deploy_pro_site', { user_id: userId });
+  },
+
+  initProDb(userId: number) {
+    return this.query('init_pro_db', { user_id: userId });
+  },
+
+  checkProVersions(userId: number) {
+    return this.query('check_pro_versions', { user_id: userId });
+  },
+
+  buyProPack(userId: number) {
+    return this.query('buy_pro_pack', { user_id: userId });
+  },
+
+  getProModelOverrides(userId: number) {
+    return this.query('get_pro_model_overrides', { user_id: userId });
+  },
+
+  setProModelOverride(override: { user_id: number; model_id: number; price_adjustment: number; is_enabled: boolean }) {
+    return this.query('set_pro_model_override', override);
+  },
+
+  setProModelEnabled(userId: number, modelId: number, isEnabled: boolean) {
+    return this.query('set_pro_model_enabled', { user_id: userId, model_id: modelId, is_enabled: isEnabled });
+  },
+
+  /* =====================================================
+     PROFESSIONAL MODEL REQUESTS
+  ===================================================== */
+  getModelRequests(userId?: number) {
+    return this.query('get_model_requests', userId ? { user_id: userId } : {});
+  },
+
+  createModelRequest(req: { description: string; container_20ft_count: number; container_40ft_count: number; bedrooms: number; bathrooms: number; sketch_url?: string }) {
+    return this.query('create_model_request', req);
+  },
+
+  updateModelRequest(req: { id: number; status: string; admin_notes?: string }) {
+    return this.query('update_model_request', req);
+  },
+
+  /* =====================================================
+     PRO PROFILE (self)
+  ===================================================== */
+  getProProfile() {
+    return this.query('get_pro_profile', {});
+  },
+
+  updateProProfile(profile: { company_name?: string; address?: string; vat_number?: string; brn_number?: string; phone?: string; sunbox_margin_percent?: number; logo_url?: string }) {
+    return this.query('update_pro_profile', profile);
+  },
+
+  getProCredits() {
+    return this.query('get_pro_credits', {});
+  },
+
+  deductProCredits(amount: number, reason: string, quoteId?: number) {
+    return this.query('deduct_pro_credits', { amount, reason, ...(quoteId ? { quote_id: quoteId } : {}) });
+  },
+
+  /* =====================================================
+     PURCHASE REPORTS (Rapport d'Achat)
+  ===================================================== */
+  requestBoqReport(quoteId: number) {
+    return this.query('request_boq_report', { quote_id: quoteId });
+  },
+
+  createPurchaseReport(quoteId: number) {
+    return this.query('create_purchase_report', { quote_id: quoteId });
+  },
+
+  getQuotePurchaseReport(quoteId: number) {
+    return this.query('get_quote_purchase_report', { quote_id: quoteId });
+  },
+
+  getPurchaseReports() {
+    return this.query('get_purchase_reports');
+  },
+
+  getPurchaseReport(id: number) {
+    return this.query('get_purchase_report', { id });
+  },
+
+  toggleReportItem(id: number) {
+    return this.query('toggle_report_item', { id });
+  },
+
+  updateReportStatus(id: number, status: 'in_progress' | 'completed') {
+    return this.query('update_report_status', { id, status });
+  },
+
+  deleteReport(id: number) {
+    return this.query('delete_purchase_report', { id });
   },
 };
 

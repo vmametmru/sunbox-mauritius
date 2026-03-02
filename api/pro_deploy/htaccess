@@ -1,0 +1,16 @@
+Options -MultiViews +FollowSymLinks
+RewriteEngine On
+RewriteBase /
+
+# Deny .env access
+<Files ".env">
+    Require all denied
+</Files>
+
+# API requests go directly to api/
+RewriteRule ^api/ - [L]
+
+# Everything else → index.html (React SPA)
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule . index.php [L]

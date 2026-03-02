@@ -41,6 +41,24 @@ import PoolBOQPriceListPage from "./pages/admin/PoolBOQPriceListPage";
 import PoolBOQTemplatePage from "./pages/admin/PoolBOQTemplatePage";
 import DevIdeasPage from "./pages/admin/DevIdeasPage";
 import DiscountsPage from "./pages/admin/DiscountsPage";
+import UsersPage from "./pages/admin/UsersPage";
+
+// Pro Pages
+import ProLoginPage from "./pages/pro/ProLoginPage";
+import ProLayout from "./pages/pro/ProLayout";
+import ProDashboardPage from "./pages/pro/ProDashboardPage";
+import ProQuotesPage from "./pages/pro/ProQuotesPage";
+import ProSettingsPage from "./pages/pro/ProSettingsPage";
+import ProModelRequestPage from "./pages/pro/ProModelRequestPage";
+import ProModelsOverridePage from "./pages/pro/ProModelsOverridePage";
+import RequirePro from "./components/RequirePro";
+import PurchaseReportsPage from "./pages/admin/PurchaseReportsPage";
+import PurchaseReportDetailPage from "./pages/admin/PurchaseReportDetailPage";
+import ProAdminContactsPage from "./pages/admin/ContactsPage";
+import ProAdminDiscountsPage from "./pages/admin/DiscountsPage";
+import ProAdminEmailPage from "./pages/admin/EmailSettingsPage";
+import ProAdminPaymentsPage from "./pages/admin/PaymentsPage";
+import ProAdminSitePage from "./pages/admin/SiteSettingsPage";
 
 const queryClient = new QueryClient();
 
@@ -72,6 +90,8 @@ const App = () => (
                   <Route path="quotes" element={<QuotesPage />} />
                   <Route path="quotes/new" element={<CreateQuotePage />} />
                   <Route path="quotes/:id" element={<QuoteDetailPage />} />
+                  <Route path="reports" element={<PurchaseReportsPage />} />
+                  <Route path="reports/:id" element={<PurchaseReportDetailPage />} />
                   <Route path="contacts" element={<ContactsPage />} />
                   <Route path="models" element={<AdminModelsPage />} />
                   <Route path="media" element={<MediaPage />} />
@@ -85,6 +105,27 @@ const App = () => (
                   <Route path="site" element={<SiteSettingsPage />} />
                   <Route path="dev-ideas" element={<DevIdeasPage />} />
                   <Route path="discounts" element={<DiscountsPage />} />
+                  <Route path="users" element={<UsersPage />} />
+                </Route>
+              </Route>
+
+              {/* Professional Portal */}
+              <Route path="/pro-login" element={<ProLoginPage />} />
+              <Route element={<RequirePro />}>
+                <Route path="/pro" element={<ProLayout />}>
+                  <Route index element={<ProDashboardPage />} />
+                  <Route path="quotes" element={<ProQuotesPage />} />
+                  <Route path="reports" element={<PurchaseReportsPage />} />
+                  <Route path="reports/:id" element={<PurchaseReportDetailPage />} />
+                  <Route path="model-request" element={<ProModelRequestPage />} />
+                  <Route path="models" element={<ProModelsOverridePage />} />
+                  <Route path="settings" element={<ProSettingsPage />} />
+                  {/* Pro site admin pages (only shown in deployed pro site via ProLayout grouped nav) */}
+                  <Route path="contacts" element={<ProAdminContactsPage />} />
+                  <Route path="discounts" element={<ProAdminDiscountsPage />} />
+                  <Route path="email" element={<ProAdminEmailPage />} />
+                  <Route path="payments" element={<ProAdminPaymentsPage />} />
+                  <Route path="site" element={<ProAdminSitePage />} />
                 </Route>
               </Route>
 

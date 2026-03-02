@@ -4,6 +4,15 @@ declare(strict_types=1);
 require_once __DIR__ . '/config.php';
 handleCORS();
 
+// Pro site deployment versions — increment these when templates or DB schema change.
+// PRO_FILE_VERSION must match define('PRO_FILE_VERSION', ...) in api/pro_deploy/api_config.php
+define('PRO_FILE_VERSION',      '2.1.0');
+define('PRO_DB_SCHEMA_VERSION', '1.6.0');
+
+// Sunbox main database schema version.
+// Increment when new tables or columns are added.
+define('SUNBOX_DB_SCHEMA_VERSION', '2.3.0');
+
 $action = $_GET['action'] ?? '';
 $body   = getRequestBody();
 
@@ -56,7 +65,111 @@ try {
             break;
         }
 
-        // === SETTINGS
+        // === SUNBOX DB VERSIONING ─────────────────────────────────────────────
+        case 'check_db_version': {
+            requireAdmin();
+            $currentVersion = '0.0.0';
+            try {
+                $row = $db->query("SELECT `version` FROM `db_schema_version` WHERE `id` = 1 LIMIT 1")->fetch();
+                if ($row) $currentVersion = $row['version'];
+            } catch (\Throwable $e) {
+                // Table doesn't exist yet — version is 0.0.0
+            }
+            ok([
+                'current_version' => $currentVersion,
+                'latest_version'  => SUNBOX_DB_SCHEMA_VERSION,
+                'is_up_to_date'   => version_compare($currentVersion, SUNBOX_DB_SCHEMA_VERSION, '>='),
+            ]);
+            break;
+        }
+
+        case 'update_db_schema': {
+            requireAdmin();
+            $messages = [];
+
+            // Helper: safely add a column only if it doesn't exist
+            $addCol = function(string $table, string $col, string $def) use ($db, &$messages): void {
+                $s = $db->prepare(
+                    "SELECT COUNT(*) FROM information_schema.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?"
+                );
+                $s->execute([$table, $col]);
+                if (!(bool)$s->fetchColumn()) {
+                    $db->exec("ALTER TABLE `{$table}` ADD COLUMN `{$col}` {$def}");
+                    $messages[] = "Colonne ajoutée : {$table}.{$col}";
+                }
+            };
+
+            // Helper: create a table only if it doesn't exist
+            $createTable = function(string $name, string $sql) use ($db, &$messages): void {
+                $s = $db->prepare(
+                    "SELECT COUNT(*) FROM information_schema.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?"
+                );
+                $s->execute([$name]);
+                if (!(bool)$s->fetchColumn()) {
+                    $db->exec($sql);
+                    $messages[] = "Table créée : {$name}";
+                }
+            };
+
+            // ── v2.1.0 ── Purchase Reports (Rapport d'Achat) ──────────────────
+            $createTable('purchase_reports', "
+                CREATE TABLE `purchase_reports` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `quote_id` INT NOT NULL,
+                    `quote_reference` VARCHAR(50) DEFAULT '',
+                    `model_name` VARCHAR(255) DEFAULT '',
+                    `status` ENUM('in_progress','completed') DEFAULT 'in_progress',
+                    `total_amount` DECIMAL(12,2) DEFAULT 0,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            ");
+
+            $createTable('purchase_report_items', "
+                CREATE TABLE `purchase_report_items` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `report_id` INT NOT NULL,
+                    `supplier_name` VARCHAR(255) DEFAULT 'Fournisseur non défini',
+                    `category_name` VARCHAR(255) NOT NULL,
+                    `description` TEXT NOT NULL,
+                    `quantity` DECIMAL(10,3) DEFAULT 1,
+                    `unit` VARCHAR(50) DEFAULT '',
+                    `unit_price` DECIMAL(12,2) DEFAULT 0,
+                    `total_price` DECIMAL(12,2) DEFAULT 0,
+                    `is_ordered` TINYINT(1) DEFAULT 0,
+                    `is_option` TINYINT(1) DEFAULT 0,
+                    `display_order` INT DEFAULT 0,
+                    FOREIGN KEY (`report_id`) REFERENCES `purchase_reports`(`id`) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            ");
+
+            // ── v2.2.0 ── Add is_option column to purchase_report_items ─────────
+            $addCol('purchase_report_items', 'is_option', "TINYINT(1) DEFAULT 0 AFTER `is_ordered`");
+
+            // ── v2.3.0 ── Add replace_with_sunbox flag to suppliers ──────────────
+            $addCol('suppliers', 'replace_with_sunbox', "TINYINT(1) DEFAULT 0 AFTER `is_active`");
+
+            // ── Schema version table (always create / update) ─────────────────
+            $db->exec("CREATE TABLE IF NOT EXISTS `db_schema_version` (
+                `id`         INT NOT NULL DEFAULT 1,
+                `version`    VARCHAR(20) NOT NULL,
+                `applied_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+            $db->prepare(
+                "INSERT INTO `db_schema_version` (`id`, `version`) VALUES (1, ?)
+                 ON DUPLICATE KEY UPDATE `version` = VALUES(`version`), `applied_at` = NOW()"
+            )->execute([SUNBOX_DB_SCHEMA_VERSION]);
+
+            if (empty($messages)) $messages[] = 'Base de données déjà à jour.';
+            ok(['version' => SUNBOX_DB_SCHEMA_VERSION, 'messages' => $messages]);
+            break;
+        }
+
+
         case 'get_settings': {
             $group = $body['group'] ?? null;
             $sql = "SELECT setting_key, setting_value FROM settings";
@@ -433,16 +546,22 @@ try {
                 $sql .= " WHERE is_active = 1";
             }
             $sql .= " ORDER BY name ASC";
-            $stmt = $db->query($sql);
-            ok($stmt->fetchAll());
+            $rows = $db->query($sql)->fetchAll();
+            // PDO returns TINYINT(1) as string "0"/"1"; cast to int so JS treats 0 as falsy.
+            foreach ($rows as &$row) {
+                $row['is_active']          = (int)($row['is_active'] ?? 0);
+                $row['replace_with_sunbox'] = (int)($row['replace_with_sunbox'] ?? 0);
+            }
+            unset($row);
+            ok($rows);
             break;
         }
 
         case 'create_supplier': {
             validateRequired($body, ['name']);
             $stmt = $db->prepare("
-                INSERT INTO suppliers (name, city, phone, email, is_active)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO suppliers (name, city, phone, email, is_active, replace_with_sunbox)
+                VALUES (?, ?, ?, ?, ?, ?)
             ");
             $stmt->execute([
                 sanitize($body['name']),
@@ -450,6 +569,7 @@ try {
                 sanitize($body['phone'] ?? ''),
                 sanitize($body['email'] ?? ''),
                 (bool)($body['is_active'] ?? true),
+                (int)($body['replace_with_sunbox'] ?? 0),
             ]);
             ok(['id' => $db->lastInsertId()]);
             break;
@@ -459,7 +579,8 @@ try {
             validateRequired($body, ['id']);
             $stmt = $db->prepare("
                 UPDATE suppliers SET
-                    name = ?, city = ?, phone = ?, email = ?, is_active = ?, updated_at = NOW()
+                    name = ?, city = ?, phone = ?, email = ?, is_active = ?,
+                    replace_with_sunbox = ?, updated_at = NOW()
                 WHERE id = ?
             ");
             $stmt->execute([
@@ -468,6 +589,7 @@ try {
                 sanitize($body['phone'] ?? ''),
                 sanitize($body['email'] ?? ''),
                 (bool)($body['is_active'] ?? true),
+                (int)($body['replace_with_sunbox'] ?? 0),
                 (int)$body['id'],
             ]);
             ok();
@@ -1120,7 +1242,210 @@ try {
             break;
         }
 
-        // === ADMIN QUOTES (Free-form and Model-based)
+        // === PURCHASE REPORTS (Rapport d'Achat) — no credit deduction for admin
+        case 'create_purchase_report': {
+            requireAdmin();
+            validateRequired($body, ['quote_id']);
+            $quoteId = (int)$body['quote_id'];
+
+            // Idempotent: return existing report if already generated
+            $chk = $db->prepare("SELECT id FROM purchase_reports WHERE quote_id = ? ORDER BY created_at DESC LIMIT 1");
+            $chk->execute([$quoteId]);
+            $existing = $chk->fetch();
+            if ($existing) { ok(['report_id' => (int)$existing['id'], 'already_exists' => true]); break; }
+
+            // Get quote + model
+            $qStmt = $db->prepare("
+                SELECT q.*, COALESCE(m.name, q.model_name) AS resolved_model_name
+                FROM quotes q LEFT JOIN models m ON q.model_id = m.id WHERE q.id = ?
+            ");
+            $qStmt->execute([$quoteId]);
+            $quote = $qStmt->fetch();
+            if (!$quote) fail('Devis introuvable', 404);
+
+            // Fetch base BOQ lines
+            $lStmt = $db->prepare("
+                SELECT bc.name AS category_name,
+                       bl.description, bl.quantity, bl.unit, bl.margin_percent,
+                       COALESCE(pl.unit_price, bl.unit_cost_ht) AS unit_price,
+                       ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht), 2) AS total_price,
+                       COALESCE(s.name, 'Fournisseur non défini') AS supplier_name,
+                       bc.display_order AS cat_order, bl.display_order AS line_order
+                FROM boq_categories bc
+                LEFT JOIN boq_lines bl ON bl.category_id = bc.id
+                LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
+                LEFT JOIN suppliers s ON bl.supplier_id = s.id
+                WHERE bc.model_id = ? AND bc.is_option = FALSE AND bl.id IS NOT NULL
+                ORDER BY COALESCE(s.name,'Fournisseur non défini'), bc.display_order, bl.display_order
+            ");
+            $lStmt->execute([(int)$quote['model_id']]);
+            $lines = $lStmt->fetchAll();
+
+            // Fetch option BOQ lines for the options selected in this quote
+            $optLinesStmt = $db->prepare("
+                SELECT bc.name AS category_name,
+                       bl.description, bl.quantity, bl.unit, bl.margin_percent,
+                       COALESCE(pl.unit_price, bl.unit_cost_ht) AS unit_price,
+                       ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht), 2) AS total_price,
+                       COALESCE(s.name, 'Fournisseur non défini') AS supplier_name,
+                       bc.display_order AS cat_order, bl.display_order AS line_order
+                FROM quote_options qo
+                JOIN boq_categories bc ON bc.model_id = ? AND bc.is_option = TRUE AND bc.name = qo.option_name
+                LEFT JOIN boq_lines bl ON bl.category_id = bc.id
+                LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
+                LEFT JOIN suppliers s ON bl.supplier_id = s.id
+                WHERE qo.quote_id = ? AND bl.id IS NOT NULL
+                ORDER BY COALESCE(s.name,'Fournisseur non défini'), bc.display_order, bl.display_order
+            ");
+            $optLinesStmt->execute([(int)$quote['model_id'], $quoteId]);
+            $optionLines = $optLinesStmt->fetchAll();
+
+            $totalAmount = (float)array_sum(array_column($lines, 'total_price'))
+                         + (float)array_sum(array_column($optionLines, 'total_price'));
+
+            $db->beginTransaction();
+            try {
+                $db->prepare("INSERT INTO purchase_reports (quote_id, quote_reference, model_name, status, total_amount) VALUES (?,?,?,?,?)")
+                   ->execute([$quoteId, $quote['reference_number'], $quote['resolved_model_name'] ?? '', 'in_progress', $totalAmount]);
+                $reportId = (int)$db->lastInsertId();
+
+                $iStmt = $db->prepare("INSERT INTO purchase_report_items
+                    (report_id, supplier_name, category_name, description, quantity, unit, unit_price, total_price, is_option, display_order)
+                    VALUES (?,?,?,?,?,?,?,?,?,?)");
+                foreach ($lines as $i => $l) {
+                    $iStmt->execute([
+                        $reportId, $l['supplier_name'], $l['category_name'], $l['description'],
+                        (float)$l['quantity'], $l['unit'], (float)$l['unit_price'], (float)$l['total_price'], 0, $i,
+                    ]);
+                }
+                foreach ($optionLines as $i => $l) {
+                    $iStmt->execute([
+                        $reportId, $l['supplier_name'], $l['category_name'], $l['description'],
+                        (float)$l['quantity'], $l['unit'], (float)$l['unit_price'], (float)$l['total_price'], 1, $i,
+                    ]);
+                }
+                $db->commit();
+                ok(['report_id' => $reportId]);
+            } catch (Exception $e) {
+                $db->rollBack();
+                throw $e;
+            }
+            break;
+        }
+
+        case 'get_quote_purchase_report': {
+            requireAdmin();
+            validateRequired($body, ['quote_id']);
+            $chk = $db->prepare("SELECT id FROM purchase_reports WHERE quote_id = ? ORDER BY created_at DESC LIMIT 1");
+            $chk->execute([(int)$body['quote_id']]);
+            $row = $chk->fetch();
+            ok($row ? ['report_id' => (int)$row['id']] : null);
+            break;
+        }
+
+        case 'get_purchase_reports': {
+            requireAdmin();
+            $rows = $db->query("
+                SELECT r.*, q.customer_name
+                FROM purchase_reports r
+                LEFT JOIN quotes q ON q.id = r.quote_id
+                ORDER BY r.created_at DESC
+            ")->fetchAll();
+            foreach ($rows as &$r) { $r['total_amount'] = (float)$r['total_amount']; }
+            ok($rows);
+            break;
+        }
+
+        case 'get_purchase_report': {
+            requireAdmin();
+            validateRequired($body, ['id']);
+            $rStmt = $db->prepare("
+                SELECT r.*,
+                       q.customer_name, q.customer_email, q.customer_phone,
+                       q.base_price   AS quote_base_price_ht,
+                       q.options_total AS quote_options_ht,
+                       q.total_price   AS quote_total_ht
+                FROM purchase_reports r
+                LEFT JOIN quotes q ON q.id = r.quote_id
+                WHERE r.id = ?
+            ");
+            $rStmt->execute([(int)$body['id']]);
+            $report = $rStmt->fetch();
+            if (!$report) fail('Rapport introuvable', 404);
+
+            $vatRate = (float)env('VAT_RATE', 15);
+            $report['vat_rate']             = $vatRate;
+            $report['quote_base_price_ht']  = (float)($report['quote_base_price_ht'] ?? 0);
+            $report['quote_options_ht']     = (float)($report['quote_options_ht'] ?? 0);
+            $report['quote_total_ht']       = (float)($report['quote_total_ht'] ?? 0);
+            $report['quote_base_price_ttc'] = round($report['quote_base_price_ht'] * (1 + $vatRate / 100), 2);
+            $report['quote_options_ttc']    = round($report['quote_options_ht']    * (1 + $vatRate / 100), 2);
+            $report['quote_total_ttc']      = round($report['quote_total_ht']      * (1 + $vatRate / 100), 2);
+
+            $iStmt = $db->prepare("SELECT * FROM purchase_report_items WHERE report_id = ? ORDER BY is_option ASC, supplier_name, display_order");
+            $iStmt->execute([(int)$body['id']]);
+            $items = $iStmt->fetchAll();
+
+            $buckets       = ['base' => [], 'option' => []];
+            $totalAmountHT = 0.0;
+            foreach ($items as $item) {
+                $sName  = $item['supplier_name'];
+                $bucket = ($item['is_option'] ?? 0) ? 'option' : 'base';
+                if (!isset($buckets[$bucket][$sName])) {
+                    $buckets[$bucket][$sName] = ['supplier_name' => $sName, 'items' => [], 'subtotal_ht' => 0.0, 'subtotal_ttc' => 0.0];
+                }
+                $item['is_ordered']        = (bool)$item['is_ordered'];
+                $item['is_option']         = (bool)($item['is_option'] ?? false);
+                $item['quantity']          = (float)$item['quantity'];
+                $item['unit_price_ht']     = (float)$item['unit_price'];
+                $item['unit_price_ttc']    = round($item['unit_price_ht'] * (1 + $vatRate / 100), 2);
+                $item['total_price_ht']    = round($item['unit_price_ht'] * $item['quantity'], 2);
+                $item['total_price_ttc']   = round($item['total_price_ht'] * (1 + $vatRate / 100), 2);
+                // keep legacy keys for backwards compat
+                $item['unit_price']        = $item['unit_price_ht'];
+                $item['total_price']       = $item['total_price_ht'];
+                $buckets[$bucket][$sName]['items'][]        = $item;
+                $buckets[$bucket][$sName]['subtotal_ht']   += $item['total_price_ht'];
+                $buckets[$bucket][$sName]['subtotal_ttc']  += $item['total_price_ttc'];
+                $buckets[$bucket][$sName]['subtotal']       = $buckets[$bucket][$sName]['subtotal_ht'];
+                $totalAmountHT += $item['total_price_ht'];
+            }
+            $report['base_groups']       = array_values($buckets['base']);
+            $report['option_groups']     = array_values($buckets['option']);
+            // Recalculate total_amount from items (in case it was stored with margin in old reports)
+            $report['total_amount_ht']   = round($totalAmountHT, 2);
+            $report['total_amount_ttc']  = round($totalAmountHT * (1 + $vatRate / 100), 2);
+            $report['total_amount']      = $report['total_amount_ht'];
+            ok($report);
+            break;
+        }
+
+        case 'toggle_report_item': {
+            requireAdmin();
+            validateRequired($body, ['id']);
+            $db->prepare("UPDATE purchase_report_items SET is_ordered = NOT is_ordered WHERE id = ?")->execute([(int)$body['id']]);
+            ok();
+            break;
+        }
+
+        case 'update_report_status': {
+            requireAdmin();
+            validateRequired($body, ['id', 'status']);
+            $db->prepare("UPDATE purchase_reports SET status = ?, updated_at = NOW() WHERE id = ?")->execute([$body['status'], (int)$body['id']]);
+            ok();
+            break;
+        }
+
+        case 'delete_purchase_report': {
+            requireAdmin();
+            validateRequired($body, ['id']);
+            // Cascade deletes items via FK; no quote flag to reset on Sunbox side
+            $db->prepare("DELETE FROM purchase_reports WHERE id = ?")->execute([(int)$body['id']]);
+            ok();
+            break;
+        }
+
+
         case 'create_admin_quote': {
             // Required for both free and model-based quotes
             validateRequired($body, ['customer_name', 'customer_email', 'customer_phone']);
@@ -2569,6 +2894,847 @@ try {
                 $d['is_active'] = (bool)$d['is_active'];
             }
             ok($discounts);
+            break;
+        }
+
+        // =====================================================================
+        // PROFESSIONAL USERS (admin management)
+        // =====================================================================
+
+        case 'get_pro_users': {
+            $stmt = $db->query("
+                SELECT u.id, u.name, u.email, u.role,
+                       pp.company_name, pp.address, pp.vat_number, pp.brn_number,
+                       pp.phone, pp.logo_url, pp.sunbox_margin_percent, pp.credits, pp.is_active,
+                       pp.domain, pp.api_token, pp.db_name
+                FROM users u
+                LEFT JOIN professional_profiles pp ON pp.user_id = u.id
+                WHERE u.role = 'professional'
+                ORDER BY u.name ASC
+            ");
+            ok($stmt->fetchAll());
+            break;
+        }
+
+        case 'create_pro_user': {
+            validateRequired($body, ['name', 'email', 'password', 'company_name']);
+            $passwordHash = password_hash((string)$body['password'], PASSWORD_BCRYPT);
+            $apiToken = bin2hex(random_bytes(32));
+
+            $db->beginTransaction();
+            try {
+                $stmt = $db->prepare("
+                    INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, 'professional')
+                ");
+                $stmt->execute([$body['name'], strtolower(trim($body['email'])), $passwordHash]);
+                $userId = (int)$db->lastInsertId();
+
+                $stmt = $db->prepare("
+                    INSERT INTO professional_profiles
+                        (user_id, company_name, address, vat_number, brn_number, phone, domain, api_token,
+                         db_name, is_active)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                ");
+                $stmt->execute([
+                    $userId,
+                    $body['company_name'],
+                    $body['address'] ?? '',
+                    $body['vat_number'] ?? '',
+                    $body['brn_number'] ?? '',
+                    $body['phone'] ?? '',
+                    $body['domain'] ?? '',
+                    $apiToken,
+                    $body['db_name'] ?? '',
+                ]);
+                $db->commit();
+                ok(['id' => $userId, 'api_token' => $apiToken]);
+            } catch (Throwable $e) {
+                $db->rollBack();
+                throw $e;
+            }
+            break;
+        }
+
+        case 'update_pro_user': {
+            validateRequired($body, ['id']);
+            $id = (int)$body['id'];
+
+            $userSets = [];
+            $userParams = [];
+            if (array_key_exists('name', $body)) { $userSets[] = 'name = ?'; $userParams[] = $body['name']; }
+            if (array_key_exists('email', $body)) { $userSets[] = 'email = ?'; $userParams[] = strtolower(trim($body['email'])); }
+            if (!empty($body['password'])) { $userSets[] = 'password_hash = ?'; $userParams[] = password_hash((string)$body['password'], PASSWORD_BCRYPT); }
+            if (!empty($userSets)) {
+                $userParams[] = $id;
+                $db->prepare("UPDATE users SET " . implode(', ', $userSets) . " WHERE id = ?")->execute($userParams);
+            }
+
+            $profSets = [];
+            $profParams = [];
+            if (array_key_exists('company_name', $body)) { $profSets[] = 'company_name = ?'; $profParams[] = $body['company_name']; }
+            if (array_key_exists('address', $body)) { $profSets[] = 'address = ?'; $profParams[] = $body['address']; }
+            if (array_key_exists('vat_number', $body)) { $profSets[] = 'vat_number = ?'; $profParams[] = $body['vat_number']; }
+            if (array_key_exists('brn_number', $body)) { $profSets[] = 'brn_number = ?'; $profParams[] = $body['brn_number']; }
+            if (array_key_exists('phone', $body)) { $profSets[] = 'phone = ?'; $profParams[] = $body['phone']; }
+            if (array_key_exists('domain', $body)) { $profSets[] = 'domain = ?'; $profParams[] = strtolower(trim($body['domain'])); }
+            if (array_key_exists('logo_url', $body)) { $profSets[] = 'logo_url = ?'; $profParams[] = $body['logo_url']; }
+            if (array_key_exists('db_name', $body)) { $profSets[] = 'db_name = ?'; $profParams[] = $body['db_name']; }
+            if (array_key_exists('sunbox_margin_percent', $body)) { $profSets[] = 'sunbox_margin_percent = ?'; $profParams[] = (float)$body['sunbox_margin_percent']; }
+            if (array_key_exists('is_active', $body)) { $profSets[] = 'is_active = ?'; $profParams[] = (int)(bool)$body['is_active']; }
+            if (!empty($profSets)) {
+                $profSets[] = 'updated_at = NOW()';
+                $profParams[] = $id;
+                $db->prepare("UPDATE professional_profiles SET " . implode(', ', $profSets) . " WHERE user_id = ?")->execute($profParams);
+            }
+            ok();
+            break;
+        }
+
+        case 'regenerate_pro_token': {
+            validateRequired($body, ['id']);
+            $newToken = bin2hex(random_bytes(32));
+            $db->prepare("UPDATE professional_profiles SET api_token = ?, updated_at = NOW() WHERE user_id = ?")->execute([$newToken, (int)$body['id']]);
+            ok(['api_token' => $newToken]);
+            break;
+        }
+
+        // ── Check deployed versions (files + DB schema) ───────────────────────
+        case 'check_pro_versions': {
+            validateRequired($body, ['user_id']);
+            $userId = (int)$body['user_id'];
+
+            $stmt = $db->prepare("SELECT pp.domain, pp.db_name FROM professional_profiles pp WHERE pp.user_id = ?");
+            $stmt->execute([$userId]);
+            $profile = $stmt->fetch();
+            if (!$profile) fail('Utilisateur introuvable.');
+
+            $domain = (string)($profile['domain'] ?? '');
+            $dbName = (string)($profile['db_name'] ?? '');
+
+            $result = [
+                'latest_file_version'   => PRO_FILE_VERSION,
+                'latest_db_version'     => PRO_DB_SCHEMA_VERSION,
+                'current_file_version'  => null,
+                'current_db_version'    => null,
+                'files_up_to_date'      => false,
+                'db_up_to_date'         => false,
+                'domain_configured'     => (bool)$domain,
+                'db_configured'         => (bool)$dbName,
+            ];
+
+            // Check deployed file version from .deploy_version file
+            if ($domain) {
+                $siteDir = proSiteDir($domain);
+                $vFile   = $siteDir . '/.deploy_version';
+                if (is_file($vFile)) {
+                    $ver = trim((string)file_get_contents($vFile));
+                    if ($ver) {
+                        $result['current_file_version'] = $ver;
+                        $result['files_up_to_date'] = version_compare($ver, PRO_FILE_VERSION, '>=');
+                    }
+                }
+            }
+
+            // Check DB schema version from pro_schema_version table
+            if ($dbName) {
+                try {
+                    $proPdo = new PDO(
+                        "mysql:host=" . DB_HOST . ";dbname={$dbName};charset=utf8mb4",
+                        DB_USER, DB_PASS,
+                        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_EMULATE_PREPARES => false]
+                    );
+                    $vStmt = $proPdo->query("SELECT `version` FROM `pro_schema_version` WHERE `id` = 1 LIMIT 1");
+                    if ($vStmt) {
+                        $row = $vStmt->fetch(PDO::FETCH_ASSOC);
+                        if ($row && !empty($row['version'])) {
+                            $result['current_db_version'] = $row['version'];
+                            $result['db_up_to_date'] = version_compare($row['version'], PRO_DB_SCHEMA_VERSION, '>=');
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    // BD inaccessible ou table absente — needs init/update
+                    $result['db_error'] = API_DEBUG ? $e->getMessage() : 'BD inaccessible ou non initialisée';
+                }
+            }
+
+            ok($result);
+            break;
+        }
+
+        // ── Deploy pro site files to /pros/<domain>/ on this server ────────────
+        case 'deploy_pro_site': {
+            validateRequired($body, ['user_id']);
+            $userId = (int)$body['user_id'];
+
+            $stmt = $db->prepare("
+                SELECT pp.domain, pp.company_name, pp.db_name, pp.logo_url,
+                       u.password_hash
+                FROM professional_profiles pp
+                JOIN users u ON u.id = pp.user_id
+                WHERE pp.user_id = ?
+            ");
+            $stmt->execute([$userId]);
+            $profile = $stmt->fetch();
+            if (!$profile || empty($profile['domain'])) {
+                fail('Domaine non configuré pour cet utilisateur. Enregistrez d\'abord le domaine.');
+            }
+
+            $domain       = (string)$profile['domain'];
+            $companyName  = (string)$profile['company_name'];
+            $dbName       = (string)($profile['db_name'] ?? '');
+            $passwordHash = (string)($profile['password_hash'] ?? '');
+
+            $siteDir      = proSiteDir($domain);
+            // The pro site is an addon domain pointing to siteDir, so its public URL
+            // IS the domain itself (not a Sunbox subdirectory).
+            $proBaseUrl   = 'https://' . $domain;
+            $sunboxBaseUrl = rtrim((string)env('APP_URL', 'https://sunbox-mauritius.com'), '/');
+            $result      = [
+                'deployed'  => false,
+                'site_dir'  => $siteDir,
+                'site_url'  => $proBaseUrl,
+                'db_name'   => $dbName,
+                'errors'    => [],
+                'debug'     => [],
+            ];
+
+            $result['debug'][] = 'api/__DIR__: ' . __DIR__;
+            $result['debug'][] = 'siteDir: ' . $siteDir;
+
+            try {
+                // Create directories
+                foreach ([$siteDir, $siteDir . '/api'] as $dir) {
+                    if (!is_dir($dir)) {
+                        if (!mkdir($dir, 0755, true)) {
+                            throw new \Exception("mkdir échoué pour: $dir — vérifiez les permissions.");
+                        }
+                    }
+                }
+                $result['debug'][] = 'Répertoires créés.';
+
+                $templateDir = __DIR__ . '/pro_deploy';
+                if (!is_dir($templateDir)) {
+                    throw new \Exception("Dossier templates introuvable: $templateDir");
+                }
+
+                $replacements = [
+                    '{{DOMAIN}}'       => $domain,
+                    '{{COMPANY_NAME}}' => $companyName,
+                ];
+
+                // Compute absolute logo URL now (used in both .env and fallback index.html)
+                $logoUrlAbs = (string)($profile['logo_url'] ?? '');
+                if ($logoUrlAbs !== '' && strpos($logoUrlAbs, 'http') !== 0) {
+                    $logoUrlAbs = $sunboxBaseUrl . '/' . ltrim($logoUrlAbs, '/');
+                }
+
+                $filesToDeploy = [
+                    'api_config.php'      => $siteDir . '/api/config.php',
+                    'api_index.php'       => $siteDir . '/api/index.php',
+                    'api_pro_auth.php'    => $siteDir . '/api/pro_auth.php',
+                    'api_upload_logo.php' => $siteDir . '/api/upload_logo.php',
+                    'api_htaccess'        => $siteDir . '/api/.htaccess',
+                    'htaccess'            => $siteDir . '/.htaccess',
+                    'index.php'           => $siteDir . '/index.php',
+                ];
+                foreach ($filesToDeploy as $tpl => $dest) {
+                    $tplPath = $templateDir . '/' . $tpl;
+                    if (!file_exists($tplPath)) {
+                        throw new \Exception("Template introuvable: $tplPath");
+                    }
+                    $content = file_get_contents($tplPath);
+                    if ($content === false) throw new \Exception("Lecture échouée: $tplPath");
+                    $content = str_replace(array_keys($replacements), array_values($replacements), $content);
+                    if (file_put_contents($dest, $content) === false) {
+                        throw new \Exception("Écriture échouée: $dest — vérifiez les permissions.");
+                    }
+                }
+                $result['debug'][] = 'Fichiers PHP déployés.';
+
+                // Create symlink siteDir/assets → main site's /assets (same server, avoids CORS).
+                // Apache mod_rewrite follows symlinks, so the JS/CSS will be served from the
+                // pro's own domain (https://mrbcreativecontracting.com/assets/...) with no CORS issue.
+                $mainAssetsDir = dirname(__DIR__) . '/assets';
+                $proAssetsLink = $siteDir . '/assets';
+                if (!file_exists($proAssetsLink) && !is_link($proAssetsLink)) {
+                    if (is_dir($mainAssetsDir)) {
+                        if (!symlink($mainAssetsDir, $proAssetsLink)) {
+                            $result['errors'][] = 'Avertissement: symlink assets échoué. Créez-le manuellement via SSH: ln -s {sunbox_root}/assets {pro_site_dir}/assets';
+                        } else {
+                            $result['debug'][] = 'Symlink assets créé: ' . $proAssetsLink . ' → ' . $mainAssetsDir;
+                        }
+                    } else {
+                        $result['errors'][] = 'Avertissement: dossier assets principal introuvable. Compilez le site (npm run build) d\'abord.';
+                    }
+                } else {
+                    $result['debug'][] = 'Symlink/dossier assets déjà présent.';
+                }
+
+                // Deploy index.html — static fallback copy used by index.php if it cannot
+                // read the Sunbox root index.html. index.php is the primary entry point now.
+                $mainIndexPath = dirname(__DIR__) . '/index.html';
+                if (file_exists($mainIndexPath)) {
+                    $indexHtml = file_get_contents($mainIndexPath);
+                    if ($indexHtml !== false) {
+                        // Inject pro config: point the React app to this pro site's own /api
+                        // and flag it as a pro site (hides admin-only features).
+                        $apiUrlJson  = json_encode($proBaseUrl . '/api', JSON_HEX_TAG | JSON_HEX_AMP);
+                        $logoJson    = json_encode($logoUrlAbs,   JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE);
+                        $companyJson = json_encode($companyName,  JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE);
+                        $proConfig   = '<script>'
+                            . 'window.__API_BASE_URL__='    . $apiUrlJson   . ';'
+                            . 'window.__PRO_SITE__=true;'
+                            . 'window.__PRO_LOGO_URL__='    . $logoJson    . ';'
+                            . 'window.__PRO_COMPANY_NAME__=' . $companyJson  . ';'
+                            . '</script>';
+                        $closeHeadPos = stripos($indexHtml, '</head>');
+                        if ($closeHeadPos !== false) {
+                            $indexHtml = substr($indexHtml, 0, $closeHeadPos) . $proConfig . substr($indexHtml, $closeHeadPos);
+                        } else {
+                            $indexHtml .= $proConfig;
+                        }
+                        if (file_put_contents($siteDir . '/index.html', $indexHtml) === false) {
+                            $result['errors'][] = 'Avertissement: impossible d\'écrire index.html (fallback)';
+                        } else {
+                            $result['debug'][] = 'index.html (fallback) déployé.';
+                        }
+                    }
+                } else {
+                    $result['errors'][] = 'Avertissement: index.html introuvable (' . $mainIndexPath . '). Compilez le site (npm run build) d\'abord. index.php fonctionnera quand même.';
+                }
+
+                // Write a minimal pro-specific .env.
+                // DB credentials (DB_HOST, DB_USER, DB_PASS) and the main Sunbox DB_NAME
+                // are NOT written here — the pro site's api_config.php loads them
+                // automatically from the Sunbox root .env (3 levels up).
+                // Only pro-specific overrides are stored here.
+                $envLines = [
+                    '# Pro site config — DB credentials come from Sunbox root .env automatically.',
+                    'APP_URL=' . $proBaseUrl,
+                    'API_DEBUG=true',
+                    '',
+                    '# Pro user identifier in Sunbox DB (used for direct DB queries)',
+                    'SUNBOX_USER_ID=' . $userId,
+                    '',
+                    '# Pro site own database (overrides DB_NAME from Sunbox root .env)',
+                    'DB_NAME=' . $dbName,
+                    '',
+                    'ADMIN_PASSWORD_HASH=' . $passwordHash,
+                    '',
+                    'COMPANY_NAME=' . $companyName,
+                    'LOGO_URL=' . $logoUrlAbs,
+                    'VAT_RATE=15',
+                ];
+                if (file_put_contents($siteDir . '/.env', implode("\n", $envLines) . "\n") === false) {
+                    $result['errors'][] = 'Avertissement: impossible d\'écrire .env';
+                } else {
+                    $result['debug'][] = '.env écrit.';
+                }
+
+                // Verify Sunbox root .env is reachable from the pro site's api/config.php
+                // (i.e., 3 levels up from siteDir/api/ == sunbox root).
+                // siteDir = sunbox-root/pros/<domain>  →  dirname($siteDir, 2) = sunbox-root
+                $sunboxRootDir = dirname($siteDir, 2);
+                $sunboxEnvPath = $sunboxRootDir . '/.env';
+                if (is_file($sunboxEnvPath) && is_readable($sunboxEnvPath)) {
+                    $result['debug'][] = 'Sunbox root .env accessible depuis le site pro (' . $sunboxEnvPath . ').';
+                } else {
+                    $result['errors'][] = 'Avertissement: Sunbox root .env introuvable à ' . $sunboxEnvPath
+                        . '. Vérifiez que le site pro est bien sous sunbox-root/pros/<domaine>/.';
+                }
+
+                // Write .deploy_version — used by check_pro_versions to detect outdated files
+                if (file_put_contents($siteDir . '/.deploy_version', PRO_FILE_VERSION) === false) {
+                    $result['errors'][] = 'Avertissement: impossible d\'écrire .deploy_version';
+                } else {
+                    $result['debug'][] = '.deploy_version: ' . PRO_FILE_VERSION;
+                }
+
+                $result['deployed'] = true;
+            } catch (Throwable $e) {
+                $result['errors'][] = $e->getMessage();
+            }
+            ok($result);
+            break;
+        }
+
+        // ── Initialize schema in an already-created pro database ───────────────
+        case 'init_pro_db': {
+            validateRequired($body, ['user_id']);
+            $userId = (int)$body['user_id'];
+
+            $stmt = $db->prepare("
+                SELECT pp.company_name, pp.db_name
+                FROM professional_profiles pp WHERE pp.user_id = ?
+            ");
+            $stmt->execute([$userId]);
+            $profile = $stmt->fetch();
+            if (!$profile) fail('Utilisateur professionnel introuvable.');
+
+            $companyName = (string)$profile['company_name'];
+            $dbName      = (string)($profile['db_name'] ?? '');
+
+            if (!$dbName) {
+                fail('Nom de la base de données manquant. Renseignez-le dans le formulaire puis enregistrez.');
+            }
+
+            $result = [
+                'db_name'            => $dbName,
+                'schema_initialized' => false,
+                'errors'             => [],
+            ];
+
+            try {
+                // Connect using Sunbox's own server credentials with the pro database name
+                $proPdo = new PDO(
+                    "mysql:host=" . DB_HOST . ";dbname={$dbName};charset=utf8mb4",
+                    DB_USER, DB_PASS,
+                    [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_EMULATE_PREPARES => false]
+                );
+
+                // Helper: safely add a missing column without touching existing data.
+                // $table: table name, $col: column name, $def: SQL column definition
+                $addCol = function(string $table, string $col, string $def) use ($proPdo): void {
+                    $s = $proPdo->prepare(
+                        "SELECT COUNT(*) FROM information_schema.COLUMNS
+                         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?"
+                    );
+                    $s->execute([$table, $col]);
+                    if (!(bool)$s->fetchColumn()) {
+                        $proPdo->exec("ALTER TABLE `{$table}` ADD COLUMN `{$col}` {$def}");
+                    }
+                };
+
+                // ── Core tables (CREATE IF NOT EXISTS = safe on existing DB) ──────
+                $proPdo->exec("CREATE TABLE IF NOT EXISTS `pro_settings` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `setting_key` VARCHAR(100) NOT NULL,
+                    `setting_value` TEXT,
+                    `setting_group` VARCHAR(50) DEFAULT 'general',
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY `uq_setting_key` (`setting_key`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                $proPdo->exec("CREATE TABLE IF NOT EXISTS `pro_contacts` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `name` VARCHAR(255) NOT NULL,
+                    `email` VARCHAR(255) DEFAULT '',
+                    `phone` VARCHAR(50) DEFAULT '',
+                    `address` TEXT,
+                    `company` VARCHAR(255) DEFAULT '',
+                    `device_id` VARCHAR(255) DEFAULT NULL,
+                    `notes` TEXT,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+                // Safe column additions for contacts (upgrade path)
+                $addCol('pro_contacts', 'company',   "VARCHAR(255) DEFAULT '' AFTER `address`");
+                $addCol('pro_contacts', 'device_id', "VARCHAR(255) DEFAULT NULL AFTER `company`");
+                $addCol('pro_contacts', 'notes',     "TEXT AFTER `device_id`");
+
+                $proPdo->exec("CREATE TABLE IF NOT EXISTS `pro_quotes` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `reference_number` VARCHAR(50) NOT NULL,
+                    `contact_id` INT DEFAULT NULL,
+                    `customer_name` VARCHAR(255) DEFAULT '',
+                    `customer_email` VARCHAR(255) DEFAULT '',
+                    `customer_phone` VARCHAR(50) DEFAULT '',
+                    `customer_address` TEXT,
+                    `customer_message` TEXT,
+                    `model_id` INT NOT NULL,
+                    `model_name` VARCHAR(255) NOT NULL,
+                    `model_type` VARCHAR(20) DEFAULT 'container',
+                    `base_price` DECIMAL(12,2) DEFAULT 0,
+                    `options_total` DECIMAL(12,2) DEFAULT 0,
+                    `total_price` DECIMAL(12,2) NOT NULL,
+                    `notes` TEXT,
+                    `status` ENUM('pending','approved','rejected','completed') DEFAULT 'pending',
+                    `valid_until` DATE DEFAULT NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+                // Safe column additions for quotes (upgrade path)
+                $addCol('pro_quotes', 'customer_address', "TEXT AFTER `customer_phone`");
+                $addCol('pro_quotes', 'customer_message', "TEXT AFTER `customer_address`");
+                $addCol('pro_quotes', 'model_type',       "VARCHAR(20) DEFAULT 'container' AFTER `model_name`");
+                $addCol('pro_quotes', 'notes',            "TEXT AFTER `total_price`");
+                $addCol('pro_quotes', 'valid_until',      "DATE DEFAULT NULL AFTER `status`");
+                $addCol('pro_quotes', 'boq_requested',    "TINYINT(1) DEFAULT 0 AFTER `valid_until`");
+
+                // ── Quote options (v1.4.0) ─────────────────────────────────────
+                $proPdo->exec("CREATE TABLE IF NOT EXISTS `pro_quote_options` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `quote_id` INT NOT NULL,
+                    `option_id` INT DEFAULT NULL,
+                    `option_name` VARCHAR(500) NOT NULL,
+                    `option_price` DECIMAL(12,2) DEFAULT 0,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (`quote_id`) REFERENCES `pro_quotes`(`id`) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                // ── Purchase Reports (v1.5.0) ──────────────────────────────────
+                $proPdo->exec("CREATE TABLE IF NOT EXISTS `pro_purchase_reports` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `quote_id` INT NOT NULL,
+                    `quote_reference` VARCHAR(50) DEFAULT '',
+                    `model_name` VARCHAR(255) DEFAULT '',
+                    `status` ENUM('in_progress','completed') DEFAULT 'in_progress',
+                    `total_amount` DECIMAL(12,2) DEFAULT 0,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    FOREIGN KEY (`quote_id`) REFERENCES `pro_quotes`(`id`) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                $proPdo->exec("CREATE TABLE IF NOT EXISTS `pro_purchase_report_items` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `report_id` INT NOT NULL,
+                    `supplier_name` VARCHAR(255) DEFAULT 'Fournisseur non défini',
+                    `category_name` VARCHAR(255) NOT NULL,
+                    `description` TEXT NOT NULL,
+                    `quantity` DECIMAL(10,3) DEFAULT 1,
+                    `unit` VARCHAR(50) DEFAULT '',
+                    `unit_price` DECIMAL(12,2) DEFAULT 0,
+                    `total_price` DECIMAL(12,2) DEFAULT 0,
+                    `is_ordered` TINYINT(1) DEFAULT 0,
+                    `is_option` TINYINT(1) DEFAULT 0,
+                    `display_order` INT DEFAULT 0,
+                    FOREIGN KEY (`report_id`) REFERENCES `pro_purchase_reports`(`id`) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                // Add is_option to pro_purchase_report_items if missing (upgrade)
+                $addCol('pro_purchase_report_items', 'is_option', "TINYINT(1) DEFAULT 0 AFTER `is_ordered`");
+
+                // ── New tables (v1.2.0) ────────────────────────────────────────
+                $proPdo->exec("CREATE TABLE IF NOT EXISTS `pro_discounts` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `name` VARCHAR(255) NOT NULL,
+                    `description` TEXT,
+                    `discount_type` ENUM('percentage','fixed') NOT NULL DEFAULT 'percentage',
+                    `discount_value` DECIMAL(10,2) NOT NULL DEFAULT 0,
+                    `apply_to` ENUM('base_price','options','both') NOT NULL DEFAULT 'both',
+                    `start_date` DATE NOT NULL,
+                    `end_date` DATE NOT NULL,
+                    `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+                    `model_ids` JSON DEFAULT NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                $proPdo->exec("CREATE TABLE IF NOT EXISTS `pro_email_templates` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `template_key` VARCHAR(100) NOT NULL,
+                    `template_type` ENUM('quote','notification','password_reset','contact','status_change','other') NOT NULL DEFAULT 'other',
+                    `name` VARCHAR(255) NOT NULL,
+                    `subject` VARCHAR(500) NOT NULL,
+                    `body_html` LONGTEXT NOT NULL,
+                    `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+                    `is_default` TINYINT(1) NOT NULL DEFAULT 0,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY `uq_template_key` (`template_key`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                $proPdo->exec("CREATE TABLE IF NOT EXISTS `pro_email_signatures` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `signature_key` VARCHAR(100) NOT NULL,
+                    `name` VARCHAR(255) NOT NULL,
+                    `description` TEXT,
+                    `body_html` LONGTEXT NOT NULL,
+                    `logo_url` VARCHAR(500) DEFAULT '',
+                    `photo_url` VARCHAR(500) DEFAULT '',
+                    `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+                    `is_default` TINYINT(1) NOT NULL DEFAULT 0,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY `uq_signature_key` (`signature_key`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                // ── Schema version table ───────────────────────────────────────
+                $proPdo->exec("CREATE TABLE IF NOT EXISTS `pro_schema_version` (
+                    `id`         INT NOT NULL DEFAULT 1,
+                    `version`    VARCHAR(20) NOT NULL,
+                    `applied_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    PRIMARY KEY (`id`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+                $proPdo->prepare(
+                    "INSERT INTO `pro_schema_version` (`id`, `version`) VALUES (1, ?)
+                     ON DUPLICATE KEY UPDATE `version` = VALUES(`version`), `applied_at` = NOW()"
+                )->execute([PRO_DB_SCHEMA_VERSION]);
+
+                // ── Default settings (safe: ON DUPLICATE KEY UPDATE) ──────────
+                $ins = $proPdo->prepare("
+                    INSERT INTO `pro_settings` (`setting_key`, `setting_value`, `setting_group`)
+                    VALUES (?, ?, ?)
+                    ON DUPLICATE KEY UPDATE `setting_value` = VALUES(`setting_value`)
+                ");
+                foreach ([
+                    ['vat_rate',              '15',              'general'],
+                    ['site_under_construction','false',           'site'],
+                    ['company_name',           $companyName,      'company'],
+                    ['company_address',        '',                'company'],
+                    ['company_phone',          '',                'company'],
+                    ['company_email',          '',                'company'],
+                    ['vat_number',             '',                'company'],
+                    ['brn_number',             '',                'company'],
+                ] as $row) {
+                    $ins->execute($row);
+                }
+
+                $result['schema_initialized'] = true;
+                $result['schema_version']      = PRO_DB_SCHEMA_VERSION;
+            } catch (Throwable $e) {
+                $result['errors'][] = $e->getMessage();
+            }
+
+            ok($result);
+            break;
+        }
+
+        case 'get_pro_model_overrides': {
+            validateRequired($body, ['user_id']);
+            $stmt = $db->prepare("SELECT * FROM pro_model_overrides WHERE user_id = ?");
+            $stmt->execute([(int)$body['user_id']]);
+            ok($stmt->fetchAll());
+            break;
+        }
+
+        case 'set_pro_model_override': {
+            validateRequired($body, ['user_id', 'model_id']);
+            $uid = (int)$body['user_id'];
+            $mid = (int)$body['model_id'];
+            $adj = isset($body['price_adjustment']) ? (float)$body['price_adjustment'] : 0;
+            $enabled = isset($body['is_enabled']) ? (int)(bool)$body['is_enabled'] : 1;
+            $db->prepare("
+                INSERT INTO pro_model_overrides (user_id, model_id, price_adjustment, is_enabled)
+                VALUES (?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE price_adjustment = ?, is_enabled = ?, updated_at = NOW()
+            ")->execute([$uid, $mid, $adj, $enabled, $adj, $enabled]);
+            ok();
+            break;
+        }
+
+        case 'set_pro_model_enabled': {
+            // Updates is_enabled only; price_adjustment is 0 for new rows,
+            // preserved unchanged for existing rows (ON DUPLICATE KEY only updates is_enabled).
+            validateRequired($body, ['user_id', 'model_id']);
+            $uid     = (int)$body['user_id'];
+            $mid     = (int)$body['model_id'];
+            $enabled = isset($body['is_enabled']) ? (int)(bool)$body['is_enabled'] : 1;
+            $db->prepare("
+                INSERT INTO pro_model_overrides (user_id, model_id, price_adjustment, is_enabled)
+                VALUES (?, ?, 0, ?)
+                ON DUPLICATE KEY UPDATE is_enabled = ?, updated_at = NOW()
+            ")->execute([$uid, $mid, $enabled, $enabled]);
+            ok();
+            break;
+        }
+
+        case 'delete_pro_user': {
+            validateRequired($body, ['id']);
+            $db->prepare("DELETE FROM users WHERE id = ? AND role = 'professional'")->execute([(int)$body['id']]);
+            ok();
+            break;
+        }
+
+        case 'get_pro_profile': {
+            startSession();
+            $userId = (int)($_SESSION['pro_user_id'] ?? $body['user_id'] ?? 0);
+            if (!$userId) { fail('Non authentifié', 401); }
+            $stmt = $db->prepare("
+                SELECT u.id, u.name, u.email,
+                       pp.company_name, pp.address, pp.vat_number, pp.brn_number,
+                       pp.phone, pp.logo_url, pp.sunbox_margin_percent, pp.credits, pp.is_active
+                FROM users u
+                LEFT JOIN professional_profiles pp ON pp.user_id = u.id
+                WHERE u.id = ?
+                LIMIT 1
+            ");
+            $stmt->execute([$userId]);
+            $profile = $stmt->fetch();
+            if (!$profile) { fail('Profil introuvable', 404); }
+            $profile['sunbox_margin_percent'] = (float)$profile['sunbox_margin_percent'];
+            $profile['credits'] = (float)$profile['credits'];
+            ok($profile);
+            break;
+        }
+
+        case 'update_pro_profile': {
+            startSession();
+            $userId = (int)($_SESSION['pro_user_id'] ?? 0);
+            if (!$userId) { fail('Non authentifié', 401); }
+            $sets = [];
+            $params = [];
+            if (array_key_exists('company_name', $body)) { $sets[] = 'company_name = ?'; $params[] = $body['company_name']; }
+            if (array_key_exists('address', $body)) { $sets[] = 'address = ?'; $params[] = $body['address']; }
+            if (array_key_exists('vat_number', $body)) { $sets[] = 'vat_number = ?'; $params[] = $body['vat_number']; }
+            if (array_key_exists('brn_number', $body)) { $sets[] = 'brn_number = ?'; $params[] = $body['brn_number']; }
+            if (array_key_exists('phone', $body)) { $sets[] = 'phone = ?'; $params[] = $body['phone']; }
+            if (array_key_exists('sunbox_margin_percent', $body)) { $sets[] = 'sunbox_margin_percent = ?'; $params[] = (float)$body['sunbox_margin_percent']; }
+            if (array_key_exists('logo_url', $body)) { $sets[] = 'logo_url = ?'; $params[] = $body['logo_url']; }
+            if (!empty($sets)) {
+                $sets[] = 'updated_at = NOW()';
+                $params[] = $userId;
+                $db->prepare("UPDATE professional_profiles SET " . implode(', ', $sets) . " WHERE user_id = ?")->execute($params);
+            }
+            ok();
+            break;
+        }
+
+        case 'buy_pro_pack': {
+            validateRequired($body, ['user_id']);
+            $userId = (int)$body['user_id'];
+            $packAmount = 10000;
+            $db->beginTransaction();
+            try {
+                // Add credits
+                $db->prepare("UPDATE professional_profiles SET credits = credits + ?, updated_at = NOW() WHERE user_id = ?")->execute([$packAmount, $userId]);
+                // Get new balance
+                $balance = (float)$db->prepare("SELECT credits FROM professional_profiles WHERE user_id = ?")->execute([$userId]) ? $db->query("SELECT credits FROM professional_profiles WHERE user_id = $userId")->fetchColumn() : 0;
+                $stmt = $db->prepare("SELECT credits FROM professional_profiles WHERE user_id = ?");
+                $stmt->execute([$userId]);
+                $balance = (float)$stmt->fetchColumn();
+                // Record pack
+                $db->prepare("INSERT INTO professional_packs (user_id, amount) VALUES (?, ?)")->execute([$userId, $packAmount]);
+                // Record transaction
+                $db->prepare("
+                    INSERT INTO professional_credit_transactions (user_id, amount, reason, balance_after)
+                    VALUES (?, ?, 'pack_purchase', ?)
+                ")->execute([$userId, $packAmount, $balance]);
+                $db->commit();
+                ok(['credits' => $balance]);
+            } catch (Throwable $e) {
+                $db->rollBack();
+                throw $e;
+            }
+            break;
+        }
+
+        case 'get_pro_credits': {
+            startSession();
+            $userId = (int)($_SESSION['pro_user_id'] ?? $body['user_id'] ?? 0);
+            if (!$userId) { fail('Non authentifié', 401); }
+            $stmt = $db->prepare("SELECT credits FROM professional_profiles WHERE user_id = ?");
+            $stmt->execute([$userId]);
+            $credits = (float)($stmt->fetchColumn() ?? 0);
+
+            $txStmt = $db->prepare("
+                SELECT * FROM professional_credit_transactions
+                WHERE user_id = ?
+                ORDER BY created_at DESC
+                LIMIT 20
+            ");
+            $txStmt->execute([$userId]);
+            $transactions = $txStmt->fetchAll();
+            ok(['credits' => $credits, 'transactions' => $transactions]);
+            break;
+        }
+
+        case 'deduct_pro_credits': {
+            startSession();
+            $userId = (int)($_SESSION['pro_user_id'] ?? $body['user_id'] ?? 0);
+            if (!$userId) { fail('Non authentifié', 401); }
+            validateRequired($body, ['amount', 'reason']);
+            $amount = (float)$body['amount'];
+            $reason = (string)$body['reason'];
+            $quoteId = isset($body['quote_id']) ? (int)$body['quote_id'] : null;
+
+            $db->beginTransaction();
+            try {
+                $stmt = $db->prepare("SELECT credits FROM professional_profiles WHERE user_id = ? FOR UPDATE");
+                $stmt->execute([$userId]);
+                $current = (float)$stmt->fetchColumn();
+                if ($current < $amount) { $db->rollBack(); fail('Crédits insuffisants', 402); }
+                $newBalance = $current - $amount;
+                $db->prepare("UPDATE professional_profiles SET credits = ?, updated_at = NOW() WHERE user_id = ?")->execute([$newBalance, $userId]);
+                $db->prepare("
+                    INSERT INTO professional_credit_transactions (user_id, amount, reason, quote_id, balance_after)
+                    VALUES (?, ?, ?, ?, ?)
+                ")->execute([$userId, -$amount, $reason, $quoteId, $newBalance]);
+                $db->commit();
+                ok(['credits' => $newBalance]);
+            } catch (Throwable $e) {
+                $db->rollBack();
+                throw $e;
+            }
+            break;
+        }
+
+        case 'get_model_requests': {
+            startSession();
+            if (!empty($body['user_id'])) {
+                $userId = (int)$body['user_id'];
+            } else {
+                $userId = (int)($_SESSION['pro_user_id'] ?? 0);
+            }
+            if ($userId) {
+                $stmt = $db->prepare("SELECT * FROM professional_model_requests WHERE user_id = ? ORDER BY created_at DESC");
+                $stmt->execute([$userId]);
+            } else {
+                $stmt = $db->query("SELECT r.*, u.name AS user_name, pp.company_name FROM professional_model_requests r LEFT JOIN users u ON u.id = r.user_id LEFT JOIN professional_profiles pp ON pp.user_id = r.user_id ORDER BY r.created_at DESC");
+            }
+            ok($stmt->fetchAll());
+            break;
+        }
+
+        case 'create_model_request': {
+            startSession();
+            $userId = (int)($_SESSION['pro_user_id'] ?? 0);
+            if (!$userId) { fail('Non authentifié', 401); }
+            validateRequired($body, ['description']);
+            $cost = 3000;
+            $db->beginTransaction();
+            try {
+                // Check credits
+                $stmt = $db->prepare("SELECT credits FROM professional_profiles WHERE user_id = ? FOR UPDATE");
+                $stmt->execute([$userId]);
+                $credits = (float)$stmt->fetchColumn();
+                if ($credits < $cost) { $db->rollBack(); fail('Crédits insuffisants (3000 Rs requis)', 402); }
+                // Deduct
+                $newBalance = $credits - $cost;
+                $db->prepare("UPDATE professional_profiles SET credits = ?, updated_at = NOW() WHERE user_id = ?")->execute([$newBalance, $userId]);
+                // Create request
+                $stmt = $db->prepare("
+                    INSERT INTO professional_model_requests
+                        (user_id, description, container_20ft_count, container_40ft_count, bedrooms, bathrooms, sketch_url)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                ");
+                $stmt->execute([
+                    $userId,
+                    $body['description'],
+                    (int)($body['container_20ft_count'] ?? 0),
+                    (int)($body['container_40ft_count'] ?? 0),
+                    (int)($body['bedrooms'] ?? 0),
+                    (int)($body['bathrooms'] ?? 0),
+                    $body['sketch_url'] ?? null,
+                ]);
+                $reqId = (int)$db->lastInsertId();
+                // Record transaction
+                $db->prepare("
+                    INSERT INTO professional_credit_transactions (user_id, amount, reason, balance_after)
+                    VALUES (?, ?, 'model_request', ?)
+                ")->execute([$userId, -$cost, $newBalance]);
+                $db->commit();
+                ok(['id' => $reqId, 'credits' => $newBalance]);
+            } catch (Throwable $e) {
+                $db->rollBack();
+                throw $e;
+            }
+            break;
+        }
+
+        case 'update_model_request': {
+            validateRequired($body, ['id']);
+            $sets = [];
+            $params = [];
+            if (array_key_exists('status', $body)) { $sets[] = 'status = ?'; $params[] = $body['status']; }
+            if (array_key_exists('admin_notes', $body)) { $sets[] = 'admin_notes = ?'; $params[] = $body['admin_notes']; }
+            if (!empty($sets)) {
+                $sets[] = 'updated_at = NOW()';
+                $params[] = (int)$body['id'];
+                $db->prepare("UPDATE professional_model_requests SET " . implode(', ', $sets) . " WHERE id = ?")->execute($params);
+            }
+            ok();
             break;
         }
 

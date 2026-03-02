@@ -102,6 +102,43 @@ define('ALLOWED_ORIGINS', [
 
 /**
  * ------------------------------------------------------------
+ * 3b) Pro site helpers (server-side deployment)
+ * ------------------------------------------------------------
+ */
+
+/** Sanitise a domain into a safe directory/slug name. */
+function proDbSlug(string $domain): string
+{
+    $domain = preg_replace('#^https?://#', '', strtolower(trim($domain)));
+    $domain = preg_replace('#^www\.#', '', $domain);
+    $domain = preg_replace('/[^a-z0-9.]/', '_', $domain);
+    $domain = str_replace('.', '_', $domain);
+    $domain = preg_replace('/_+/', '_', $domain);
+    return trim($domain, '_');
+}
+
+/**
+ * Absolute filesystem path to the pro site directory.
+ * Always derived from __DIR__ (api/) going one level up to public_html root.
+ * More reliable than DOCUMENT_ROOT on cPanel.
+ */
+function proSiteDir(string $domain): string
+{
+    $safeDomain = preg_replace('/[^a-z0-9._-]/i', '_', strtolower($domain));
+    // __DIR__ = public_html/api  →  dirname(__DIR__) = public_html
+    $webRoot = rtrim(dirname(__DIR__), '/');
+    return $webRoot . '/pros/' . $safeDomain;
+}
+
+/** Public URL of the pro site. */
+function proSiteUrl(string $domain): string
+{
+    $safeDomain = preg_replace('/[^a-z0-9._-]/i', '_', strtolower($domain));
+    return 'https://sunbox-mauritius.com/pros/' . $safeDomain;
+}
+
+/**
+ * ------------------------------------------------------------
  * 3) DB connection
  * ------------------------------------------------------------
  */

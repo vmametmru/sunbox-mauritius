@@ -16,6 +16,7 @@ import {
   Download,
   Send,
   Loader2,
+  ClipboardList,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -38,6 +39,8 @@ export default function QuoteDetailPage() {
   const [sendingEmail, setSendingEmail] = useState(false);
   const [emailRecipient, setEmailRecipient] = useState('');
   const [showEmailInput, setShowEmailInput] = useState(false);
+  const [reportId, setReportId] = useState<number | null>(null);
+  const [creatingReport, setCreatingReport] = useState(false);
 
   // Admin Configure Modal state for editing model-based quotes
   const [showConfigureModal, setShowConfigureModal] = useState(false);
@@ -60,6 +63,11 @@ export default function QuoteDetailPage() {
     try {
       const result = await api.getQuote(quoteId);
       setQuote(result);
+      // Check if a purchase report already exists for this quote
+      try {
+        const rep = await api.getQuotePurchaseReport(quoteId);
+        setReportId(rep?.report_id ?? null);
+      } catch { /* non-fatal */ }
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
     } finally {
@@ -264,8 +272,21 @@ export default function QuoteDetailPage() {
     }
   };
 
-  const getStatusBadge = (status: string) => {
-    const styles: Record<string, string> = {
+  const handleCreateReport = async () => {
+    if (!quote) return;
+    setCreatingReport(true);
+    try {
+      const result = await api.createPurchaseReport(quote.id);
+      setReportId(result.report_id);
+      navigate(`/admin/reports/${result.report_id}`);
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setCreatingReport(false);
+    }
+  };
+
+  const getStatusBadge = (status: string) => {    const styles: Record<string, string> = {
       pending:            'bg-yellow-100 text-yellow-800',
       approved:           'bg-green-100 text-green-800',
       rejected:           'bg-red-100 text-red-800',
@@ -506,6 +527,38 @@ export default function QuoteDetailPage() {
                 {sendingEmail ? 'Envoi…' : 'Envoyer'}
               </Button>
             </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Rapport d'Achat — separate card, clearly away from delete */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <ClipboardList className="h-5 w-5 text-orange-500" />
+            Rapport d'Achat
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-gray-500 mb-3">
+            Génère la liste des articles à commander par fournisseur, avec sous-totaux et cases à cocher.
+          </p>
+          {reportId ? (
+            <Button onClick={() => navigate(`/admin/reports/${reportId}`)} variant="outline">
+              <ClipboardList className="h-4 w-4 mr-2" />
+              Ouvrir le rapport existant
+            </Button>
+          ) : (
+            <Button
+              onClick={handleCreateReport}
+              disabled={creatingReport}
+              className="bg-orange-500 hover:bg-orange-600"
+            >
+              {creatingReport
+                ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                : <ClipboardList className="h-4 w-4 mr-2" />}
+              {creatingReport ? 'Génération…' : "Générer le Rapport d'Achat"}
+            </Button>
           )}
         </CardContent>
       </Card>
