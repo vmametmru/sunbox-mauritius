@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
-import { ArrowLeft, Printer, CheckCircle, Package, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Printer, CheckCircle, Package, RefreshCw, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 
@@ -17,6 +17,7 @@ interface ReportItem {
   unit_price: number;
   total_price: number;
   is_ordered: boolean;
+  is_option: boolean;
   display_order: number;
 }
 
@@ -35,11 +36,90 @@ interface PurchaseReport {
   status: 'in_progress' | 'completed';
   total_amount: number;
   created_at: string;
-  groups: SupplierGroup[];
+  // price summary fields
+  vat_rate?: number;
+  quote_base_price_ht?: number;
+  quote_options_ht?: number;
+  quote_total_ht?: number;
+  quote_base_price_ttc?: number;
+  quote_options_ttc?: number;
+  quote_total_ttc?: number;
+  // grouped items
+  base_groups: SupplierGroup[];
+  option_groups: SupplierGroup[];
 }
 
-const fmt = (p: number) =>
-  new Intl.NumberFormat('fr-MU', { style: 'decimal', minimumFractionDigits: 0 }).format(p) + ' Rs';
+const numFmt = new Intl.NumberFormat('fr-MU', { style: 'decimal', minimumFractionDigits: 0 });
+const fmt = (p: number) => numFmt.format(Math.round(p)) + ' Rs';
+
+// Render a list of supplier groups as table rows
+function SupplierGroupsTable({
+  groups,
+  onToggle,
+}: {
+  groups: SupplierGroup[];
+  onToggle: (id: number) => void;
+}) {
+  if (!groups.length) return null;
+  return (
+    <div className="space-y-4">
+      {groups.map(group => (
+        <Card key={group.supplier_name}>
+          <CardHeader className="pb-2 pt-4 px-4">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-semibold text-gray-800">
+                🏢 {group.supplier_name}
+              </CardTitle>
+              <span className="text-sm font-bold text-orange-600">
+                Sous-total : {fmt(group.subtotal)}
+              </span>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-2 text-left text-sm font-medium text-gray-500 w-10 no-print">✓</th>
+                    <th className="px-4 py-2 text-left text-sm font-medium text-gray-500">Catégorie</th>
+                    <th className="px-4 py-2 text-left text-sm font-medium text-gray-500">Description</th>
+                    <th className="px-4 py-2 text-right text-sm font-medium text-gray-500">Qté</th>
+                    <th className="px-4 py-2 text-left text-sm font-medium text-gray-500">Unité</th>
+                    <th className="px-4 py-2 text-right text-sm font-medium text-gray-500">P.U.</th>
+                    <th className="px-4 py-2 text-right text-sm font-medium text-gray-500">Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {group.items.map(item => (
+                    <tr key={item.id}
+                      className={item.is_ordered ? 'bg-green-50' : 'hover:bg-gray-50'}>
+                      <td className="px-4 py-2 no-print">
+                        <Checkbox
+                          checked={item.is_ordered}
+                          onCheckedChange={() => onToggle(item.id)}
+                        />
+                      </td>
+                      <td className="px-4 py-2 text-sm text-gray-600">{item.category_name}</td>
+                      <td className="px-4 py-2 text-sm font-medium">
+                        {item.is_ordered
+                          ? <span className="line-through text-gray-400">{item.description}</span>
+                          : item.description}
+                      </td>
+                      <td className="px-4 py-2 text-sm text-right">{item.quantity}</td>
+                      <td className="px-4 py-2 text-sm text-gray-500">{item.unit}</td>
+                      <td className="px-4 py-2 text-sm text-right">{fmt(item.unit_price)}</td>
+                      <td className="px-4 py-2 text-sm text-right font-medium">{fmt(item.total_price)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
 
 export default function PurchaseReportDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -73,15 +153,14 @@ export default function PurchaseReportDetailPage() {
       await api.toggleReportItem(itemId);
       setReport(prev => {
         if (!prev) return prev;
-        return {
-          ...prev,
-          groups: prev.groups.map(g => ({
+        const toggleIn = (groups: SupplierGroup[]) =>
+          groups.map(g => ({
             ...g,
             items: g.items.map(item =>
               item.id === itemId ? { ...item, is_ordered: !item.is_ordered } : item
             ),
-          })),
-        };
+          }));
+        return { ...prev, base_groups: toggleIn(prev.base_groups), option_groups: toggleIn(prev.option_groups) };
       });
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
@@ -98,6 +177,20 @@ export default function PurchaseReportDetailPage() {
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
     } finally {
+      setUpdating(false);
+    }
+  };
+
+  const deleteReport = async () => {
+    const msg = "Supprimer ce rapport d'achat ? Cette action est irréversible.\nVous pourrez le régénérer depuis la page du devis.";
+    if (!report || !confirm(msg)) return;
+    setUpdating(true);
+    try {
+      await api.deleteReport(report.id);
+      toast({ title: 'Rapport supprimé', description: 'Vous pouvez maintenant le régénérer depuis le devis.' });
+      navigate(backPath);
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
       setUpdating(false);
     }
   };
@@ -120,9 +213,16 @@ export default function PurchaseReportDetailPage() {
     );
   }
 
-  const allItems     = report.groups.flatMap(g => g.items);
-  const orderedCount = allItems.filter(i => i.is_ordered).length;
-  const totalCount   = allItems.length;
+  const allBaseItems    = report.base_groups.flatMap(g => g.items);
+  const allOptionItems  = report.option_groups.flatMap(g => g.items);
+  const allItems        = [...allBaseItems, ...allOptionItems];
+  const orderedItems    = allItems.filter(i => i.is_ordered);
+  const orderedAmount   = orderedItems.reduce((s, i) => s + i.total_price, 0);
+  const remainingAmount = allItems.filter(i => !i.is_ordered).reduce((s, i) => s + i.total_price, 0);
+  const totalCount      = allItems.length;
+  const orderedCount    = orderedItems.length;
+  const vatRate         = report.vat_rate ?? 15;
+  const hasOptionGroups = report.option_groups.length > 0;
 
   return (
     <>
@@ -160,13 +260,18 @@ export default function PurchaseReportDetailPage() {
                 <CheckCircle className="h-4 w-4 mr-2" />Marquer Terminé
               </Button>
             )}
+            <Button size="sm" variant="outline" className="text-red-600 border-red-300 hover:bg-red-50"
+              onClick={deleteReport} disabled={updating}>
+              <Trash2 className="h-4 w-4 mr-2" />Supprimer
+            </Button>
           </div>
         </div>
 
         <div id="purchase-report-print">
           {/* Meta card */}
           <Card className="mb-4">
-            <CardContent className="p-4">
+            <CardContent className="p-4 space-y-4">
+              {/* Quote identity */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                 <div>
                   <p className="text-gray-500 text-xs">Devis</p>
@@ -191,11 +296,66 @@ export default function PurchaseReportDetailPage() {
                   </div>
                 </div>
               </div>
+
+              {/* Price summary */}
+              {(report.quote_total_ht != null && report.quote_total_ht > 0) && (
+                <div className="border-t pt-3">
+                  <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Résumé du Devis</p>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                    <div className="bg-gray-50 rounded p-2">
+                      <p className="text-xs text-gray-500">Prix de Base HT</p>
+                      <p className="font-semibold">{fmt(report.quote_base_price_ht ?? 0)}</p>
+                      <p className="text-xs text-gray-400">TTC: {fmt(report.quote_base_price_ttc ?? 0)}</p>
+                    </div>
+                    {(report.quote_options_ht ?? 0) > 0 && (
+                      <div className="bg-gray-50 rounded p-2">
+                        <p className="text-xs text-gray-500">Options HT</p>
+                        <p className="font-semibold">{fmt(report.quote_options_ht ?? 0)}</p>
+                        <p className="text-xs text-gray-400">TTC: {fmt(report.quote_options_ttc ?? 0)}</p>
+                      </div>
+                    )}
+                    <div className="bg-orange-50 rounded p-2 border border-orange-200">
+                      <p className="text-xs text-gray-500">Total Vente HT</p>
+                      <p className="font-bold text-orange-700">{fmt(report.quote_total_ht ?? 0)}</p>
+                      <p className="text-xs text-gray-500">TTC ({vatRate}%): <span className="font-bold text-orange-600">{fmt(report.quote_total_ttc ?? 0)}</span></p>
+                    </div>
+                    <div className="bg-blue-50 rounded p-2 border border-blue-200">
+                      <p className="text-xs text-gray-500">Coût Achats HT</p>
+                      <p className="font-bold text-blue-700">{fmt(report.total_amount)}</p>
+                      <p className="text-xs text-gray-400">Généré le {new Date(report.created_at).toLocaleDateString('fr-FR')}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
 
-          {/* Supplier groups */}
-          {report.groups.length === 0 ? (
+          {/* Ordered / Remaining summary */}
+          {totalCount > 0 && (
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <Card className="bg-green-50 border-green-200">
+                <CardContent className="p-3 flex justify-between items-center">
+                  <div>
+                    <p className="text-xs text-gray-500">Commandé ({orderedCount} articles)</p>
+                    <p className="text-lg font-bold text-green-700">{fmt(orderedAmount)}</p>
+                  </div>
+                  <CheckCircle className="h-6 w-6 text-green-500 opacity-60" />
+                </CardContent>
+              </Card>
+              <Card className="bg-amber-50 border-amber-200">
+                <CardContent className="p-3 flex justify-between items-center">
+                  <div>
+                    <p className="text-xs text-gray-500">À commander ({totalCount - orderedCount} articles)</p>
+                    <p className="text-lg font-bold text-amber-700">{fmt(remainingAmount)}</p>
+                  </div>
+                  <Package className="h-6 w-6 text-amber-500 opacity-60" />
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {/* Base items */}
+          {report.base_groups.length === 0 && report.option_groups.length === 0 ? (
             <Card>
               <CardContent className="p-8 text-center text-gray-400">
                 <Package className="h-10 w-10 mx-auto mb-2 opacity-50" />
@@ -203,72 +363,40 @@ export default function PurchaseReportDetailPage() {
               </CardContent>
             </Card>
           ) : (
-            <div className="space-y-4">
-              {report.groups.map(group => (
-                <Card key={group.supplier_name}>
-                  <CardHeader className="pb-2 pt-4 px-4">
-                    <div className="flex items-center justify-between">
-                      <CardTitle className="text-base font-semibold text-gray-800">
-                        🏢 {group.supplier_name}
-                      </CardTitle>
-                      <span className="text-sm font-bold text-orange-600">
-                        Sous-total : {fmt(group.subtotal)}
-                      </span>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="p-0">
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            <th className="px-4 py-2 text-left font-medium text-gray-500 w-10 no-print">✓</th>
-                            <th className="px-4 py-2 text-left font-medium text-gray-500">Catégorie</th>
-                            <th className="px-4 py-2 text-left font-medium text-gray-500">Description</th>
-                            <th className="px-4 py-2 text-right font-medium text-gray-500">Qté</th>
-                            <th className="px-4 py-2 text-left font-medium text-gray-500">Unité</th>
-                            <th className="px-4 py-2 text-right font-medium text-gray-500">P.U.</th>
-                            <th className="px-4 py-2 text-right font-medium text-gray-500">Total</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y">
-                          {group.items.map(item => (
-                            <tr key={item.id}
-                              className={item.is_ordered ? 'bg-green-50' : 'hover:bg-gray-50'}>
-                              <td className="px-4 py-2 no-print">
-                                <Checkbox
-                                  checked={item.is_ordered}
-                                  onCheckedChange={() => toggleItem(item.id)}
-                                />
-                              </td>
-                              <td className="px-4 py-2 text-gray-600 text-xs">{item.category_name}</td>
-                              <td className="px-4 py-2 font-medium">
-                                {item.is_ordered
-                                  ? <span className="line-through text-gray-400">{item.description}</span>
-                                  : item.description}
-                              </td>
-                              <td className="px-4 py-2 text-right">{item.quantity}</td>
-                              <td className="px-4 py-2 text-gray-500">{item.unit}</td>
-                              <td className="px-4 py-2 text-right">{fmt(item.unit_price)}</td>
-                              <td className="px-4 py-2 text-right font-medium">{fmt(item.total_price)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+            <div className="space-y-6">
+              {report.base_groups.length > 0 && (
+                <div>
+                  <h2 className="text-base font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                    <span className="inline-block w-3 h-3 rounded-full bg-blue-500" />
+                    Achats de Base
+                  </h2>
+                  <SupplierGroupsTable groups={report.base_groups} onToggle={toggleItem} />
+                </div>
+              )}
+
+              {hasOptionGroups && (
+                <div>
+                  <h2 className="text-base font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                    <span className="inline-block w-3 h-3 rounded-full bg-purple-500" />
+                    Achats Options
+                  </h2>
+                  <SupplierGroupsTable groups={report.option_groups} onToggle={toggleItem} />
+                </div>
+              )}
 
               {/* Grand total */}
               <Card className="bg-orange-50 border-orange-200">
                 <CardContent className="p-4">
                   <div className="flex justify-between items-center">
-                    <span className="text-lg font-bold text-gray-800">TOTAL GÉNÉRAL</span>
+                    <span className="text-lg font-bold text-gray-800">TOTAL ACHATS</span>
                     <span className="text-2xl font-bold text-orange-600">{fmt(report.total_amount)}</span>
                   </div>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Généré le {new Date(report.created_at).toLocaleDateString('fr-FR')}
-                  </p>
+                  {hasOptionGroups && (
+                    <div className="flex justify-between text-sm text-gray-500 mt-1">
+                      <span>Base: {fmt(report.base_groups.reduce((s, g) => s + g.subtotal, 0))}</span>
+                      <span>Options: {fmt(report.option_groups.reduce((s, g) => s + g.subtotal, 0))}</span>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </div>

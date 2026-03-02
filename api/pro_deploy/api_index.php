@@ -564,15 +564,15 @@ try {
                 if ($existing) { ok(['report_id' => (int)$existing['id'], 'already_exists' => true]); break; }
             }
 
-            // Deduct 1 500 Rs
-            $creditResult = deductCredits(1500, 'boq_report_requested', $quoteId);
+            // Deduct 1 500 Rs ('boq_requested' is the allowed reason in deductCredits)
+            $creditResult = deductCredits(1500, 'boq_requested', $quoteId);
             if (!($creditResult['success'] ?? false)) {
                 fail($creditResult['error'] ?? 'Crédits insuffisants', 402);
             }
 
-            // Fetch BOQ lines from Sunbox DB
+            // Fetch base BOQ lines from Sunbox DB
             $sdb   = getSunboxDB();
-            $lStmt = $sdb->prepare("
+            $boqSql = "
                 SELECT bc.name AS category_name,
                        bl.description, bl.quantity, bl.unit, bl.margin_percent,
                        COALESCE(pl.unit_price, bl.unit_cost_ht) AS unit_price,
@@ -585,11 +585,49 @@ try {
                 LEFT JOIN suppliers s ON bl.supplier_id = s.id
                 WHERE bc.model_id = ? AND bc.is_option = FALSE AND bl.id IS NOT NULL
                 ORDER BY COALESCE(s.name,'Fournisseur non défini'), bc.display_order, bl.display_order
-            ");
+            ";
+            $lStmt = $sdb->prepare($boqSql);
             $lStmt->execute([(int)$quote['model_id']]);
             $lines = $lStmt->fetchAll();
 
-            $totalAmount = (float)array_sum(array_column($lines, 'total_price'));
+            // Fetch option BOQ lines for the options actually selected in this quote
+            // Step 1: get distinct option_name values from pro DB
+            $optionLines = [];
+            try {
+                $selOptStmt = $db->prepare(
+                    "SELECT DISTINCT option_name FROM pro_quote_options WHERE quote_id = ? AND option_name IS NOT NULL AND option_name != ''"
+                );
+                $selOptStmt->execute([$quoteId]);
+                $selectedOptionNames = array_column($selOptStmt->fetchAll(), 'option_name');
+
+                // Step 2: fetch BOQ lines for those option categories from Sunbox DB
+                if (!empty($selectedOptionNames)) {
+                    $ph = implode(',', array_fill(0, count($selectedOptionNames), '?'));
+                    $optLinesStmt = $sdb->prepare("
+                        SELECT bc.name AS category_name,
+                               bl.description, bl.quantity, bl.unit, bl.margin_percent,
+                               COALESCE(pl.unit_price, bl.unit_cost_ht) AS unit_price,
+                               ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2) AS total_price,
+                               COALESCE(s.name, 'Fournisseur non défini') AS supplier_name,
+                               bc.display_order AS cat_order, bl.display_order AS line_order
+                        FROM boq_categories bc
+                        LEFT JOIN boq_lines bl ON bl.category_id = bc.id
+                        LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
+                        LEFT JOIN suppliers s ON bl.supplier_id = s.id
+                        WHERE bc.model_id = ? AND bc.is_option = TRUE AND bc.name IN ($ph) AND bl.id IS NOT NULL
+                        ORDER BY COALESCE(s.name,'Fournisseur non défini'), bc.display_order, bl.display_order
+                    ");
+                    $params = array_merge([(int)$quote['model_id']], $selectedOptionNames);
+                    $optLinesStmt->execute($params);
+                    $optionLines = $optLinesStmt->fetchAll();
+                }
+            } catch (\Throwable $ignored) {
+                // pro_quote_options table may not exist yet; skip option items gracefully
+            }
+
+            $totalBase    = (float)array_sum(array_column($lines, 'total_price'));
+            $totalOptions = (float)array_sum(array_column($optionLines, 'total_price'));
+            $totalAmount  = $totalBase + $totalOptions;
 
             $db->beginTransaction();
             try {
@@ -598,12 +636,18 @@ try {
                 $reportId = (int)$db->lastInsertId();
 
                 $iStmt = $db->prepare("INSERT INTO pro_purchase_report_items
-                    (report_id, supplier_name, category_name, description, quantity, unit, unit_price, total_price, display_order)
-                    VALUES (?,?,?,?,?,?,?,?,?)");
+                    (report_id, supplier_name, category_name, description, quantity, unit, unit_price, total_price, is_option, display_order)
+                    VALUES (?,?,?,?,?,?,?,?,?,?)");
                 foreach ($lines as $i => $l) {
                     $iStmt->execute([
                         $reportId, $l['supplier_name'], $l['category_name'], $l['description'],
-                        (float)$l['quantity'], $l['unit'], (float)$l['unit_price'], (float)$l['total_price'], $i,
+                        (float)$l['quantity'], $l['unit'], (float)$l['unit_price'], (float)$l['total_price'], 0, $i,
+                    ]);
+                }
+                foreach ($optionLines as $i => $l) {
+                    $iStmt->execute([
+                        $reportId, $l['supplier_name'], $l['category_name'], $l['description'],
+                        (float)$l['quantity'], $l['unit'], (float)$l['unit_price'], (float)$l['total_price'], 1, $i,
                     ]);
                 }
 
@@ -636,7 +680,11 @@ try {
             $db = getDB();
             validateRequired($body, ['id']);
             $rStmt = $db->prepare("
-                SELECT r.*, q.customer_name, q.customer_email, q.customer_phone
+                SELECT r.*,
+                       q.customer_name, q.customer_email, q.customer_phone,
+                       q.base_price AS quote_base_price_ht,
+                       q.options_total AS quote_options_ht,
+                       q.total_price AS quote_total_ht
                 FROM pro_purchase_reports r
                 LEFT JOIN pro_quotes q ON q.id = r.quote_id
                 WHERE r.id = ?
@@ -645,25 +693,37 @@ try {
             $report = $rStmt->fetch();
             if (!$report) fail('Rapport introuvable', 404);
 
-            $iStmt = $db->prepare("SELECT * FROM pro_purchase_report_items WHERE report_id = ? ORDER BY supplier_name, display_order");
+            $vatRate = (float)env('VAT_RATE', 15);
+            $report['vat_rate']            = $vatRate;
+            $report['quote_base_price_ht'] = (float)($report['quote_base_price_ht'] ?? 0);
+            $report['quote_options_ht']    = (float)($report['quote_options_ht'] ?? 0);
+            $report['quote_total_ht']      = (float)($report['quote_total_ht'] ?? 0);
+            $report['quote_base_price_ttc']= round($report['quote_base_price_ht'] * (1 + $vatRate / 100), 2);
+            $report['quote_options_ttc']   = round($report['quote_options_ht']    * (1 + $vatRate / 100), 2);
+            $report['quote_total_ttc']     = round($report['quote_total_ht']      * (1 + $vatRate / 100), 2);
+
+            $iStmt = $db->prepare("SELECT * FROM pro_purchase_report_items WHERE report_id = ? ORDER BY is_option ASC, supplier_name, display_order");
             $iStmt->execute([(int)$body['id']]);
             $items = $iStmt->fetchAll();
 
-            $groups = [];
+            $buckets = ['base' => [], 'option' => []];
             foreach ($items as $item) {
-                $sName = $item['supplier_name'];
-                if (!isset($groups[$sName])) {
-                    $groups[$sName] = ['supplier_name' => $sName, 'items' => [], 'subtotal' => 0.0];
+                $sName  = $item['supplier_name'];
+                $bucket = ($item['is_option'] ?? 0) ? 'option' : 'base';
+                if (!isset($buckets[$bucket][$sName])) {
+                    $buckets[$bucket][$sName] = ['supplier_name' => $sName, 'items' => [], 'subtotal' => 0.0];
                 }
                 $item['is_ordered']  = (bool)$item['is_ordered'];
+                $item['is_option']   = (bool)($item['is_option'] ?? false);
                 $item['quantity']    = (float)$item['quantity'];
                 $item['unit_price']  = (float)$item['unit_price'];
                 $item['total_price'] = (float)$item['total_price'];
-                $groups[$sName]['items'][]   = $item;
-                $groups[$sName]['subtotal'] += (float)$item['total_price'];
+                $buckets[$bucket][$sName]['items'][]   = $item;
+                $buckets[$bucket][$sName]['subtotal'] += $item['total_price'];
             }
-            $report['groups']       = array_values($groups);
-            $report['total_amount'] = (float)$report['total_amount'];
+            $report['base_groups']   = array_values($buckets['base']);
+            $report['option_groups'] = array_values($buckets['option']);
+            $report['total_amount']  = (float)$report['total_amount'];
             ok($report);
             break;
         }
@@ -686,6 +746,23 @@ try {
             break;
         }
 
+        case 'delete_purchase_report': {
+            requireAdmin();
+            $db = getDB();
+            validateRequired($body, ['id']);
+            // Get the quote_id so we can reset boq_requested = 0 (allows re-generation)
+            $rStmt = $db->prepare("SELECT quote_id FROM pro_purchase_reports WHERE id = ?");
+            $rStmt->execute([(int)$body['id']]);
+            $row = $rStmt->fetch();
+            // CASCADE FK deletes items automatically
+            $db->prepare("DELETE FROM pro_purchase_reports WHERE id = ?")->execute([(int)$body['id']]);
+            if ($row) {
+                // Reset flag so the quote can have a new report generated
+                $db->prepare("UPDATE pro_quotes SET boq_requested = 0 WHERE id = ?")->execute([(int)$row['quote_id']]);
+            }
+            ok();
+            break;
+        }
 
         case 'get_discounts': {
             requireAdmin();

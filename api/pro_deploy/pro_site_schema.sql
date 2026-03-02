@@ -229,6 +229,7 @@ CREATE TABLE IF NOT EXISTS `pro_purchase_report_items` (
     `unit_price` DECIMAL(12,2) DEFAULT 0,
     `total_price` DECIMAL(12,2) DEFAULT 0,
     `is_ordered` TINYINT(1) DEFAULT 0,
+    `is_option` TINYINT(1) DEFAULT 0,
     `display_order` INT DEFAULT 0,
     FOREIGN KEY (`report_id`) REFERENCES `pro_purchase_reports`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -243,5 +244,15 @@ SET @col_exists = (
 SET @sql = IF(@col_exists > 0, 'SELECT 1', 'ALTER TABLE `pro_quotes` ADD COLUMN `boq_requested` TINYINT(1) DEFAULT 0 AFTER `valid_until`');
 PREPARE _stmt FROM @sql; EXECUTE _stmt; DEALLOCATE PREPARE _stmt;
 
-INSERT INTO `pro_schema_version` (`id`, `version`) VALUES (1, '1.5.0')
+-- Add is_option to pro_purchase_report_items if missing (v1.6.0 upgrade)
+SET @col_exists = (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'pro_purchase_report_items'
+      AND COLUMN_NAME = 'is_option'
+);
+SET @sql = IF(@col_exists > 0, 'SELECT 1', 'ALTER TABLE `pro_purchase_report_items` ADD COLUMN `is_option` TINYINT(1) DEFAULT 0 AFTER `is_ordered`');
+PREPARE _stmt FROM @sql; EXECUTE _stmt; DEALLOCATE PREPARE _stmt;
+
+INSERT INTO `pro_schema_version` (`id`, `version`) VALUES (1, '1.6.0')
 ON DUPLICATE KEY UPDATE `version` = VALUES(`version`), `applied_at` = NOW();

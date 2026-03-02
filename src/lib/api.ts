@@ -970,6 +970,10 @@ export const api = {
   updateReportStatus(id: number, status: 'in_progress' | 'completed') {
     return this.query('update_report_status', { id, status });
   },
+
+  deleteReport(id: number) {
+    return this.query('delete_purchase_report', { id });
+  },
 };
 
 export default api;
