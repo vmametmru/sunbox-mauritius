@@ -461,27 +461,68 @@ try {
                     $contactId = (int)$db->lastInsertId();
                 }
 
-                // Insert quote
-                $db->prepare("
-                    INSERT INTO pro_quotes
-                        (reference_number, contact_id, customer_name, customer_email, customer_phone,
-                         customer_address, customer_message, model_id, model_name, model_type,
-                         base_price, options_total, total_price, status, valid_until)
-                    VALUES (?,?,?,?,?, ?,?,?,?,?, ?,?,?,'pending',?)
-                ")->execute([
-                    $reference,
-                    $contactId,
-                    $customerName, $customerEmail, $customerPhone,
-                    $customerAddress,
-                    sanitize($body['customer_message'] ?? ''),
-                    (int)$body['model_id'],
-                    sanitize($body['model_name']),
-                    $modelType,
-                    (float)$body['base_price'],
-                    (float)($body['options_total'] ?? 0),
-                    (float)$body['total_price'],
-                    $validUntil,
-                ]);
+                // Insert quote (try with pool dimension columns first; fall back if migration not applied)
+                $nullFloat = fn($k) => isset($body[$k]) && $body[$k] !== null ? (float)$body[$k] : null;
+                $proInserted = false;
+                try {
+                    $db->prepare("
+                        INSERT INTO pro_quotes
+                            (reference_number, contact_id, customer_name, customer_email, customer_phone,
+                             customer_address, customer_message, model_id, model_name, model_type,
+                             base_price, options_total, total_price, status, valid_until,
+                             pool_shape,
+                             pool_longueur, pool_largeur, pool_profondeur,
+                             pool_longueur_la, pool_largeur_la, pool_profondeur_la,
+                             pool_longueur_lb, pool_largeur_lb, pool_profondeur_lb,
+                             pool_longueur_ta, pool_largeur_ta, pool_profondeur_ta,
+                             pool_longueur_tb, pool_largeur_tb, pool_profondeur_tb)
+                        VALUES (?,?,?,?,?, ?,?,?,?,?, ?,?,?,'pending',?,
+                                ?, ?,?,?, ?,?,?, ?,?,?, ?,?,?, ?,?,?)
+                    ")->execute([
+                        $reference,
+                        $contactId,
+                        $customerName, $customerEmail, $customerPhone,
+                        $customerAddress,
+                        sanitize($body['customer_message'] ?? ''),
+                        (int)$body['model_id'],
+                        sanitize($body['model_name']),
+                        $modelType,
+                        (float)$body['base_price'],
+                        (float)($body['options_total'] ?? 0),
+                        (float)$body['total_price'],
+                        $validUntil,
+                        isset($body['pool_shape']) ? sanitize($body['pool_shape']) : null,
+                        $nullFloat('pool_longueur'),    $nullFloat('pool_largeur'),    $nullFloat('pool_profondeur'),
+                        $nullFloat('pool_longueur_la'), $nullFloat('pool_largeur_la'), $nullFloat('pool_profondeur_la'),
+                        $nullFloat('pool_longueur_lb'), $nullFloat('pool_largeur_lb'), $nullFloat('pool_profondeur_lb'),
+                        $nullFloat('pool_longueur_ta'), $nullFloat('pool_largeur_ta'), $nullFloat('pool_profondeur_ta'),
+                        $nullFloat('pool_longueur_tb'), $nullFloat('pool_largeur_tb'), $nullFloat('pool_profondeur_tb'),
+                    ]);
+                    $proInserted = true;
+                } catch (PDOException $dimEx) { /* pool dimension columns not yet added – fall through */ }
+
+                if (!$proInserted) {
+                    $db->prepare("
+                        INSERT INTO pro_quotes
+                            (reference_number, contact_id, customer_name, customer_email, customer_phone,
+                             customer_address, customer_message, model_id, model_name, model_type,
+                             base_price, options_total, total_price, status, valid_until)
+                        VALUES (?,?,?,?,?, ?,?,?,?,?, ?,?,?,'pending',?)
+                    ")->execute([
+                        $reference,
+                        $contactId,
+                        $customerName, $customerEmail, $customerPhone,
+                        $customerAddress,
+                        sanitize($body['customer_message'] ?? ''),
+                        (int)$body['model_id'],
+                        sanitize($body['model_name']),
+                        $modelType,
+                        (float)$body['base_price'],
+                        (float)($body['options_total'] ?? 0),
+                        (float)$body['total_price'],
+                        $validUntil,
+                    ]);
+                }
                 $quoteId = (int)$db->lastInsertId();
 
                 // Update reference with actual quote ID for uniqueness guarantee
