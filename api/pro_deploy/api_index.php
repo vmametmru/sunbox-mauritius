@@ -740,26 +740,28 @@ try {
             // This fixes both old reports (stored real name) and handles the case where the
             // Sunbox DB hasn't been upgraded to v2.3.0 yet (replace_with_sunbox column missing).
             $sunboxReplacedNames = [];
+            $replaceError = null;
             try {
                 $sdb = getSunboxDB();
                 // Try with the replace_with_sunbox column; fall back gracefully if missing.
                 try {
-                    $rStmt = $sdb->query("SELECT name FROM suppliers WHERE replace_with_sunbox = 1");
+                    $rStmt = $sdb->query("SELECT name FROM suppliers WHERE COALESCE(replace_with_sunbox,0) = 1");
                     foreach ($rStmt->fetchAll() as $row) {
-                        $sunboxReplacedNames[$row['name']] = true;
+                        // Trim whitespace to handle any DB encoding differences
+                        $sunboxReplacedNames[trim((string)$row['name'])] = true;
                     }
-                } catch (\Throwable $ignored) {
-                    // Column doesn't exist yet (DB not upgraded) — no replacements applied
+                } catch (\Throwable $e2) {
+                    $replaceError = 'suppliers query: ' . $e2->getMessage();
                 }
-            } catch (\Throwable $ignored) {
-                // getSunboxDB() unavailable — no replacements applied
+            } catch (\Throwable $e1) {
+                $replaceError = 'getSunboxDB: ' . $e1->getMessage();
             }
 
             $buckets       = ['base' => [], 'option' => []];
             $totalAmountHT = 0.0;
             foreach ($items as $item) {
-                // Apply live "replace_with_sunbox" substitution — fixes old reports too
-                $rawName = $item['supplier_name'];
+                // Apply live "replace_with_sunbox" substitution — fixes old reports stored before the flag was added
+                $rawName = trim((string)($item['supplier_name'] ?? ''));
                 $sName   = isset($sunboxReplacedNames[$rawName]) ? 'Sunbox' : $rawName;
                 $bucket = ($item['is_option'] ?? 0) ? 'option' : 'base';
                 if (!isset($buckets[$bucket][$sName])) {
@@ -785,6 +787,9 @@ try {
             $report['total_amount_ht']  = round($totalAmountHT, 2);
             $report['total_amount_ttc'] = round($totalAmountHT * (1 + $vatRate / 100), 2);
             $report['total_amount']     = $report['total_amount_ht'];
+            if ($replaceError !== null && API_DEBUG) {
+                $report['_replace_error'] = $replaceError;
+            }
             ok($report);
             break;
         }

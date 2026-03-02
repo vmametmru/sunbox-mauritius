@@ -6,7 +6,7 @@ handleCORS();
 
 // Pro site deployment versions — increment these when templates or DB schema change.
 // PRO_FILE_VERSION must match define('PRO_FILE_VERSION', ...) in api/pro_deploy/api_config.php
-define('PRO_FILE_VERSION',      '1.9.0');
+define('PRO_FILE_VERSION',      '2.0.0');
 define('PRO_DB_SCHEMA_VERSION', '1.6.0');
 
 // Sunbox main database schema version.
@@ -546,8 +546,14 @@ try {
                 $sql .= " WHERE is_active = 1";
             }
             $sql .= " ORDER BY name ASC";
-            $stmt = $db->query($sql);
-            ok($stmt->fetchAll());
+            $rows = $db->query($sql)->fetchAll();
+            // PDO returns TINYINT(1) as string "0"/"1"; cast to int so JS treats 0 as falsy.
+            foreach ($rows as &$row) {
+                $row['is_active']          = (int)($row['is_active'] ?? 0);
+                $row['replace_with_sunbox'] = (int)($row['replace_with_sunbox'] ?? 0);
+            }
+            unset($row);
+            ok($rows);
             break;
         }
 
