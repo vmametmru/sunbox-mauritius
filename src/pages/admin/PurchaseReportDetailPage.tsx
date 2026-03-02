@@ -14,8 +14,12 @@ interface ReportItem {
   description: string;
   quantity: number;
   unit: string;
-  unit_price: number;
-  total_price: number;
+  unit_price: number;       // HT (legacy)
+  total_price: number;      // HT (legacy)
+  unit_price_ht: number;
+  unit_price_ttc: number;
+  total_price_ht: number;
+  total_price_ttc: number;
   is_ordered: boolean;
   is_option: boolean;
   display_order: number;
@@ -24,7 +28,9 @@ interface ReportItem {
 interface SupplierGroup {
   supplier_name: string;
   items: ReportItem[];
-  subtotal: number;
+  subtotal: number;         // HT (legacy)
+  subtotal_ht: number;
+  subtotal_ttc: number;
 }
 
 interface PurchaseReport {
@@ -34,7 +40,9 @@ interface PurchaseReport {
   model_name: string;
   customer_name: string;
   status: 'in_progress' | 'completed';
-  total_amount: number;
+  total_amount: number;        // HT (legacy)
+  total_amount_ht: number;
+  total_amount_ttc: number;
   created_at: string;
   // price summary fields
   vat_rate?: number;
@@ -70,9 +78,14 @@ function SupplierGroupsTable({
               <CardTitle className="text-sm font-semibold text-gray-800">
                 🏢 {group.supplier_name}
               </CardTitle>
-              <span className="text-sm font-bold text-orange-600">
-                Sous-total : {fmt(group.subtotal)}
-              </span>
+              <div className="text-right">
+                <span className="text-sm font-bold text-orange-600">
+                  Sous-total TTC : {fmt(group.subtotal_ttc ?? group.subtotal)}
+                </span>
+                <span className="text-xs text-gray-400 ml-2">
+                  (HT : {fmt(group.subtotal_ht ?? group.subtotal)})
+                </span>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="p-0">
@@ -85,8 +98,9 @@ function SupplierGroupsTable({
                     <th className="px-4 py-2 text-left text-sm font-medium text-gray-500">Description</th>
                     <th className="px-4 py-2 text-right text-sm font-medium text-gray-500">Qté</th>
                     <th className="px-4 py-2 text-left text-sm font-medium text-gray-500">Unité</th>
-                    <th className="px-4 py-2 text-right text-sm font-medium text-gray-500">P.U.</th>
-                    <th className="px-4 py-2 text-right text-sm font-medium text-gray-500">Total</th>
+                    <th className="px-4 py-2 text-right text-sm font-medium text-gray-500">P.U. HT</th>
+                    <th className="px-4 py-2 text-right text-sm font-medium text-gray-500">Total HT</th>
+                    <th className="px-4 py-2 text-right text-sm font-medium text-gray-500">Total TTC</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -107,8 +121,9 @@ function SupplierGroupsTable({
                       </td>
                       <td className="px-4 py-2 text-sm text-right">{item.quantity}</td>
                       <td className="px-4 py-2 text-sm text-gray-500">{item.unit}</td>
-                      <td className="px-4 py-2 text-sm text-right">{fmt(item.unit_price)}</td>
-                      <td className="px-4 py-2 text-sm text-right font-medium">{fmt(item.total_price)}</td>
+                      <td className="px-4 py-2 text-sm text-right">{fmt(item.unit_price_ht ?? item.unit_price)}</td>
+                      <td className="px-4 py-2 text-sm text-right">{fmt(item.total_price_ht ?? item.total_price)}</td>
+                      <td className="px-4 py-2 text-sm text-right font-medium text-orange-700">{fmt(item.total_price_ttc ?? item.total_price)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -217,8 +232,10 @@ export default function PurchaseReportDetailPage() {
   const allOptionItems  = report.option_groups.flatMap(g => g.items);
   const allItems        = [...allBaseItems, ...allOptionItems];
   const orderedItems    = allItems.filter(i => i.is_ordered);
-  const orderedAmount   = orderedItems.reduce((s, i) => s + i.total_price, 0);
-  const remainingAmount = allItems.filter(i => !i.is_ordered).reduce((s, i) => s + i.total_price, 0);
+  const orderedAmountTTC   = orderedItems.reduce((s, i) => s + (i.total_price_ttc ?? i.total_price), 0);
+  const remainingAmountTTC = allItems.filter(i => !i.is_ordered).reduce((s, i) => s + (i.total_price_ttc ?? i.total_price), 0);
+  const totalAmountTTC  = report.total_amount_ttc ?? report.total_amount;
+  const totalAmountHT   = report.total_amount_ht  ?? report.total_amount;
   const totalCount      = allItems.length;
   const orderedCount    = orderedItems.length;
   const vatRate         = report.vat_rate ?? 15;
@@ -321,8 +338,8 @@ export default function PurchaseReportDetailPage() {
                     </div>
                     <div className="bg-blue-50 rounded p-2 border border-blue-200">
                       <p className="text-xs text-gray-500">Coût Achats HT</p>
-                      <p className="font-bold text-blue-700">{fmt(report.total_amount)}</p>
-                      <p className="text-xs text-gray-400">Généré le {new Date(report.created_at).toLocaleDateString('fr-FR')}</p>
+                      <p className="font-bold text-blue-700">{fmt(totalAmountHT)}</p>
+                      <p className="text-xs text-gray-500">TTC ({vatRate}%): <span className="font-bold text-blue-600">{fmt(totalAmountTTC)}</span></p>
                     </div>
                   </div>
                 </div>
@@ -337,7 +354,7 @@ export default function PurchaseReportDetailPage() {
                 <CardContent className="p-3 flex justify-between items-center">
                   <div>
                     <p className="text-xs text-gray-500">Commandé ({orderedCount} articles)</p>
-                    <p className="text-lg font-bold text-green-700">{fmt(orderedAmount)}</p>
+                    <p className="text-lg font-bold text-green-700">{fmt(orderedAmountTTC)} TTC</p>
                   </div>
                   <CheckCircle className="h-6 w-6 text-green-500 opacity-60" />
                 </CardContent>
@@ -346,7 +363,7 @@ export default function PurchaseReportDetailPage() {
                 <CardContent className="p-3 flex justify-between items-center">
                   <div>
                     <p className="text-xs text-gray-500">À commander ({totalCount - orderedCount} articles)</p>
-                    <p className="text-lg font-bold text-amber-700">{fmt(remainingAmount)}</p>
+                    <p className="text-lg font-bold text-amber-700">{fmt(remainingAmountTTC)} TTC</p>
                   </div>
                   <Package className="h-6 w-6 text-amber-500 opacity-60" />
                 </CardContent>
@@ -371,6 +388,18 @@ export default function PurchaseReportDetailPage() {
                     Achats de Base
                   </h2>
                   <SupplierGroupsTable groups={report.base_groups} onToggle={toggleItem} />
+                  {/* Base subtotal */}
+                  {(() => {
+                    const ht  = report.base_groups.reduce((s, g) => s + (g.subtotal_ht  ?? g.subtotal), 0);
+                    const ttc = report.base_groups.reduce((s, g) => s + (g.subtotal_ttc ?? g.subtotal), 0);
+                    return (
+                      <div className="flex justify-end items-center gap-6 mt-2 px-4 py-2 bg-blue-50 border border-blue-200 rounded-lg text-sm">
+                        <span className="text-gray-500">Sous-total Achats de Base :</span>
+                        <span className="text-gray-700">HT&nbsp;<span className="font-semibold">{fmt(ht)}</span></span>
+                        <span className="text-blue-700 font-bold">TTC&nbsp;{fmt(ttc)}</span>
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
 
@@ -381,6 +410,18 @@ export default function PurchaseReportDetailPage() {
                     Achats Options
                   </h2>
                   <SupplierGroupsTable groups={report.option_groups} onToggle={toggleItem} />
+                  {/* Options subtotal */}
+                  {(() => {
+                    const ht  = report.option_groups.reduce((s, g) => s + (g.subtotal_ht  ?? g.subtotal), 0);
+                    const ttc = report.option_groups.reduce((s, g) => s + (g.subtotal_ttc ?? g.subtotal), 0);
+                    return (
+                      <div className="flex justify-end items-center gap-6 mt-2 px-4 py-2 bg-purple-50 border border-purple-200 rounded-lg text-sm">
+                        <span className="text-gray-500">Sous-total Achats Options :</span>
+                        <span className="text-gray-700">HT&nbsp;<span className="font-semibold">{fmt(ht)}</span></span>
+                        <span className="text-purple-700 font-bold">TTC&nbsp;{fmt(ttc)}</span>
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
 
@@ -388,15 +429,10 @@ export default function PurchaseReportDetailPage() {
               <Card className="bg-orange-50 border-orange-200">
                 <CardContent className="p-4">
                   <div className="flex justify-between items-center">
-                    <span className="text-lg font-bold text-gray-800">TOTAL ACHATS</span>
-                    <span className="text-2xl font-bold text-orange-600">{fmt(report.total_amount)}</span>
+                    <span className="text-lg font-bold text-gray-800">TOTAL ACHATS TTC</span>
+                    <span className="text-2xl font-bold text-orange-600">{fmt(totalAmountTTC)}</span>
                   </div>
-                  {hasOptionGroups && (
-                    <div className="flex justify-between text-sm text-gray-500 mt-1">
-                      <span>Base: {fmt(report.base_groups.reduce((s, g) => s + g.subtotal, 0))}</span>
-                      <span>Options: {fmt(report.option_groups.reduce((s, g) => s + g.subtotal, 0))}</span>
-                    </div>
-                  )}
+                  <p className="text-sm text-gray-500 mt-1">HT : {fmt(totalAmountHT)}</p>
                 </CardContent>
               </Card>
             </div>

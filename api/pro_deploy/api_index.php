@@ -576,7 +576,7 @@ try {
                 SELECT bc.name AS category_name,
                        bl.description, bl.quantity, bl.unit, bl.margin_percent,
                        COALESCE(pl.unit_price, bl.unit_cost_ht) AS unit_price,
-                       ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2) AS total_price,
+                       ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht), 2) AS total_price,
                        COALESCE(s.name, 'Fournisseur non défini') AS supplier_name,
                        bc.display_order AS cat_order, bl.display_order AS line_order
                 FROM boq_categories bc
@@ -607,7 +607,7 @@ try {
                         SELECT bc.name AS category_name,
                                bl.description, bl.quantity, bl.unit, bl.margin_percent,
                                COALESCE(pl.unit_price, bl.unit_cost_ht) AS unit_price,
-                               ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2) AS total_price,
+                               ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht), 2) AS total_price,
                                COALESCE(s.name, 'Fournisseur non défini') AS supplier_name,
                                bc.display_order AS cat_order, bl.display_order AS line_order
                         FROM boq_categories bc
@@ -706,24 +706,34 @@ try {
             $iStmt->execute([(int)$body['id']]);
             $items = $iStmt->fetchAll();
 
-            $buckets = ['base' => [], 'option' => []];
+            $buckets       = ['base' => [], 'option' => []];
+            $totalAmountHT = 0.0;
             foreach ($items as $item) {
                 $sName  = $item['supplier_name'];
                 $bucket = ($item['is_option'] ?? 0) ? 'option' : 'base';
                 if (!isset($buckets[$bucket][$sName])) {
-                    $buckets[$bucket][$sName] = ['supplier_name' => $sName, 'items' => [], 'subtotal' => 0.0];
+                    $buckets[$bucket][$sName] = ['supplier_name' => $sName, 'items' => [], 'subtotal_ht' => 0.0, 'subtotal_ttc' => 0.0];
                 }
-                $item['is_ordered']  = (bool)$item['is_ordered'];
-                $item['is_option']   = (bool)($item['is_option'] ?? false);
-                $item['quantity']    = (float)$item['quantity'];
-                $item['unit_price']  = (float)$item['unit_price'];
-                $item['total_price'] = (float)$item['total_price'];
-                $buckets[$bucket][$sName]['items'][]   = $item;
-                $buckets[$bucket][$sName]['subtotal'] += $item['total_price'];
+                $item['is_ordered']       = (bool)$item['is_ordered'];
+                $item['is_option']        = (bool)($item['is_option'] ?? false);
+                $item['quantity']         = (float)$item['quantity'];
+                $item['unit_price_ht']    = (float)$item['unit_price'];
+                $item['unit_price_ttc']   = round((float)$item['unit_price'] * (1 + $vatRate / 100), 2);
+                $item['total_price_ht']   = (float)$item['total_price'];
+                $item['total_price_ttc']  = round((float)$item['total_price'] * (1 + $vatRate / 100), 2);
+                $item['unit_price']       = $item['unit_price_ht'];
+                $item['total_price']      = $item['total_price_ht'];
+                $buckets[$bucket][$sName]['items'][]       = $item;
+                $buckets[$bucket][$sName]['subtotal_ht']  += $item['total_price_ht'];
+                $buckets[$bucket][$sName]['subtotal_ttc'] += $item['total_price_ttc'];
+                $buckets[$bucket][$sName]['subtotal']      = $buckets[$bucket][$sName]['subtotal_ht'];
+                $totalAmountHT += $item['total_price_ht'];
             }
-            $report['base_groups']   = array_values($buckets['base']);
-            $report['option_groups'] = array_values($buckets['option']);
-            $report['total_amount']  = (float)$report['total_amount'];
+            $report['base_groups']      = array_values($buckets['base']);
+            $report['option_groups']    = array_values($buckets['option']);
+            $report['total_amount_ht']  = round($totalAmountHT, 2);
+            $report['total_amount_ttc'] = round($totalAmountHT * (1 + $vatRate / 100), 2);
+            $report['total_amount']     = $report['total_amount_ht'];
             ok($report);
             break;
         }
