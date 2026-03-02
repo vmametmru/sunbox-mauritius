@@ -261,21 +261,20 @@ export default function PurchaseReportDetailPage() {
   return (
     <>
       <style>{`
+        @media screen {
+          #print-report-pdf { display: none; }
+        }
         @media print {
-          body * { visibility: hidden; }
-          #print-report-pdf, #print-report-pdf * { visibility: visible; }
-          #print-report-pdf { position: absolute; left: 0; top: 0; width: 100%; }
+          body > * { display: none !important; }
+          #print-report-pdf { display: block !important; }
           .no-print { display: none !important; }
-          .pdf-page { page-break-before: always; padding: 20px; }
+          .pdf-page { page-break-before: always; padding: 20mm 15mm; box-sizing: border-box; }
           .pdf-page:first-child { page-break-before: auto; }
         }
       `}</style>
 
       {/* ── Print-only per-supplier A4 layout ─────────────────────────────── */}
-      <div id="print-report-pdf" style={{ display: 'none' }}>
-        <style>{`
-          @media print { #print-report-pdf { display: block !important; } }
-        `}</style>
+      <div id="print-report-pdf">
         {pdfPages.map((group, idx) => (
             <div key={`${group.supplier_name}-${idx}`} className="pdf-page">
               {/* Page header */}
