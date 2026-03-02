@@ -7,6 +7,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { ArrowLeft, Printer, CheckCircle, Package, RefreshCw, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
+import { useSiteSettings } from '@/hooks/use-settings';
 
 interface ReportItem {
   id: number;
@@ -141,6 +142,15 @@ export default function PurchaseReportDetailPage() {
   const navigate  = useNavigate();
   const location  = useLocation();
   const { toast } = useToast();
+  const { data: siteSettings } = useSiteSettings();
+
+  const isProSite = typeof window !== 'undefined' && !!(window as any).__PRO_SITE__;
+  const logoUrl = isProSite
+    ? ((window as any).__PRO_LOGO_URL__ || '')
+    : (siteSettings?.pdf_logo || siteSettings?.site_logo || '');
+  const companyName = isProSite
+    ? ((window as any).__PRO_COMPANY_NAME__ || '')
+    : 'Sunbox';
 
   const isAdmin  = location.pathname.startsWith('/admin');
   const backPath = isAdmin ? '/admin/reports' : '/pro/reports';
@@ -241,6 +251,13 @@ export default function PurchaseReportDetailPage() {
   const vatRate         = report.vat_rate ?? 15;
   const hasOptionGroups = report.option_groups.length > 0;
 
+  // Build flat pages array for PDF (each supplier = 1 page)
+  const pdfPages = [
+    ...report.base_groups.map(g => ({ ...g, section: 'Base' as const })),
+    ...report.option_groups.map(g => ({ ...g, section: 'Options' as const })),
+  ];
+  const totalPages = pdfPages.length;
+
   return (
     <>
       <style>{`
@@ -259,30 +276,48 @@ export default function PurchaseReportDetailPage() {
         <style>{`
           @media print { #print-report-pdf { display: block !important; } }
         `}</style>
-        {[...report.base_groups.map(g => ({ ...g, section: 'Base' })),
-           ...report.option_groups.map(g => ({ ...g, section: 'Options' }))]
-          .map((group, idx) => (
+        {pdfPages.map((group, idx) => (
             <div key={`${group.supplier_name}-${idx}`} className="pdf-page">
               {/* Page header */}
               <div style={{ borderBottom: '2px solid #f97316', paddingBottom: '8px', marginBottom: '12px' }}>
-                <h1 style={{ fontSize: '18px', fontWeight: 'bold', textAlign: 'center', color: '#ea580c' }}>
-                  Rapport d'Achats
-                </h1>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginTop: '6px', color: '#374151' }}>
+                {/* Logo + title row */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                  {logoUrl ? (
+                    <img src={logoUrl} alt={companyName} style={{ height: '36px', width: 'auto', objectFit: 'contain' }} />
+                  ) : (
+                    <span style={{ fontSize: '13px', fontWeight: 700, color: '#ea580c' }}>{companyName}</span>
+                  )}
+                  <h1 style={{ fontSize: '18px', fontWeight: 'bold', textAlign: 'center', color: '#ea580c', flex: 1, margin: '0 12px' }}>
+                    Rapport d'Achats
+                  </h1>
+                  {/* Page numbering */}
+                  <span style={{ fontSize: '11px', color: '#6b7280', whiteSpace: 'nowrap' }}>
+                    Page {idx + 1}/{totalPages}
+                  </span>
+                </div>
+                {/* Quote info row */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#374151' }}>
                   <span><strong>Client :</strong> {report.customer_name}</span>
                   <span><strong>Modèle :</strong> {report.model_name}</span>
                   <span><strong>Réf. :</strong> {report.quote_reference}</span>
                 </div>
               </div>
-              {/* Supplier name */}
-              <h2 style={{ fontSize: '14px', fontWeight: '700', marginBottom: '8px', color: '#1f2937' }}>
-                🏢 {group.supplier_name}
-                {group.section === 'Options' && (
-                  <span style={{ fontSize: '11px', fontWeight: 'normal', marginLeft: '8px', color: '#7c3aed' }}>
-                    (Options)
-                  </span>
-                )}
-              </h2>
+
+              {/* Section badge + Supplier name */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+                <span style={{
+                  fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '4px',
+                  background: group.section === 'Options' ? '#ede9fe' : '#dbeafe',
+                  color: group.section === 'Options' ? '#7c3aed' : '#1d4ed8',
+                  textTransform: 'uppercase', letterSpacing: '0.05em',
+                }}>
+                  {group.section === 'Options' ? 'Achats Options' : 'Achats de Base'}
+                </span>
+                <h2 style={{ fontSize: '14px', fontWeight: '700', color: '#1f2937', margin: 0 }}>
+                  🏢 {group.supplier_name}
+                </h2>
+              </div>
+
               {/* Items table */}
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
                 <thead>
