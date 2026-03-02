@@ -2693,6 +2693,13 @@ try {
 
             $domain       = (string)$profile['domain'];
             $apiToken     = (string)$profile['api_token'];
+            // Ensure the pro user always has a valid API token before deploying.
+            // This handles users created before the api_token column was added.
+            if ($apiToken === '') {
+                $apiToken = bin2hex(random_bytes(32));
+                $db->prepare("UPDATE professional_profiles SET api_token = ? WHERE user_id = ?")
+                   ->execute([$apiToken, $userId]);
+            }
             $companyName  = (string)$profile['company_name'];
             $dbName       = (string)($profile['db_name'] ?? '');
             $passwordHash = (string)($profile['password_hash'] ?? '');

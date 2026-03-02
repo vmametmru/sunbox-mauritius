@@ -153,7 +153,7 @@ export default function UsersPage() {
           const next = new Set(prev);
           for (const ov of list) {
             const mid = Number(ov.model_id);
-            if (!ov.is_enabled) next.delete(mid);
+            if (!Number(ov.is_enabled)) next.delete(mid);
             else next.add(mid);
           }
           return next;

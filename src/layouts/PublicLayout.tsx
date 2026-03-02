@@ -13,7 +13,7 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
     ? ((window as any).__PRO_COMPANY_NAME__ || '')
     : 'Sunbox';
   const siteSlogan = isProSite ? '' : (settings?.site_slogan || 'container home - swimming-pools');
-  const siteUnderConstruction = !isProSite && settings?.site_under_construction === 'true';
+  const siteUnderConstruction = settings?.site_under_construction === 'true';
   const constructionMessage = settings?.under_construction_message || '';
 
   return (
