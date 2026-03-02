@@ -107,23 +107,23 @@ function SupplierGroupsTable({
                   {group.items.map(item => (
                     <tr key={item.id}
                       className={item.is_ordered ? 'bg-green-50' : 'hover:bg-gray-50'}>
-                      <td className="px-4 py-2 no-print">
+                      <td className="px-3 py-1.5 no-print">
                         <Checkbox
                           checked={item.is_ordered}
                           onCheckedChange={() => onToggle(item.id)}
                         />
                       </td>
-                      <td className="px-4 py-2 text-sm text-gray-600">{item.category_name}</td>
-                      <td className="px-4 py-2 text-sm font-medium">
+                      <td className="px-3 py-1.5 text-xs text-gray-600">{item.category_name}</td>
+                      <td className="px-3 py-1.5 text-xs font-medium">
                         {item.is_ordered
                           ? <span className="line-through text-gray-400">{item.description}</span>
                           : item.description}
                       </td>
-                      <td className="px-4 py-2 text-sm text-right">{item.quantity}</td>
-                      <td className="px-4 py-2 text-sm text-gray-500">{item.unit}</td>
-                      <td className="px-4 py-2 text-sm text-right">{fmt(item.unit_price_ht ?? item.unit_price)}</td>
-                      <td className="px-4 py-2 text-sm text-right">{fmt(item.total_price_ht ?? item.total_price)}</td>
-                      <td className="px-4 py-2 text-sm text-right font-medium text-orange-700">{fmt(item.total_price_ttc ?? item.total_price)}</td>
+                      <td className="px-3 py-1.5 text-xs text-right">{item.quantity}</td>
+                      <td className="px-3 py-1.5 text-xs text-gray-500">{item.unit}</td>
+                      <td className="px-3 py-1.5 text-xs text-right">{fmt(item.unit_price_ht ?? item.unit_price)}</td>
+                      <td className="px-3 py-1.5 text-xs text-right">{fmt(item.total_price_ht ?? item.total_price)}</td>
+                      <td className="px-3 py-1.5 text-xs text-right font-medium text-orange-700">{fmt(item.total_price_ttc ?? item.total_price)}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -1386,9 +1386,9 @@ try {
                 $item['is_option']         = (bool)($item['is_option'] ?? false);
                 $item['quantity']          = (float)$item['quantity'];
                 $item['unit_price_ht']     = (float)$item['unit_price'];
-                $item['unit_price_ttc']    = round((float)$item['unit_price'] * (1 + $vatRate / 100), 2);
-                $item['total_price_ht']    = (float)$item['total_price'];
-                $item['total_price_ttc']   = round((float)$item['total_price'] * (1 + $vatRate / 100), 2);
+                $item['unit_price_ttc']    = round($item['unit_price_ht'] * (1 + $vatRate / 100), 2);
+                $item['total_price_ht']    = round($item['unit_price_ht'] * $item['quantity'], 2);
+                $item['total_price_ttc']   = round($item['total_price_ht'] * (1 + $vatRate / 100), 2);
                 // keep legacy keys for backwards compat
                 $item['unit_price']        = $item['unit_price_ht'];
                 $item['total_price']       = $item['total_price_ht'];
