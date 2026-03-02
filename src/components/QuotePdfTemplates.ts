@@ -177,12 +177,31 @@ function pdfOptBlock(opts: QuotePdfData['options']): string {
   </div>`).join('');
 }
 
-/** Photos in a compact side-by-side layout for the model section */
-function pdfPhotos(photo?: string, plan?: string): string {
-  if (!photo && !plan) return '';
+/**
+ * Photos + optional pool-dimensions panel in a single fixed-height row.
+ * When a dims panel is provided (pool quotes): [photo | plan | dims] at height:120px.
+ * Without dims (container / free quotes): original side-by-side layout unchanged.
+ */
+function pdfModelRow(photo: string | undefined, plan: string | undefined, dimPanel?: string): string {
+  const hasPhoto = !!photo;
+  const hasPlan  = !!plan;
+  const hasDim   = !!dimPanel;
+
+  if (!hasPhoto && !hasPlan && !hasDim) return '';
+
+  if (hasDim) {
+    const photoCols = [
+      hasPhoto ? `<img src="${photo}" style="flex:1;height:120px;object-fit:cover;border-radius:4px;min-width:0;" alt="Photo" />` : '',
+      hasPlan  ? `<img src="${plan}"  style="flex:1;height:120px;object-fit:cover;border-radius:4px;min-width:0;" alt="Plan"  />` : '',
+      `<div style="flex:1;height:120px;min-width:0;">${dimPanel}</div>`,
+    ].filter(Boolean).join('');
+    return `<div style="display:flex;gap:6px;margin-top:8px;height:120px;">${photoCols}</div>`;
+  }
+
+  // No dimensions panel – original 2-photo layout (container / free quotes)
   return `<div style="display:flex;gap:8px;margin-top:8px;">
-    ${photo ? `<img src="${photo}" style="width:${plan ? '48%' : '70%'};max-height:120px;object-fit:cover;border-radius:4px;" alt="Photo" />` : ''}
-    ${plan ? `<img src="${plan}" style="width:${photo ? '48%' : '70%'};max-height:120px;object-fit:cover;border-radius:4px;" alt="Plan" />` : ''}
+    ${hasPhoto ? `<img src="${photo}" style="width:${hasPlan ? '48%' : '70%'};max-height:120px;object-fit:cover;border-radius:4px;" alt="Photo" />` : ''}
+    ${hasPlan  ? `<img src="${plan}"  style="width:${hasPhoto ? '48%' : '70%'};max-height:120px;object-fit:cover;border-radius:4px;" alt="Plan"  />` : ''}
   </div>`;
 }
 
@@ -242,72 +261,71 @@ function fmtM3(v: number): string {
 }
 
 /** Render pool dimensions block for pool quotes: dimensions, surface m², volume m³, périmètre m */
-function pdfPoolDimensions(data: QuotePdfData, accentColor: string, divider: string): string {
+function pdfPoolDimensions(data: QuotePdfData, sectionLabelColor: string): string {
   if (data.model_type !== 'pool') return '';
 
   const shape = (data.pool_shape || 'Rectangulaire').toUpperCase();
 
   const row = (label: string, value: string) =>
-    `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid ${divider};">
-      <span style="font-size:11px;color:#6b7280;">${label}</span>
-      <span style="font-size:11px;font-weight:600;color:#111827;">${value}</span>
+    `<div style="display:flex;justify-content:space-between;padding:1px 0;">
+      <span style="font-size:10px;color:#6b7280;">${label}</span>
+      <span style="font-size:10px;font-weight:600;color:#111827;">${value}</span>
     </div>`;
 
-  let html = `<div style="margin-top:10px;">
-    <div style="font-size:12px;font-weight:700;color:${accentColor};margin-bottom:6px;">Dimensions de la piscine</div>
-    <div style="background:#f9fafb;border:1px solid ${divider};border-radius:4px;padding:8px 12px;">`;
+  let inner = '';
 
   if (shape === 'L') {
     const la = data.pool_longueur_la ?? 0, lwa = data.pool_largeur_la ?? 0, da = data.pool_profondeur_la ?? 0;
     const lb = data.pool_longueur_lb ?? 0, lwb = data.pool_largeur_lb ?? 0, db_ = data.pool_profondeur_lb ?? 0;
     const surface = la * lwa + lb * lwb;
     const volume  = la * lwa * da + lb * lwb * db_;
-    html += `<div style="font-size:11px;font-weight:700;color:#374151;margin-bottom:4px;">Forme : L</div>`;
-    html += `<div style="font-size:10px;color:#6b7280;margin-bottom:2px;">Partie A</div>`;
-    html += row('Longueur A', fmtDim(la));
-    html += row('Largeur A',  fmtDim(lwa));
-    html += row('Profondeur A', fmtDim(da));
-    html += `<div style="font-size:10px;color:#6b7280;margin-top:6px;margin-bottom:2px;">Partie B</div>`;
-    html += row('Longueur B', fmtDim(lb));
-    html += row('Largeur B',  fmtDim(lwb));
-    html += row('Profondeur B', fmtDim(db_));
-    if (surface > 0) html += row('Surface totale', fmtM2(surface));
-    if (volume  > 0) html += row('Volume total',   fmtM3(volume));
+    inner += `<div style="font-size:9px;color:#6b7280;font-weight:600;margin-bottom:1px;">Partie A</div>`;
+    inner += row('Longueur A',   fmtDim(la));
+    inner += row('Largeur A',    fmtDim(lwa));
+    inner += row('Profondeur A', fmtDim(da));
+    inner += `<div style="font-size:9px;color:#6b7280;font-weight:600;margin-top:3px;margin-bottom:1px;">Partie B</div>`;
+    inner += row('Longueur B',   fmtDim(lb));
+    inner += row('Largeur B',    fmtDim(lwb));
+    inner += row('Profondeur B', fmtDim(db_));
+    if (surface > 0) inner += row('Surface totale', fmtM2(surface));
+    if (volume  > 0) inner += row('Volume total',   fmtM3(volume));
   } else if (shape === 'T') {
     const ta = data.pool_longueur_ta ?? 0, twa = data.pool_largeur_ta ?? 0, tda = data.pool_profondeur_ta ?? 0;
     const tb = data.pool_longueur_tb ?? 0, twb = data.pool_largeur_tb ?? 0, tdb = data.pool_profondeur_tb ?? 0;
     const surface = ta * twa + tb * twb;
     const volume  = ta * twa * tda + tb * twb * tdb;
-    html += `<div style="font-size:11px;font-weight:700;color:#374151;margin-bottom:4px;">Forme : T</div>`;
-    html += `<div style="font-size:10px;color:#6b7280;margin-bottom:2px;">Partie A</div>`;
-    html += row('Longueur A', fmtDim(ta));
-    html += row('Largeur A',  fmtDim(twa));
-    html += row('Profondeur A', fmtDim(tda));
-    html += `<div style="font-size:10px;color:#6b7280;margin-top:6px;margin-bottom:2px;">Partie B</div>`;
-    html += row('Longueur B', fmtDim(tb));
-    html += row('Largeur B',  fmtDim(twb));
-    html += row('Profondeur B', fmtDim(tdb));
-    if (surface > 0) html += row('Surface totale', fmtM2(surface));
-    if (volume  > 0) html += row('Volume total',   fmtM3(volume));
+    inner += `<div style="font-size:9px;color:#6b7280;font-weight:600;margin-bottom:1px;">Partie A</div>`;
+    inner += row('Longueur A',   fmtDim(ta));
+    inner += row('Largeur A',    fmtDim(twa));
+    inner += row('Profondeur A', fmtDim(tda));
+    inner += `<div style="font-size:9px;color:#6b7280;font-weight:600;margin-top:3px;margin-bottom:1px;">Partie B</div>`;
+    inner += row('Longueur B',   fmtDim(tb));
+    inner += row('Largeur B',    fmtDim(twb));
+    inner += row('Profondeur B', fmtDim(tdb));
+    if (surface > 0) inner += row('Surface totale', fmtM2(surface));
+    if (volume  > 0) inner += row('Volume total',   fmtM3(volume));
   } else {
-    // Rectangular (default)
+    // Rectangular (default) – and any other named shape
     const l = data.pool_longueur ?? 0, w = data.pool_largeur ?? 0, d = data.pool_profondeur ?? 0;
     const surface   = l * w;
     const volume    = l * w * d;
     const perimetre = 2 * (l + w);
     if (shape !== 'RECTANGULAIRE') {
-      html += `<div style="font-size:11px;font-weight:700;color:#374151;margin-bottom:4px;">Forme : ${esc(data.pool_shape || 'Rectangulaire')}</div>`;
+      inner += `<div style="font-size:9px;font-weight:700;color:#374151;margin-bottom:2px;">Forme : ${esc(data.pool_shape || 'Rectangulaire')}</div>`;
     }
-    html += row('Longueur',   fmtDim(l));
-    html += row('Largeur',    fmtDim(w));
-    html += row('Profondeur', fmtDim(d));
-    if (surface   > 0) html += row('Surface',    fmtM2(surface));
-    if (volume    > 0) html += row('Volume',      fmtM3(volume));
-    if (perimetre > 0) html += row('Périmètre',   fmtDim(perimetre));
+    inner += row('Longueur',   fmtDim(l));
+    inner += row('Largeur',    fmtDim(w));
+    inner += row('Profondeur', fmtDim(d));
+    if (surface   > 0) inner += row('Surface',    fmtM2(surface));
+    if (volume    > 0) inner += row('Volume',      fmtM3(volume));
+    if (perimetre > 0) inner += row('Périmètre',   fmtDim(perimetre));
   }
 
-  html += `</div></div>`;
-  return html;
+  // Title style matches "Client" / "Modèle" labels: 13px, 700, sectionLabelColor
+  return `<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;padding:6px 8px;height:100%;box-sizing:border-box;overflow:hidden;">
+    <div style="font-size:13px;font-weight:700;color:${sectionLabelColor};margin-bottom:4px;">Dimensions</div>
+    ${inner}
+  </div>`;
 }
 
 // ─── Internal template builder ──────────────────────────────────────────────
@@ -382,8 +400,7 @@ export function buildTemplate(
         </div>
         <div style="flex:1.3;">
           ${modelTitle ? `<div style="font-size:13px;font-weight:700;color:${theme.sectionLabelColor};margin-bottom:6px;">Modèle : <span style="font-weight:400;">${modelTitle}</span></div>` : ''}
-          ${pdfPhotos(data.photo_url, data.plan_url)}
-          ${pdfPoolDimensions(data, theme.accent, div)}
+          ${pdfModelRow(data.photo_url, data.plan_url, pdfPoolDimensions(data, theme.sectionLabelColor))}
         </div>
       </div>
       <div style="border-bottom:1px solid ${div};margin:8px 40px 0;"></div>
