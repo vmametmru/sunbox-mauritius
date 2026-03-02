@@ -52,6 +52,12 @@ import ProSettingsPage from "./pages/pro/ProSettingsPage";
 import ProModelRequestPage from "./pages/pro/ProModelRequestPage";
 import ProModelsOverridePage from "./pages/pro/ProModelsOverridePage";
 import RequirePro from "./components/RequirePro";
+// Pro site admin pages (reuse existing admin pages — all calls go to API_BASE_URL = pro site's own API)
+import ProAdminContactsPage from "./pages/admin/ContactsPage";
+import ProAdminDiscountsPage from "./pages/admin/DiscountsPage";
+import ProAdminEmailPage from "./pages/admin/EmailSettingsPage";
+import ProAdminPaymentsPage from "./pages/admin/PaymentsPage";
+import ProAdminSitePage from "./pages/admin/SiteSettingsPage";
 
 const queryClient = new QueryClient();
 
@@ -109,6 +115,12 @@ const App = () => (
                   <Route path="model-request" element={<ProModelRequestPage />} />
                   <Route path="models" element={<ProModelsOverridePage />} />
                   <Route path="settings" element={<ProSettingsPage />} />
+                  {/* Pro site admin pages (only shown in deployed pro site via ProLayout grouped nav) */}
+                  <Route path="contacts" element={<ProAdminContactsPage />} />
+                  <Route path="discounts" element={<ProAdminDiscountsPage />} />
+                  <Route path="email" element={<ProAdminEmailPage />} />
+                  <Route path="payments" element={<ProAdminPaymentsPage />} />
+                  <Route path="site" element={<ProAdminSitePage />} />
                 </Route>
               </Route>
 

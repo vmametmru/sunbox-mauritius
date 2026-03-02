@@ -82,6 +82,53 @@ SET @col_exists = (
 SET @sql = IF(@col_exists > 0, 'SELECT 1', 'ALTER TABLE `pro_contacts` ADD COLUMN `company` VARCHAR(255) DEFAULT `""` AFTER `address`');
 PREPARE _stmt FROM @sql; EXECUTE _stmt; DEALLOCATE PREPARE _stmt;
 
+-- ── Discounts (pro's own promotional discounts) ───────────────────────────────
+CREATE TABLE IF NOT EXISTS `pro_discounts` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `name` VARCHAR(255) NOT NULL,
+    `description` TEXT,
+    `discount_type` ENUM('percentage', 'fixed') NOT NULL DEFAULT 'percentage',
+    `discount_value` DECIMAL(10,2) NOT NULL DEFAULT 0,
+    `apply_to` ENUM('base_price', 'options', 'both') NOT NULL DEFAULT 'both',
+    `start_date` DATE NOT NULL,
+    `end_date` DATE NOT NULL,
+    `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+    `model_ids` JSON DEFAULT NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ── Email templates (pro's own email templates) ────────────────────────────────
+CREATE TABLE IF NOT EXISTS `pro_email_templates` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `template_key` VARCHAR(100) NOT NULL,
+    `template_type` ENUM('quote','notification','password_reset','contact','status_change','other') NOT NULL DEFAULT 'other',
+    `name` VARCHAR(255) NOT NULL,
+    `subject` VARCHAR(500) NOT NULL,
+    `body_html` LONGTEXT NOT NULL,
+    `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+    `is_default` TINYINT(1) NOT NULL DEFAULT 0,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY `uq_template_key` (`template_key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ── Email signatures (pro's own email signatures) ──────────────────────────────
+CREATE TABLE IF NOT EXISTS `pro_email_signatures` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `signature_key` VARCHAR(100) NOT NULL,
+    `name` VARCHAR(255) NOT NULL,
+    `description` TEXT,
+    `body_html` LONGTEXT NOT NULL,
+    `logo_url` VARCHAR(500) DEFAULT '',
+    `photo_url` VARCHAR(500) DEFAULT '',
+    `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+    `is_default` TINYINT(1) NOT NULL DEFAULT 0,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY `uq_signature_key` (`signature_key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- ── Default settings (safe to re-run: ON DUPLICATE KEY UPDATE) ─────────────────
 INSERT INTO `pro_settings` (`setting_key`, `setting_value`, `setting_group`) VALUES
 ('vat_rate',               '15',              'general'),

@@ -2738,11 +2738,12 @@ try {
                 ];
 
                 $filesToDeploy = [
-                    'api_config.php'   => $siteDir . '/api/config.php',
-                    'api_index.php'    => $siteDir . '/api/index.php',
-                    'api_pro_auth.php' => $siteDir . '/api/pro_auth.php',
-                    'api_htaccess'     => $siteDir . '/api/.htaccess',
-                    'htaccess'         => $siteDir . '/.htaccess',
+                    'api_config.php'    => $siteDir . '/api/config.php',
+                    'api_index.php'     => $siteDir . '/api/index.php',
+                    'api_pro_auth.php'  => $siteDir . '/api/pro_auth.php',
+                    'api_upload_logo.php' => $siteDir . '/api/upload_logo.php',
+                    'api_htaccess'      => $siteDir . '/api/.htaccess',
+                    'htaccess'          => $siteDir . '/.htaccess',
                 ];
                 foreach ($filesToDeploy as $tpl => $dest) {
                     $tplPath = $templateDir . '/' . $tpl;

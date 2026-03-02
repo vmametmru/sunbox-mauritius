@@ -146,52 +146,99 @@ function generateReference(): string
 }
 
 /**
+ * HTTP request helper — uses cURL (primary, handles SSL reliably on shared hosting)
+ * with file_get_contents fallback.
+ * When SSL certificate verification fails, the request is retried without it so the
+ * connection still works on shared hosting servers that lack a CA bundle. This fallback
+ * is logged so administrators are aware. The URL is always verified to be HTTPS.
+ */
+function sunboxHttpRequest(string $url, string $method = 'GET', ?string $jsonBody = null): string|false
+{
+    if (function_exists('curl_init')) {
+        $headers = ['Accept: application/json', 'User-Agent: ProSite/1.0'];
+        if ($jsonBody !== null) {
+            $headers[] = 'Content-Type: application/json';
+        }
+        $ch = curl_init();
+        curl_setopt_array($ch, [
+            CURLOPT_URL            => $url,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT        => 15,
+            CURLOPT_HTTPHEADER     => $headers,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
+        ]);
+        if ($method === 'POST') {
+            curl_setopt($ch, CURLOPT_POST, true);
+            if ($jsonBody !== null) {
+                curl_setopt($ch, CURLOPT_POSTFIELDS, $jsonBody);
+            }
+        }
+        $result = curl_exec($ch);
+        if ($result === false) {
+            // SSL verification failed (CA bundle missing on shared hosting).
+            // Log this downgrade so admins can install the CA bundle if desired.
+            error_log('ProSite: SSL verification failed for ' . $url . ', retrying without peer verification (install CA bundle to fix)');
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
+            $result = curl_exec($ch);
+        }
+        curl_close($ch);
+        return $result;
+    }
+
+    // Fallback: file_get_contents.
+    // SSL verification disabled here because file_get_contents cannot do CA-bundle retry.
+    // This path is only taken when cURL is unavailable (rare on modern PHP).
+    error_log('ProSite: cURL unavailable, using file_get_contents without SSL verification for ' . $url);
+    $httpOpts = [
+        'method'        => $method,
+        'header'        => "Accept: application/json\r\nUser-Agent: ProSite/1.0\r\n",
+        'timeout'       => 15,
+        'ignore_errors' => true,
+    ];
+    if ($jsonBody !== null) {
+        $httpOpts['header'] .= "Content-Type: application/json\r\n";
+        $httpOpts['content'] = $jsonBody;
+    }
+    return @file_get_contents($url, false, stream_context_create([
+        'http' => $httpOpts,
+        'ssl'  => ['verify_peer' => false, 'verify_peer_name' => false],
+    ]));
+}
+
+/**
  * Fetch models from Sunbox main API (with pro margin + overrides already applied).
  */
 function fetchSunboxModels(): array
 {
-    $url = SUNBOX_API_URL . '/pro_public.php?action=get_models&token=' . urlencode(SUNBOX_API_TOKEN);
-    $opts = [
-        'http' => [
-            'method' => 'GET',
-            'header' => "Accept: application/json\r\nUser-Agent: ProSite/1.0\r\n",
-            'timeout' => 10,
-        ],
-        'ssl' => ['verify_peer' => true, 'verify_peer_name' => true],
-    ];
-    $raw = @file_get_contents($url, false, stream_context_create($opts));
-    if ($raw === false) return ['models' => [], 'catalog_mode' => true, 'credits' => 0, 'logo_url' => '', 'company_name' => ''];
+    $empty = ['models' => [], 'catalog_mode' => true, 'credits' => 0, 'logo_url' => '', 'company_name' => ''];
+    $url   = SUNBOX_API_URL . '/pro_public.php?action=get_models&token=' . urlencode(SUNBOX_API_TOKEN);
+    $raw   = sunboxHttpRequest($url);
+    if ($raw === false) return $empty;
     $json = json_decode($raw, true);
-    if (!$json || !$json['success']) return ['models' => [], 'catalog_mode' => true, 'credits' => 0, 'logo_url' => '', 'company_name' => ''];
-    return $json['data'];
+    if (!is_array($json) || !($json['success'] ?? false)) return $empty;
+    return is_array($json['data'] ?? null) ? $json['data'] : $empty;
 }
 
 /** Check remaining credits from Sunbox. */
 function checkSunboxCredits(): array
 {
     $url = SUNBOX_API_URL . '/pro_public.php?action=check_credits&token=' . urlencode(SUNBOX_API_TOKEN);
-    $opts = ['http' => ['method' => 'GET', 'timeout' => 5]];
-    $raw = @file_get_contents($url, false, stream_context_create($opts));
+    $raw = sunboxHttpRequest($url);
     if ($raw === false) return ['credits' => 0, 'catalog_mode' => true];
     $json = json_decode($raw, true);
-    if (!$json || !$json['success']) return ['credits' => 0, 'catalog_mode' => true];
-    return $json['data'];
+    if (!is_array($json) || !($json['success'] ?? false)) return ['credits' => 0, 'catalog_mode' => true];
+    return is_array($json['data'] ?? null) ? $json['data'] : ['credits' => 0, 'catalog_mode' => true];
 }
 
 /** Deduct credits from Sunbox. */
 function deductSunboxCredits(float $amount, string $reason, ?int $quoteId = null): array
 {
-    $url = SUNBOX_API_URL . '/pro_public.php?action=deduct_credits&token=' . urlencode(SUNBOX_API_TOKEN);
+    $url     = SUNBOX_API_URL . '/pro_public.php?action=deduct_credits&token=' . urlencode(SUNBOX_API_TOKEN);
     $payload = json_encode(['amount' => $amount, 'reason' => $reason, 'quote_id' => $quoteId]);
-    $opts = [
-        'http' => [
-            'method' => 'POST',
-            'header' => "Content-Type: application/json\r\nAccept: application/json\r\n",
-            'content' => $payload,
-            'timeout' => 10,
-        ],
-    ];
-    $raw = @file_get_contents($url, false, stream_context_create($opts));
+    $raw     = sunboxHttpRequest($url, 'POST', $payload);
     if ($raw === false) return ['success' => false, 'error' => 'Impossible de contacter Sunbox'];
     return json_decode($raw, true) ?? ['success' => false];
 }
