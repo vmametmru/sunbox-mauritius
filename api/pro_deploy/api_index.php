@@ -770,6 +770,47 @@ try {
             break;
         }
 
+        // ── CREDITS (direct from Sunbox DB — no HTTP) ─────────────────────────
+        case 'get_pro_credits': {
+            requireAdmin();
+            try {
+                $balance = checkCredits();
+                $sdb = getSunboxDB();
+                $txStmt = $sdb->prepare("
+                    SELECT id, amount, reason, quote_id, balance_after, created_at
+                    FROM professional_credit_transactions
+                    WHERE user_id = ?
+                    ORDER BY created_at DESC
+                    LIMIT 20
+                ");
+                $txStmt->execute([SUNBOX_USER_ID]);
+                $transactions = $txStmt->fetchAll();
+                ok([
+                    'credits'      => $balance['credits'],
+                    'catalog_mode' => $balance['catalog_mode'],
+                    'transactions' => $transactions,
+                ]);
+            } catch (\Throwable $e) {
+                error_log('get_pro_credits error: ' . $e->getMessage());
+                ok(['credits' => 0, 'catalog_mode' => true, 'transactions' => []]);
+            }
+            break;
+        }
+
+        case 'deduct_pro_credits': {
+            requireAdmin();
+            validateRequired($body, ['amount', 'reason']);
+            $amount  = (float)$body['amount'];
+            $reason  = (string)$body['reason'];
+            $quoteId = isset($body['quote_id']) ? (int)$body['quote_id'] : null;
+            $result  = deductCredits($amount, $reason, $quoteId);
+            if (!($result['success'] ?? false)) {
+                fail($result['error'] ?? 'Crédits insuffisants', 402);
+            }
+            ok($result['data'] ?? []);
+            break;
+        }
+
         default:
             fail('Action inconnue.', 400);
     }
