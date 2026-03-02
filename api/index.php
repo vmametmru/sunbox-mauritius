@@ -6,7 +6,7 @@ handleCORS();
 
 // Pro site deployment versions — increment these when templates or DB schema change.
 // PRO_FILE_VERSION must match define('PRO_FILE_VERSION', ...) in api/pro_deploy/api_config.php
-define('PRO_FILE_VERSION',      '2.0.0');
+define('PRO_FILE_VERSION',      '2.1.0');
 define('PRO_DB_SCHEMA_VERSION', '1.6.0');
 
 // Sunbox main database schema version.
@@ -3122,13 +3122,20 @@ try {
                     '{{COMPANY_NAME}}' => $companyName,
                 ];
 
+                // Compute absolute logo URL now (used in both .env and fallback index.html)
+                $logoUrlAbs = (string)($profile['logo_url'] ?? '');
+                if ($logoUrlAbs !== '' && strpos($logoUrlAbs, 'http') !== 0) {
+                    $logoUrlAbs = $sunboxBaseUrl . '/' . ltrim($logoUrlAbs, '/');
+                }
+
                 $filesToDeploy = [
-                    'api_config.php'    => $siteDir . '/api/config.php',
-                    'api_index.php'     => $siteDir . '/api/index.php',
-                    'api_pro_auth.php'  => $siteDir . '/api/pro_auth.php',
+                    'api_config.php'      => $siteDir . '/api/config.php',
+                    'api_index.php'       => $siteDir . '/api/index.php',
+                    'api_pro_auth.php'    => $siteDir . '/api/pro_auth.php',
                     'api_upload_logo.php' => $siteDir . '/api/upload_logo.php',
-                    'api_htaccess'      => $siteDir . '/api/.htaccess',
-                    'htaccess'          => $siteDir . '/.htaccess',
+                    'api_htaccess'        => $siteDir . '/api/.htaccess',
+                    'htaccess'            => $siteDir . '/.htaccess',
+                    'index.php'           => $siteDir . '/index.php',
                 ];
                 foreach ($filesToDeploy as $tpl => $dest) {
                     $tplPath = $templateDir . '/' . $tpl;
@@ -3163,8 +3170,8 @@ try {
                     $result['debug'][] = 'Symlink/dossier assets déjà présent.';
                 }
 
-                // Deploy index.html — read from main site's built index.html, inject pro API config.
-                // Asset paths stay as /assets/... (served locally via the symlink above, no CORS).
+                // Deploy index.html — static fallback copy used by index.php if it cannot
+                // read the Sunbox root index.html. index.php is the primary entry point now.
                 $mainIndexPath = dirname(__DIR__) . '/index.html';
                 if (file_exists($mainIndexPath)) {
                     $indexHtml = file_get_contents($mainIndexPath);
@@ -3172,13 +3179,8 @@ try {
                         // Inject pro config: point the React app to this pro site's own /api
                         // and flag it as a pro site (hides admin-only features).
                         $apiUrlJson  = json_encode($proBaseUrl . '/api', JSON_HEX_TAG | JSON_HEX_AMP);
-                        // Make logo URL absolute (logo is stored on Sunbox server)
-                        $logoUrl     = (string)($profile['logo_url'] ?? '');
-                        if ($logoUrl !== '' && str_starts_with($logoUrl, '/')) {
-                            $logoUrl = $sunboxBaseUrl . $logoUrl;
-                        }
-                        $logoJson    = json_encode($logoUrl,     JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE);
-                        $companyJson = json_encode($companyName, JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE);
+                        $logoJson    = json_encode($logoUrlAbs,   JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE);
+                        $companyJson = json_encode($companyName,  JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE);
                         $proConfig   = '<script>'
                             . 'window.__API_BASE_URL__='    . $apiUrlJson   . ';'
                             . 'window.__PRO_SITE__=true;'
@@ -3192,15 +3194,13 @@ try {
                             $indexHtml .= $proConfig;
                         }
                         if (file_put_contents($siteDir . '/index.html', $indexHtml) === false) {
-                            $result['errors'][] = 'Avertissement: impossible d\'écrire index.html';
+                            $result['errors'][] = 'Avertissement: impossible d\'écrire index.html (fallback)';
                         } else {
-                            $result['debug'][] = 'index.html déployé avec configuration API pro (' . $proBaseUrl . '/api).';
+                            $result['debug'][] = 'index.html (fallback) déployé.';
                         }
-                    } else {
-                        $result['errors'][] = 'Avertissement: lecture de index.html échouée: ' . $mainIndexPath;
                     }
                 } else {
-                    $result['errors'][] = 'Avertissement: index.html introuvable (' . $mainIndexPath . '). Compilez et déployez le site (npm run build) d\'abord.';
+                    $result['errors'][] = 'Avertissement: index.html introuvable (' . $mainIndexPath . '). Compilez le site (npm run build) d\'abord. index.php fonctionnera quand même.';
                 }
 
                 // Write a minimal pro-specific .env.
@@ -3222,6 +3222,7 @@ try {
                     'ADMIN_PASSWORD_HASH=' . $passwordHash,
                     '',
                     'COMPANY_NAME=' . $companyName,
+                    'LOGO_URL=' . $logoUrlAbs,
                     'VAT_RATE=15',
                 ];
                 if (file_put_contents($siteDir . '/.env', implode("\n", $envLines) . "\n") === false) {
