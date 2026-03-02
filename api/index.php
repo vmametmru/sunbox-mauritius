@@ -6,12 +6,12 @@ handleCORS();
 
 // Pro site deployment versions — increment these when templates or DB schema change.
 // PRO_FILE_VERSION must match define('PRO_FILE_VERSION', ...) in api/pro_deploy/api_config.php
-define('PRO_FILE_VERSION',      '1.8.0');
+define('PRO_FILE_VERSION',      '1.9.0');
 define('PRO_DB_SCHEMA_VERSION', '1.6.0');
 
 // Sunbox main database schema version.
 // Increment when new tables or columns are added.
-define('SUNBOX_DB_SCHEMA_VERSION', '2.2.0');
+define('SUNBOX_DB_SCHEMA_VERSION', '2.3.0');
 
 $action = $_GET['action'] ?? '';
 $body   = getRequestBody();
@@ -147,6 +147,9 @@ try {
 
             // ── v2.2.0 ── Add is_option column to purchase_report_items ─────────
             $addCol('purchase_report_items', 'is_option', "TINYINT(1) DEFAULT 0 AFTER `is_ordered`");
+
+            // ── v2.3.0 ── Add replace_with_sunbox flag to suppliers ──────────────
+            $addCol('suppliers', 'replace_with_sunbox', "TINYINT(1) DEFAULT 0 AFTER `is_active`");
 
             // ── Schema version table (always create / update) ─────────────────
             $db->exec("CREATE TABLE IF NOT EXISTS `db_schema_version` (
@@ -551,8 +554,8 @@ try {
         case 'create_supplier': {
             validateRequired($body, ['name']);
             $stmt = $db->prepare("
-                INSERT INTO suppliers (name, city, phone, email, is_active)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO suppliers (name, city, phone, email, is_active, replace_with_sunbox)
+                VALUES (?, ?, ?, ?, ?, ?)
             ");
             $stmt->execute([
                 sanitize($body['name']),
@@ -560,6 +563,7 @@ try {
                 sanitize($body['phone'] ?? ''),
                 sanitize($body['email'] ?? ''),
                 (bool)($body['is_active'] ?? true),
+                (int)($body['replace_with_sunbox'] ?? 0),
             ]);
             ok(['id' => $db->lastInsertId()]);
             break;
@@ -569,7 +573,8 @@ try {
             validateRequired($body, ['id']);
             $stmt = $db->prepare("
                 UPDATE suppliers SET
-                    name = ?, city = ?, phone = ?, email = ?, is_active = ?, updated_at = NOW()
+                    name = ?, city = ?, phone = ?, email = ?, is_active = ?,
+                    replace_with_sunbox = ?, updated_at = NOW()
                 WHERE id = ?
             ");
             $stmt->execute([
@@ -578,6 +583,7 @@ try {
                 sanitize($body['phone'] ?? ''),
                 sanitize($body['email'] ?? ''),
                 (bool)($body['is_active'] ?? true),
+                (int)($body['replace_with_sunbox'] ?? 0),
                 (int)$body['id'],
             ]);
             ok();

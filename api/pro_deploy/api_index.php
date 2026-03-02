@@ -577,7 +577,7 @@ try {
                        bl.description, bl.quantity, bl.unit, bl.margin_percent,
                        COALESCE(pl.unit_price, bl.unit_cost_ht) AS unit_price,
                        ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht), 2) AS total_price,
-                       COALESCE(s.name, 'Fournisseur non défini') AS supplier_name,
+                       IF(COALESCE(s.replace_with_sunbox, 0) = 1, 'Sunbox', COALESCE(s.name, 'Fournisseur non défini')) AS supplier_name,
                        bc.display_order AS cat_order, bl.display_order AS line_order
                 FROM boq_categories bc
                 LEFT JOIN boq_lines bl ON bl.category_id = bc.id
@@ -608,7 +608,7 @@ try {
                                bl.description, bl.quantity, bl.unit, bl.margin_percent,
                                COALESCE(pl.unit_price, bl.unit_cost_ht) AS unit_price,
                                ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht), 2) AS total_price,
-                               COALESCE(s.name, 'Fournisseur non défini') AS supplier_name,
+                               IF(COALESCE(s.replace_with_sunbox, 0) = 1, 'Sunbox', COALESCE(s.name, 'Fournisseur non défini')) AS supplier_name,
                                bc.display_order AS cat_order, bl.display_order AS line_order
                         FROM boq_categories bc
                         LEFT JOIN boq_lines bl ON bl.category_id = bc.id

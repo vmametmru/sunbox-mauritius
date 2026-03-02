@@ -246,11 +246,92 @@ export default function PurchaseReportDetailPage() {
       <style>{`
         @media print {
           body * { visibility: hidden; }
-          #purchase-report-print, #purchase-report-print * { visibility: visible; }
-          #purchase-report-print { position: absolute; left: 0; top: 0; width: 100%; }
+          #print-report-pdf, #print-report-pdf * { visibility: visible; }
+          #print-report-pdf { position: absolute; left: 0; top: 0; width: 100%; }
           .no-print { display: none !important; }
+          .pdf-page { page-break-before: always; padding: 20px; }
+          .pdf-page:first-child { page-break-before: auto; }
         }
       `}</style>
+
+      {/* ── Print-only per-supplier A4 layout ─────────────────────────────── */}
+      <div id="print-report-pdf" style={{ display: 'none' }}>
+        <style>{`
+          @media print { #print-report-pdf { display: block !important; } }
+        `}</style>
+        {[...report.base_groups.map(g => ({ ...g, section: 'Base' })),
+           ...report.option_groups.map(g => ({ ...g, section: 'Options' }))]
+          .map((group, idx) => (
+            <div key={`${group.supplier_name}-${idx}`} className="pdf-page">
+              {/* Page header */}
+              <div style={{ borderBottom: '2px solid #f97316', paddingBottom: '8px', marginBottom: '12px' }}>
+                <h1 style={{ fontSize: '18px', fontWeight: 'bold', textAlign: 'center', color: '#ea580c' }}>
+                  Rapport d'Achats
+                </h1>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginTop: '6px', color: '#374151' }}>
+                  <span><strong>Client :</strong> {report.customer_name}</span>
+                  <span><strong>Modèle :</strong> {report.model_name}</span>
+                  <span><strong>Réf. :</strong> {report.quote_reference}</span>
+                </div>
+              </div>
+              {/* Supplier name */}
+              <h2 style={{ fontSize: '14px', fontWeight: '700', marginBottom: '8px', color: '#1f2937' }}>
+                🏢 {group.supplier_name}
+                {group.section === 'Options' && (
+                  <span style={{ fontSize: '11px', fontWeight: 'normal', marginLeft: '8px', color: '#7c3aed' }}>
+                    (Options)
+                  </span>
+                )}
+              </h2>
+              {/* Items table */}
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+                <thead>
+                  <tr style={{ background: '#f9fafb' }}>
+                    <th style={{ border: '1px solid #e5e7eb', padding: '4px 6px', textAlign: 'left' }}>□</th>
+                    <th style={{ border: '1px solid #e5e7eb', padding: '4px 6px', textAlign: 'left' }}>Catégorie</th>
+                    <th style={{ border: '1px solid #e5e7eb', padding: '4px 6px', textAlign: 'left' }}>Description</th>
+                    <th style={{ border: '1px solid #e5e7eb', padding: '4px 6px', textAlign: 'right' }}>Qté</th>
+                    <th style={{ border: '1px solid #e5e7eb', padding: '4px 6px', textAlign: 'left' }}>Unité</th>
+                    <th style={{ border: '1px solid #e5e7eb', padding: '4px 6px', textAlign: 'right' }}>P.U. HT</th>
+                    <th style={{ border: '1px solid #e5e7eb', padding: '4px 6px', textAlign: 'right' }}>Total HT</th>
+                    <th style={{ border: '1px solid #e5e7eb', padding: '4px 6px', textAlign: 'right' }}>Total TTC</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {group.items.map(item => (
+                    <tr key={item.id} style={{ background: item.is_ordered ? '#f0fdf4' : 'white' }}>
+                      <td style={{ border: '1px solid #e5e7eb', padding: '3px 6px', textAlign: 'center' }}>
+                        {item.is_ordered ? '☑' : '☐'}
+                      </td>
+                      <td style={{ border: '1px solid #e5e7eb', padding: '3px 6px', color: '#4b5563' }}>{item.category_name}</td>
+                      <td style={{ border: '1px solid #e5e7eb', padding: '3px 6px',
+                        textDecoration: item.is_ordered ? 'line-through' : 'none',
+                        color: item.is_ordered ? '#9ca3af' : '#111827' }}>{item.description}</td>
+                      <td style={{ border: '1px solid #e5e7eb', padding: '3px 6px', textAlign: 'right' }}>{item.quantity}</td>
+                      <td style={{ border: '1px solid #e5e7eb', padding: '3px 6px', color: '#6b7280' }}>{item.unit}</td>
+                      <td style={{ border: '1px solid #e5e7eb', padding: '3px 6px', textAlign: 'right' }}>{fmt(item.unit_price_ht ?? item.unit_price)}</td>
+                      <td style={{ border: '1px solid #e5e7eb', padding: '3px 6px', textAlign: 'right' }}>{fmt(item.total_price_ht ?? item.total_price)}</td>
+                      <td style={{ border: '1px solid #e5e7eb', padding: '3px 6px', textAlign: 'right', fontWeight: 600, color: '#ea580c' }}>{fmt(item.total_price_ttc ?? item.total_price)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr style={{ background: '#fff7ed' }}>
+                    <td colSpan={6} style={{ border: '1px solid #e5e7eb', padding: '4px 6px', textAlign: 'right', fontWeight: 700 }}>
+                      Sous-total {group.supplier_name}
+                    </td>
+                    <td style={{ border: '1px solid #e5e7eb', padding: '4px 6px', textAlign: 'right', fontWeight: 700 }}>
+                      {fmt(group.subtotal_ht ?? group.subtotal)} HT
+                    </td>
+                    <td style={{ border: '1px solid #e5e7eb', padding: '4px 6px', textAlign: 'right', fontWeight: 700, color: '#ea580c' }}>
+                      {fmt(group.subtotal_ttc ?? group.subtotal)} TTC
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          ))}
+      </div>
 
       <div className="space-y-6">
         {/* Header */}
@@ -260,7 +341,7 @@ export default function PurchaseReportDetailPage() {
               <ArrowLeft className="h-4 w-4 mr-2" />Rapports d'Achat
             </Button>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">Rapport d'Achat</h1>
+              <h1 className="text-2xl font-bold text-gray-900">Rapport d'Achats</h1>
               <p className="text-sm text-gray-500 font-mono">{report.quote_reference}</p>
             </div>
           </div>
@@ -285,6 +366,8 @@ export default function PurchaseReportDetailPage() {
         </div>
 
         <div id="purchase-report-print">
+          {/* On-screen centered title */}
+          <h2 className="text-center text-xl font-bold text-gray-800 mb-4">Rapport d'Achats</h2>
           {/* Meta card */}
           <Card className="mb-4">
             <CardContent className="p-4 space-y-4">

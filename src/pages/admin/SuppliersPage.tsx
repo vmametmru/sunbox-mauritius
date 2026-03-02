@@ -34,6 +34,7 @@ interface Supplier {
   phone: string;
   email: string;
   is_active: boolean;
+  replace_with_sunbox: boolean;
 }
 
 const emptySupplier: Supplier = {
@@ -42,6 +43,7 @@ const emptySupplier: Supplier = {
   phone: '',
   email: '',
   is_active: true,
+  replace_with_sunbox: false,
 };
 
 /* ======================================================
@@ -174,7 +176,12 @@ export default function SuppliersPage() {
                   </div>
                   <div>
                     <h3 className="font-bold">{supplier.name}</h3>
-                    {!supplier.is_active && <Badge variant="secondary">Inactif</Badge>}
+                    <div className="flex gap-1 flex-wrap mt-0.5">
+                      {!supplier.is_active && <Badge variant="secondary">Inactif</Badge>}
+                      {supplier.replace_with_sunbox && (
+                        <Badge className="bg-blue-100 text-blue-800 text-xs">Remplacé par Sunbox</Badge>
+                      )}
+                    </div>
                   </div>
                 </div>
                 <div className="flex gap-1">
@@ -279,6 +286,24 @@ export default function SuppliersPage() {
                   }
                 />
                 <Label>Fournisseur actif</Label>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Switch
+                  checked={!!editingSupplier.replace_with_sunbox}
+                  onCheckedChange={(checked) =>
+                    setEditingSupplier({
+                      ...editingSupplier,
+                      replace_with_sunbox: checked,
+                    })
+                  }
+                />
+                <div>
+                  <Label>Remplacer par Sunbox</Label>
+                  <p className="text-xs text-gray-400">
+                    Sur les sites pro, ce fournisseur sera affiché comme "Sunbox"
+                  </p>
+                </div>
               </div>
 
               <div className="flex justify-end gap-2 pt-4">
