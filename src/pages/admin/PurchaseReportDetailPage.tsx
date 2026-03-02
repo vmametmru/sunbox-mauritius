@@ -61,6 +61,116 @@ interface PurchaseReport {
 const numFmt = new Intl.NumberFormat('fr-MU', { style: 'decimal', minimumFractionDigits: 0 });
 const fmt = (p: number) => numFmt.format(Math.round(p)) + ' Rs';
 
+/** Build a standalone print HTML document and open it in a new window. */
+function openPrintWindow(report: PurchaseReport, logoUrl: string, companyName: string) {
+  const pdfPages = [
+    ...report.base_groups.map(g => ({ ...g, section: 'Base' as const })),
+    ...report.option_groups.map(g => ({ ...g, section: 'Options' as const })),
+  ];
+  const totalPages = pdfPages.length;
+  const vatRate = report.vat_rate ?? 15;
+
+  const pageHtml = pdfPages.map((group, idx) => {
+    const sectionLabel = group.section === 'Options' ? 'Achats Options' : 'Achats de Base';
+    const sectionColor = group.section === 'Options' ? '#7c3aed' : '#1d4ed8';
+    const sectionBg    = group.section === 'Options' ? '#ede9fe'  : '#dbeafe';
+    const logoHtml = logoUrl
+      ? `<img src="${logoUrl}" alt="${companyName}" style="height:36px;width:auto;object-fit:contain;">`
+      : `<span style="font-size:13px;font-weight:700;color:#ea580c;">${companyName}</span>`;
+
+    const rows = group.items.map(item => {
+      const totalHT  = item.total_price_ht  ?? item.total_price;
+      const totalTTC = item.total_price_ttc ?? item.total_price;
+      const unitHT   = item.unit_price_ht   ?? item.unit_price;
+      return `
+        <tr style="background:${item.is_ordered ? '#f0fdf4' : 'white'}">
+          <td style="border:1px solid #e5e7eb;padding:3px 6px;text-align:center;">${item.is_ordered ? '☑' : '☐'}</td>
+          <td style="border:1px solid #e5e7eb;padding:3px 6px;color:#4b5563;">${item.category_name}</td>
+          <td style="border:1px solid #e5e7eb;padding:3px 6px;${item.is_ordered ? 'text-decoration:line-through;color:#9ca3af;' : ''}">${item.description}</td>
+          <td style="border:1px solid #e5e7eb;padding:3px 6px;text-align:right;">${item.quantity}</td>
+          <td style="border:1px solid #e5e7eb;padding:3px 6px;color:#6b7280;">${item.unit}</td>
+          <td style="border:1px solid #e5e7eb;padding:3px 6px;text-align:right;">${fmt(unitHT)}</td>
+          <td style="border:1px solid #e5e7eb;padding:3px 6px;text-align:right;">${fmt(totalHT)}</td>
+          <td style="border:1px solid #e5e7eb;padding:3px 6px;text-align:right;font-weight:600;color:#ea580c;">${fmt(totalTTC)}</td>
+        </tr>`;
+    }).join('');
+
+    const subtotalHT  = group.subtotal_ht  ?? group.subtotal;
+    const subtotalTTC = group.subtotal_ttc ?? group.subtotal;
+
+    return `
+      <div class="pdf-page${idx === 0 ? ' first-page' : ''}">
+        <div style="border-bottom:2px solid #f97316;padding-bottom:8px;margin-bottom:12px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+            <div style="min-width:80px;">${logoHtml}</div>
+            <h1 style="font-size:18px;font-weight:bold;text-align:center;color:#ea580c;flex:1;margin:0 12px;">Rapport d'Achats</h1>
+            <span style="font-size:11px;color:#6b7280;white-space:nowrap;min-width:60px;text-align:right;">Page ${idx + 1}/${totalPages}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:#374151;">
+            <span><strong>Client :</strong> ${report.customer_name}</span>
+            <span><strong>Modèle :</strong> ${report.model_name}</span>
+            <span><strong>Réf. :</strong> ${report.quote_reference}</span>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+          <span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;background:${sectionBg};color:${sectionColor};text-transform:uppercase;letter-spacing:0.05em;">${sectionLabel}</span>
+          <h2 style="font-size:14px;font-weight:700;color:#1f2937;margin:0;">🏢 ${group.supplier_name}</h2>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:11px;">
+          <thead>
+            <tr style="background:#f9fafb;">
+              <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">□</th>
+              <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">Catégorie</th>
+              <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">Description</th>
+              <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:right;">Qté</th>
+              <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:left;">Unité</th>
+              <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:right;">P.U. HT</th>
+              <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:right;">Total HT</th>
+              <th style="border:1px solid #e5e7eb;padding:4px 6px;text-align:right;">Total TTC</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+          <tfoot>
+            <tr style="background:#fff7ed;">
+              <td colspan="6" style="border:1px solid #e5e7eb;padding:4px 6px;text-align:right;font-weight:700;">Sous-total ${group.supplier_name}</td>
+              <td style="border:1px solid #e5e7eb;padding:4px 6px;text-align:right;font-weight:700;">${fmt(subtotalHT)} HT</td>
+              <td style="border:1px solid #e5e7eb;padding:4px 6px;text-align:right;font-weight:700;color:#ea580c;">${fmt(subtotalTTC)} TTC</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>`;
+  }).join('');
+
+  const html = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Rapport d'Achats — ${report.quote_reference}</title>
+<style>
+  * { box-sizing: border-box; font-family: Arial, sans-serif; }
+  body { margin: 0; padding: 0; }
+  .pdf-page { padding: 18mm 15mm; min-height: 297mm; }
+  .pdf-page:not(.first-page) { page-break-before: always; }
+  @media print {
+    .pdf-page { padding: 18mm 15mm; }
+    .pdf-page:not(.first-page) { page-break-before: always; }
+  }
+</style>
+</head>
+<body>${pageHtml}</body>
+</html>`;
+
+  const w = window.open('', '_blank');
+  if (!w) { alert('Veuillez autoriser les pop-ups pour imprimer le PDF.'); return; }
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+  // Wait for images (logo) to load before printing
+  w.onload = () => { w.focus(); w.print(); };
+  // Fallback if onload already fired
+  setTimeout(() => { try { w.focus(); w.print(); } catch (_) {} }, 800);
+}
+
 // Render a list of supplier groups as table rows
 function SupplierGroupsTable({
   groups,
@@ -251,122 +361,8 @@ export default function PurchaseReportDetailPage() {
   const vatRate         = report.vat_rate ?? 15;
   const hasOptionGroups = report.option_groups.length > 0;
 
-  // Build flat pages array for PDF (each supplier = 1 page)
-  const pdfPages = [
-    ...report.base_groups.map(g => ({ ...g, section: 'Base' as const })),
-    ...report.option_groups.map(g => ({ ...g, section: 'Options' as const })),
-  ];
-  const totalPages = pdfPages.length;
-
   return (
     <>
-      <style>{`
-        @media screen {
-          #print-report-pdf { display: none; }
-        }
-        @media print {
-          body > * { display: none !important; }
-          #print-report-pdf { display: block !important; }
-          .no-print { display: none !important; }
-          .pdf-page { page-break-before: always; padding: 20mm 15mm; box-sizing: border-box; }
-          .pdf-page:first-child { page-break-before: auto; }
-        }
-      `}</style>
-
-      {/* ── Print-only per-supplier A4 layout ─────────────────────────────── */}
-      <div id="print-report-pdf">
-        {pdfPages.map((group, idx) => (
-            <div key={`${group.supplier_name}-${idx}`} className="pdf-page">
-              {/* Page header */}
-              <div style={{ borderBottom: '2px solid #f97316', paddingBottom: '8px', marginBottom: '12px' }}>
-                {/* Logo + title row */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                  {logoUrl ? (
-                    <img src={logoUrl} alt={companyName} style={{ height: '36px', width: 'auto', objectFit: 'contain' }} />
-                  ) : (
-                    <span style={{ fontSize: '13px', fontWeight: 700, color: '#ea580c' }}>{companyName}</span>
-                  )}
-                  <h1 style={{ fontSize: '18px', fontWeight: 'bold', textAlign: 'center', color: '#ea580c', flex: 1, margin: '0 12px' }}>
-                    Rapport d'Achats
-                  </h1>
-                  {/* Page numbering */}
-                  <span style={{ fontSize: '11px', color: '#6b7280', whiteSpace: 'nowrap' }}>
-                    Page {idx + 1}/{totalPages}
-                  </span>
-                </div>
-                {/* Quote info row */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#374151' }}>
-                  <span><strong>Client :</strong> {report.customer_name}</span>
-                  <span><strong>Modèle :</strong> {report.model_name}</span>
-                  <span><strong>Réf. :</strong> {report.quote_reference}</span>
-                </div>
-              </div>
-
-              {/* Section badge + Supplier name */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
-                <span style={{
-                  fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '4px',
-                  background: group.section === 'Options' ? '#ede9fe' : '#dbeafe',
-                  color: group.section === 'Options' ? '#7c3aed' : '#1d4ed8',
-                  textTransform: 'uppercase', letterSpacing: '0.05em',
-                }}>
-                  {group.section === 'Options' ? 'Achats Options' : 'Achats de Base'}
-                </span>
-                <h2 style={{ fontSize: '14px', fontWeight: '700', color: '#1f2937', margin: 0 }}>
-                  🏢 {group.supplier_name}
-                </h2>
-              </div>
-
-              {/* Items table */}
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
-                <thead>
-                  <tr style={{ background: '#f9fafb' }}>
-                    <th style={{ border: '1px solid #e5e7eb', padding: '4px 6px', textAlign: 'left' }}>□</th>
-                    <th style={{ border: '1px solid #e5e7eb', padding: '4px 6px', textAlign: 'left' }}>Catégorie</th>
-                    <th style={{ border: '1px solid #e5e7eb', padding: '4px 6px', textAlign: 'left' }}>Description</th>
-                    <th style={{ border: '1px solid #e5e7eb', padding: '4px 6px', textAlign: 'right' }}>Qté</th>
-                    <th style={{ border: '1px solid #e5e7eb', padding: '4px 6px', textAlign: 'left' }}>Unité</th>
-                    <th style={{ border: '1px solid #e5e7eb', padding: '4px 6px', textAlign: 'right' }}>P.U. HT</th>
-                    <th style={{ border: '1px solid #e5e7eb', padding: '4px 6px', textAlign: 'right' }}>Total HT</th>
-                    <th style={{ border: '1px solid #e5e7eb', padding: '4px 6px', textAlign: 'right' }}>Total TTC</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {group.items.map(item => (
-                    <tr key={item.id} style={{ background: item.is_ordered ? '#f0fdf4' : 'white' }}>
-                      <td style={{ border: '1px solid #e5e7eb', padding: '3px 6px', textAlign: 'center' }}>
-                        {item.is_ordered ? '☑' : '☐'}
-                      </td>
-                      <td style={{ border: '1px solid #e5e7eb', padding: '3px 6px', color: '#4b5563' }}>{item.category_name}</td>
-                      <td style={{ border: '1px solid #e5e7eb', padding: '3px 6px',
-                        textDecoration: item.is_ordered ? 'line-through' : 'none',
-                        color: item.is_ordered ? '#9ca3af' : '#111827' }}>{item.description}</td>
-                      <td style={{ border: '1px solid #e5e7eb', padding: '3px 6px', textAlign: 'right' }}>{item.quantity}</td>
-                      <td style={{ border: '1px solid #e5e7eb', padding: '3px 6px', color: '#6b7280' }}>{item.unit}</td>
-                      <td style={{ border: '1px solid #e5e7eb', padding: '3px 6px', textAlign: 'right' }}>{fmt(item.unit_price_ht ?? item.unit_price)}</td>
-                      <td style={{ border: '1px solid #e5e7eb', padding: '3px 6px', textAlign: 'right' }}>{fmt(item.total_price_ht ?? item.total_price)}</td>
-                      <td style={{ border: '1px solid #e5e7eb', padding: '3px 6px', textAlign: 'right', fontWeight: 600, color: '#ea580c' }}>{fmt(item.total_price_ttc ?? item.total_price)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr style={{ background: '#fff7ed' }}>
-                    <td colSpan={6} style={{ border: '1px solid #e5e7eb', padding: '4px 6px', textAlign: 'right', fontWeight: 700 }}>
-                      Sous-total {group.supplier_name}
-                    </td>
-                    <td style={{ border: '1px solid #e5e7eb', padding: '4px 6px', textAlign: 'right', fontWeight: 700 }}>
-                      {fmt(group.subtotal_ht ?? group.subtotal)} HT
-                    </td>
-                    <td style={{ border: '1px solid #e5e7eb', padding: '4px 6px', textAlign: 'right', fontWeight: 700, color: '#ea580c' }}>
-                      {fmt(group.subtotal_ttc ?? group.subtotal)} TTC
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          ))}
-      </div>
-
       <div className="space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between no-print">
@@ -383,7 +379,7 @@ export default function PurchaseReportDetailPage() {
             <Button variant="outline" size="sm" onClick={() => loadReport(report.id)}>
               <RefreshCw className="h-4 w-4 mr-2" />Actualiser
             </Button>
-            <Button variant="outline" size="sm" onClick={() => window.print()}>
+            <Button variant="outline" size="sm" onClick={() => openPrintWindow(report, logoUrl, companyName)}>
               <Printer className="h-4 w-4 mr-2" />Imprimer / PDF
             </Button>
             {report.status === 'in_progress' && (
