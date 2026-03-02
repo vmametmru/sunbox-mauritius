@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Plus,
   Edit,
@@ -12,6 +12,9 @@ import {
   Upload,
   FolderOpen,
   Database,
+  CheckCircle2,
+  AlertTriangle,
+  RefreshCw,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -50,6 +53,19 @@ interface ProUser {
   db_name?: string;
 }
 
+interface VersionStatus {
+  checking: boolean;
+  files_up_to_date: boolean;
+  db_up_to_date: boolean;
+  current_file_version: string | null;
+  current_db_version: string | null;
+  latest_file_version: string;
+  latest_db_version: string;
+  domain_configured: boolean;
+  db_configured: boolean;
+  db_error?: string;
+}
+
 const emptyUser: ProUser = {
   name: '',
   email: '',
@@ -64,6 +80,18 @@ const emptyUser: ProUser = {
   logo_url: '',
   db_name: '',
   is_active: true,
+};
+
+const defaultVersionStatus: VersionStatus = {
+  checking: false,
+  files_up_to_date: false,
+  db_up_to_date: false,
+  current_file_version: null,
+  current_db_version: null,
+  latest_file_version: '1.2.0',
+  latest_db_version: '1.2.0',
+  domain_configured: false,
+  db_configured: false,
 };
 
 /** Convert domain to DB slug (mirrors PHP proDbSlug). */
@@ -96,14 +124,39 @@ export default function UsersPage() {
   const [allModels, setAllModels] = useState<{ id: number; name: string; type: string }[]>([]);
   const [enabledModelIds, setEnabledModelIds] = useState<Set<number>>(new Set());
   const [loadingModels, setLoadingModels] = useState(false);
+  const [versionStatuses, setVersionStatuses] = useState<Map<number, VersionStatus>>(new Map());
   const logoInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   const API_BASE = 'https://sunbox-mauritius.com/api';
 
+  /* ======================================================
+     VERSION CHECKING
+  ====================================================== */
+  const checkUserVersion = useCallback(async (userId: number) => {
+    setVersionStatuses(prev => {
+      const next = new Map(prev);
+      next.set(userId, { ...(prev.get(userId) ?? defaultVersionStatus), checking: true });
+      return next;
+    });
+    try {
+      const data = await api.checkProVersions(userId);
+      setVersionStatuses(prev => {
+        const next = new Map(prev);
+        next.set(userId, { checking: false, ...data });
+        return next;
+      });
+    } catch {
+      setVersionStatuses(prev => {
+        const next = new Map(prev);
+        next.set(userId, { ...defaultVersionStatus, checking: false });
+        return next;
+      });
+    }
+  }, []);
+
   useEffect(() => {
     loadUsers();
-    // Load all active models once for the model-selection checkboxes
     api.getModels(undefined, true).then((data: any) => {
       const list = Array.isArray(data) ? data : (data?.models ?? []);
       setAllModels(list.map((m: any) => ({ id: Number(m.id), name: m.name, type: m.type })));
@@ -119,7 +172,12 @@ export default function UsersPage() {
     try {
       setLoading(true);
       const data = await api.getProUsers();
-      setUsers(Array.isArray(data) ? data : []);
+      const list: ProUser[] = Array.isArray(data) ? data : [];
+      setUsers(list);
+      // Check versions for all users that have a domain configured
+      list.forEach(u => {
+        if (u.id && u.domain) checkUserVersion(u.id);
+      });
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
       setUsers([]);
@@ -134,7 +192,6 @@ export default function UsersPage() {
   const openNewUser = () => {
     setEditingUser({ ...emptyUser });
     setProvisionStatus(null);
-    // Default: all models enabled for a new user
     setEnabledModelIds(new Set(allModels.map(m => m.id)));
     setIsDialogOpen(true);
   };
@@ -142,10 +199,13 @@ export default function UsersPage() {
   const openEditUser = (user: ProUser) => {
     setEditingUser({ ...user, password: '' });
     setProvisionStatus(null);
-    // Start with all models enabled, then apply stored overrides
     const allIds = new Set(allModels.map(m => m.id));
     setEnabledModelIds(allIds);
     if (user.id) {
+      // Load version status for this user if not already loaded
+      if (!versionStatuses.has(user.id) && user.domain) {
+        checkUserVersion(user.id);
+      }
       setLoadingModels(true);
       api.getProModelOverrides(user.id).then((overrides: any) => {
         const list = Array.isArray(overrides) ? overrides : [];
@@ -184,7 +244,6 @@ export default function UsersPage() {
         if (!userId) throw new Error('ID utilisateur manquant dans la réponse du serveur.');
         toast({ title: 'Succès', description: 'Utilisateur professionnel créé.' });
       }
-      // Save model visibility overrides (is_enabled only, preserving price_adjustment)
       if (allModels.length > 0 && userId) {
         await Promise.all(
           allModels.map(m =>
@@ -259,6 +318,8 @@ export default function UsersPage() {
           message: `✅ Fichiers déployés dans ${data.site_dir}${errors.length ? ' — Avertissements: ' + errors.join(', ') : ''}`,
         });
         toast({ title: 'Site déployé', description: `URL: ${data.site_url}` });
+        // Refresh version status
+        checkUserVersion(userId);
       } else {
         setProvisionStatus({ ok: false, message: `❌ Échec: ${errors.join(', ') || 'Erreur inconnue'}${debugInfo}` });
       }
@@ -278,9 +339,11 @@ export default function UsersPage() {
       if (data.schema_initialized) {
         setProvisionStatus({
           ok: true,
-          message: `✅ Tables créées — BD: ${data.db_name}${errors.length ? ' — Avertissements: ' + errors.join(', ') : ''}`,
+          message: `✅ Base de données mise à jour — BD: ${data.db_name} (v${data.schema_version ?? '?'})${errors.length ? ' — Avertissements: ' + errors.join(', ') : ''}`,
         });
         toast({ title: 'Base de données initialisée', description: data.db_name });
+        // Refresh version status
+        checkUserVersion(userId);
       } else {
         setProvisionStatus({ ok: false, message: '❌ ' + (errors.join(', ') || 'Erreur inconnue') });
       }
@@ -301,6 +364,24 @@ export default function UsersPage() {
       u.company_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (u.domain ?? '').toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+/** Status chip showing file/DB version state. Defined outside component for stable reference. */
+function VersionChip({ ok, checking, label }: { ok: boolean; checking: boolean; label: string }) {
+  if (checking) return (
+    <span className="inline-flex items-center gap-1 text-xs text-gray-400">
+      <RefreshCw className="h-3 w-3 animate-spin" />{label}
+    </span>
+  );
+  return ok ? (
+    <span className="inline-flex items-center gap-1 text-xs text-green-700 font-medium">
+      <CheckCircle2 className="h-3 w-3" />{label}
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1 text-xs text-amber-600 font-medium">
+      <AlertTriangle className="h-3 w-3" />{label}
+    </span>
+  );
+}
 
   /* ======================================================
      RENDER
@@ -336,77 +417,98 @@ export default function UsersPage() {
         <p className="text-gray-400">Chargement...</p>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {filteredUsers.map((user) => (
-            <Card key={user.id} className="overflow-hidden">
-              <CardContent className="p-4 space-y-3">
-                {/* Header */}
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    {user.logo_url ? (
-                      <img
-                        src={user.logo_url}
-                        alt="Logo"
-                        className="w-10 h-10 object-contain rounded-lg border bg-white flex-shrink-0"
-                      />
-                    ) : (
-                      <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
-                        <Building2 className="h-5 w-5 text-blue-600" />
+          {filteredUsers.map((user) => {
+            const vs = user.id ? versionStatuses.get(user.id) : undefined;
+            return (
+              <Card key={user.id} className="overflow-hidden">
+                <CardContent className="p-4 space-y-3">
+                  {/* Header */}
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-3">
+                      {user.logo_url ? (
+                        <img
+                          src={user.logo_url}
+                          alt="Logo"
+                          className="w-10 h-10 object-contain rounded-lg border bg-white flex-shrink-0"
+                        />
+                      ) : (
+                        <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
+                          <Building2 className="h-5 w-5 text-blue-600" />
+                        </div>
+                      )}
+                      <div>
+                        <h3 className="font-bold">{user.name}</h3>
+                        <p className="text-xs text-gray-500">{user.email}</p>
+                        {!user.is_active && <Badge variant="secondary">Inactif</Badge>}
+                      </div>
+                    </div>
+                    <div className="flex gap-1">
+                      <Button size="sm" variant="ghost" onClick={() => openEditUser(user)}>
+                        <Edit className="h-4 w-4" />
+                      </Button>
+                      <Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteUser(user.id!)}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Info */}
+                  <div className="space-y-1 text-sm text-gray-600">
+                    {user.company_name && (
+                      <div className="flex items-center gap-2">
+                        <Users className="h-4 w-4 text-gray-400" />
+                        {user.company_name}
                       </div>
                     )}
-                    <div>
-                      <h3 className="font-bold">{user.name}</h3>
-                      <p className="text-xs text-gray-500">{user.email}</p>
-                      {!user.is_active && <Badge variant="secondary">Inactif</Badge>}
-                    </div>
-                  </div>
-                  <div className="flex gap-1">
-                    <Button size="sm" variant="ghost" onClick={() => openEditUser(user)}>
-                      <Edit className="h-4 w-4" />
-                    </Button>
-                    <Button size="sm" variant="ghost" className="text-red-600" onClick={() => deleteUser(user.id!)}>
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Info */}
-                <div className="space-y-1 text-sm text-gray-600">
-                  {user.company_name && (
                     <div className="flex items-center gap-2">
-                      <Users className="h-4 w-4 text-gray-400" />
-                      {user.company_name}
+                      <CreditCard className="h-4 w-4 text-gray-400" />
+                      <span className="font-medium text-orange-600">
+                        {(user.credits ?? 0).toLocaleString()} Rs
+                      </span>
+                    </div>
+                    {user.domain && (
+                      <div className="flex items-center gap-2">
+                        <Globe className="h-4 w-4 text-gray-400" />
+                        <span className="text-blue-600">{user.domain}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Version status chips — shown in card when domain is configured */}
+                  {user.domain && vs && (
+                    <div className="flex gap-3 pt-1">
+                      <VersionChip
+                        checking={vs.checking}
+                        ok={vs.files_up_to_date}
+                        label="Fichiers"
+                      />
+                      {user.db_name && (
+                        <VersionChip
+                          checking={vs.checking}
+                          ok={vs.db_up_to_date}
+                          label="BD"
+                        />
+                      )}
                     </div>
                   )}
-                  <div className="flex items-center gap-2">
-                    <CreditCard className="h-4 w-4 text-gray-400" />
-                    <span className="font-medium text-orange-600">
-                      {(user.credits ?? 0).toLocaleString()} Rs
-                    </span>
-                  </div>
-                  {user.domain && (
-                    <div className="flex items-center gap-2">
-                      <Globe className="h-4 w-4 text-gray-400" />
-                      <span className="text-blue-600">{user.domain}</span>
-                    </div>
-                  )}
-                </div>
 
-                {/* Actions */}
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="text-orange-600 border-orange-300 hover:bg-orange-50"
-                    onClick={() => buyPackForUser(user.id!, user.name)}
-                    disabled={buyingPack === user.id}
-                  >
-                    <TrendingUp className="h-4 w-4 mr-1" />
-                    {buyingPack === user.id ? 'Ajout...' : 'Pack +10 000 Rs'}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                  {/* Actions */}
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-orange-600 border-orange-300 hover:bg-orange-50"
+                      onClick={() => buyPackForUser(user.id!, user.name)}
+                      disabled={buyingPack === user.id}
+                    >
+                      <TrendingUp className="h-4 w-4 mr-1" />
+                      {buyingPack === user.id ? 'Ajout...' : 'Pack +10 000 Rs'}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
 
           {filteredUsers.length === 0 && (
             <div className="col-span-full text-center py-12 text-gray-400">
@@ -475,7 +577,7 @@ export default function UsersPage() {
                   placeholder="poolbuilder.mu"
                 />
                 <p className="text-xs text-gray-500 mt-1">
-                  Domaine sur lequel le site pro sera déployé. Utilisé pour valider les requêtes API.
+                  Domaine sur lequel le site pro sera déployé.
                 </p>
               </div>
 
@@ -585,7 +687,7 @@ export default function UsersPage() {
                   🏠 Modèles disponibles sur le site pro
                 </p>
                 <p className="text-xs text-gray-500">
-                  Cochez les modèles à afficher sur le site du professionnel. Par défaut, tous les modèles actifs sont affichés.
+                  Cochez les modèles à afficher sur le site du professionnel.
                 </p>
                 {loadingModels ? (
                   <p className="text-xs text-gray-400">Chargement des modèles...</p>
@@ -642,76 +744,130 @@ export default function UsersPage() {
                 </div>
               </div>
 
-              {/* Site Deployment */}
-              <div className="border rounded-lg p-4 space-y-3 bg-blue-50">
-                <p className="text-sm font-semibold text-blue-700 flex items-center gap-2">
-                  🚀 Déploiement du site professionnel
+              {/* Site Deployment — version-aware */}
+              {editingUser.id && editingUser.domain && (() => {
+                const vs = versionStatuses.get(editingUser.id!);
+                return (
+                  <div className="border rounded-lg p-4 space-y-3 bg-blue-50">
+                    <p className="text-sm font-semibold text-blue-700 flex items-center gap-2">
+                      🚀 Déploiement du site professionnel
+                    </p>
+
+                    <div className="space-y-1">
+                      <p className="text-xs text-gray-600">
+                        📁 Répertoire :{' '}
+                        <code className="bg-white border rounded px-1">
+                          sunbox-mauritius.com/pros/{editingUser.domain}
+                        </code>
+                      </p>
+                      {editingUser.db_name && (
+                        <p className="text-xs text-gray-600">
+                          🗄️ Base de données :{' '}
+                          <code className="bg-white border rounded px-1">{editingUser.db_name}</code>
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="space-y-2">
+                      {/* File deployment row */}
+                      {vs?.checking ? (
+                        <div className="flex items-center gap-2 text-xs text-gray-400 py-1">
+                          <RefreshCw className="h-3 w-3 animate-spin" />
+                          Vérification des versions...
+                        </div>
+                      ) : vs?.files_up_to_date ? (
+                        <div className="flex items-center gap-2 text-sm text-green-700 py-1">
+                          <CheckCircle2 className="h-4 w-4" />
+                          Fichiers à jour
+                          {vs.current_file_version && (
+                            <span className="text-xs text-gray-400">(v{vs.current_file_version})</span>
+                          )}
+                        </div>
+                      ) : (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={deploying}
+                          onClick={() => deployProSite(editingUser.id!)}
+                          className="text-blue-700 border-blue-300 hover:bg-blue-100 justify-start w-full"
+                        >
+                          <FolderOpen className="h-4 w-4 mr-2" />
+                          {deploying ? 'Déploiement en cours...' : (
+                            vs?.current_file_version
+                              ? `Mettre à jour les fichiers (v${vs.current_file_version} → v${vs.latest_file_version})`
+                              : 'Déployer les fichiers du site'
+                          )}
+                        </Button>
+                      )}
+
+                      {/* DB row */}
+                      {editingUser.db_name && (
+                        vs?.checking ? null : vs?.db_up_to_date ? (
+                          <div className="flex items-center gap-2 text-sm text-green-700 py-1">
+                            <CheckCircle2 className="h-4 w-4" />
+                            Base de données à jour
+                            {vs.current_db_version && (
+                              <span className="text-xs text-gray-400">(v{vs.current_db_version})</span>
+                            )}
+                          </div>
+                        ) : (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={initializingDb}
+                            onClick={() => initProDb(editingUser.id!)}
+                            className="text-green-700 border-green-300 hover:bg-green-100 justify-start w-full"
+                          >
+                            <Database className="h-4 w-4 mr-2" />
+                            {initializingDb ? 'Mise à jour en cours...' : (
+                              vs?.current_db_version
+                                ? `Mettre à jour la BD (v${vs.current_db_version} → v${vs.latest_db_version})`
+                                : 'Créer les tables dans la base de données'
+                            )}
+                          </Button>
+                        )
+                      )}
+
+                      {/* Refresh versions button */}
+                      {editingUser.id && !vs?.checking && (
+                        <button
+                          type="button"
+                          onClick={() => checkUserVersion(editingUser.id!)}
+                          className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1 mt-1"
+                        >
+                          <RefreshCw className="h-3 w-3" /> Vérifier les versions
+                        </button>
+                      )}
+                    </div>
+
+                    {provisionStatus && (
+                      <div
+                        className={`text-xs p-2 rounded border ${
+                          provisionStatus.ok
+                            ? 'bg-green-50 border-green-200 text-green-800'
+                            : 'bg-red-50 border-red-200 text-red-800'
+                        }`}
+                      >
+                        {provisionStatus.message}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Show deploy section for new users without ID, or users without domain */}
+              {editingUser.id && !editingUser.domain && (
+                <p className="text-xs text-amber-600">
+                  ⚠️ Renseignez le domaine ci-dessus avant de déployer.
                 </p>
-
-                {editingUser.domain ? (
-                  <div className="space-y-1">
-                    <p className="text-xs text-gray-600">
-                      📁 Répertoire :{' '}
-                      <code className="bg-white border rounded px-1">
-                        sunbox-mauritius.com/pros/{editingUser.domain}
-                      </code>
-                    </p>
-                    <p className="text-xs text-gray-600">
-                      🗄️ Base de données :{' '}
-                      <code className="bg-white border rounded px-1">
-                        mauriti2_sunbox_mauritius_{domainToSlug(editingUser.domain)}
-                      </code>
-                    </p>
-                  </div>
-                ) : (
-                  <p className="text-xs text-amber-600">
-                    ⚠️ Renseignez le domaine ci-dessus avant de déployer.
-                  </p>
-                )}
-
-                {!editingUser.id && (
-                  <p className="text-xs text-amber-600">
-                    ⚠️ Enregistrez d'abord l'utilisateur pour activer le déploiement.
-                  </p>
-                )}
-
-                <div className="grid grid-cols-1 gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={!editingUser.id || !editingUser.domain || deploying}
-                    onClick={() => deployProSite(editingUser.id!)}
-                    className="text-blue-700 border-blue-300 hover:bg-blue-100 justify-start"
-                  >
-                    <FolderOpen className="h-4 w-4 mr-2" />
-                    {deploying ? 'Déploiement en cours...' : 'Déployer les fichiers du site du professionnel'}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={!editingUser.id || !editingUser.domain || initializingDb || !editingUser.db_name}
-                    onClick={() => initProDb(editingUser.id!)}
-                    className="text-green-700 border-green-300 hover:bg-green-100 justify-start"
-                  >
-                    <Database className="h-4 w-4 mr-2" />
-                    {initializingDb ? 'Initialisation en cours...' : 'Créer la Base de données et créer les tables'}
-                  </Button>
-                </div>
-
-                {provisionStatus && (
-                  <div
-                    className={`text-xs p-2 rounded border ${
-                      provisionStatus.ok
-                        ? 'bg-green-50 border-green-200 text-green-800'
-                        : 'bg-red-50 border-red-200 text-red-800'
-                    }`}
-                  >
-                    {provisionStatus.message}
-                  </div>
-                )}
-              </div>
+              )}
+              {!editingUser.id && (
+                <p className="text-xs text-amber-600">
+                  ⚠️ Enregistrez d'abord l'utilisateur pour activer le déploiement.
+                </p>
+              )}
 
               <div className="flex justify-end gap-2 pt-4">
                 <Button variant="outline" onClick={() => setIsDialogOpen(false)}>

@@ -4,6 +4,11 @@ declare(strict_types=1);
 require_once __DIR__ . '/config.php';
 handleCORS();
 
+// Pro site deployment versions — increment these when templates or DB schema change.
+// PRO_FILE_VERSION must match define('PRO_FILE_VERSION', ...) in api/pro_deploy/api_config.php
+define('PRO_FILE_VERSION',      '1.2.0');
+define('PRO_DB_SCHEMA_VERSION', '1.2.0');
+
 $action = $_GET['action'] ?? '';
 $body   = getRequestBody();
 
@@ -2673,6 +2678,69 @@ try {
             break;
         }
 
+        // ── Check deployed versions (files + DB schema) ───────────────────────
+        case 'check_pro_versions': {
+            validateRequired($body, ['user_id']);
+            $userId = (int)$body['user_id'];
+
+            $stmt = $db->prepare("SELECT pp.domain, pp.db_name FROM professional_profiles pp WHERE pp.user_id = ?");
+            $stmt->execute([$userId]);
+            $profile = $stmt->fetch();
+            if (!$profile) fail('Utilisateur introuvable.');
+
+            $domain = (string)($profile['domain'] ?? '');
+            $dbName = (string)($profile['db_name'] ?? '');
+
+            $result = [
+                'latest_file_version'   => PRO_FILE_VERSION,
+                'latest_db_version'     => PRO_DB_SCHEMA_VERSION,
+                'current_file_version'  => null,
+                'current_db_version'    => null,
+                'files_up_to_date'      => false,
+                'db_up_to_date'         => false,
+                'domain_configured'     => (bool)$domain,
+                'db_configured'         => (bool)$dbName,
+            ];
+
+            // Check deployed file version from .deploy_version file
+            if ($domain) {
+                $siteDir = proSiteDir($domain);
+                $vFile   = $siteDir . '/.deploy_version';
+                if (is_file($vFile)) {
+                    $ver = trim((string)file_get_contents($vFile));
+                    if ($ver) {
+                        $result['current_file_version'] = $ver;
+                        $result['files_up_to_date'] = version_compare($ver, PRO_FILE_VERSION, '>=');
+                    }
+                }
+            }
+
+            // Check DB schema version from pro_schema_version table
+            if ($dbName) {
+                try {
+                    $proPdo = new PDO(
+                        "mysql:host=" . DB_HOST . ";dbname={$dbName};charset=utf8mb4",
+                        DB_USER, DB_PASS,
+                        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_EMULATE_PREPARES => false]
+                    );
+                    $vStmt = $proPdo->query("SELECT `version` FROM `pro_schema_version` WHERE `id` = 1 LIMIT 1");
+                    if ($vStmt) {
+                        $row = $vStmt->fetch(PDO::FETCH_ASSOC);
+                        if ($row && !empty($row['version'])) {
+                            $result['current_db_version'] = $row['version'];
+                            $result['db_up_to_date'] = version_compare($row['version'], PRO_DB_SCHEMA_VERSION, '>=');
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    // BD inaccessible ou table absente — needs init/update
+                    $result['db_error'] = API_DEBUG ? $e->getMessage() : 'BD inaccessible ou non initialisée';
+                }
+            }
+
+            ok($result);
+            break;
+        }
+
         // ── Deploy pro site files to /pros/<domain>/ on this server ────────────
         case 'deploy_pro_site': {
             validateRequired($body, ['user_id']);
@@ -2854,6 +2922,13 @@ try {
                         . '. Vérifiez que le site pro est bien sous sunbox-root/pros/<domaine>/.';
                 }
 
+                // Write .deploy_version — used by check_pro_versions to detect outdated files
+                if (file_put_contents($siteDir . '/.deploy_version', PRO_FILE_VERSION) === false) {
+                    $result['errors'][] = 'Avertissement: impossible d\'écrire .deploy_version';
+                } else {
+                    $result['debug'][] = '.deploy_version: ' . PRO_FILE_VERSION;
+                }
+
                 $result['deployed'] = true;
             } catch (Throwable $e) {
                 $result['errors'][] = $e->getMessage();
@@ -2896,6 +2971,20 @@ try {
                     [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_EMULATE_PREPARES => false]
                 );
 
+                // Helper: safely add a missing column without touching existing data.
+                // $table: table name, $col: column name, $def: SQL column definition
+                $addCol = function(string $table, string $col, string $def) use ($proPdo): void {
+                    $s = $proPdo->prepare(
+                        "SELECT COUNT(*) FROM information_schema.COLUMNS
+                         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?"
+                    );
+                    $s->execute([$table, $col]);
+                    if (!(bool)$s->fetchColumn()) {
+                        $proPdo->exec("ALTER TABLE `{$table}` ADD COLUMN `{$col}` {$def}");
+                    }
+                };
+
+                // ── Core tables (CREATE IF NOT EXISTS = safe on existing DB) ──────
                 $proPdo->exec("CREATE TABLE IF NOT EXISTS `pro_settings` (
                     `id` INT AUTO_INCREMENT PRIMARY KEY,
                     `setting_key` VARCHAR(100) NOT NULL,
@@ -2917,6 +3006,9 @@ try {
                     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+                // Safe column additions for contacts (upgrade path)
+                $addCol('pro_contacts', 'company', "VARCHAR(255) DEFAULT '' AFTER `address`");
+                $addCol('pro_contacts', 'notes',   "TEXT AFTER `company`");
 
                 $proPdo->exec("CREATE TABLE IF NOT EXISTS `pro_quotes` (
                     `id` INT AUTO_INCREMENT PRIMARY KEY,
@@ -2936,26 +3028,88 @@ try {
                     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+                // Safe column additions for quotes (upgrade path)
+                $addCol('pro_quotes', 'notes',       "TEXT AFTER `total_price`");
+                $addCol('pro_quotes', 'valid_until',  "DATE DEFAULT NULL AFTER `status`");
 
-                // Seed default settings
+                // ── New tables (v1.2.0) ────────────────────────────────────────
+                $proPdo->exec("CREATE TABLE IF NOT EXISTS `pro_discounts` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `name` VARCHAR(255) NOT NULL,
+                    `description` TEXT,
+                    `discount_type` ENUM('percentage','fixed') NOT NULL DEFAULT 'percentage',
+                    `discount_value` DECIMAL(10,2) NOT NULL DEFAULT 0,
+                    `apply_to` ENUM('base_price','options','both') NOT NULL DEFAULT 'both',
+                    `start_date` DATE NOT NULL,
+                    `end_date` DATE NOT NULL,
+                    `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+                    `model_ids` JSON DEFAULT NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                $proPdo->exec("CREATE TABLE IF NOT EXISTS `pro_email_templates` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `template_key` VARCHAR(100) NOT NULL,
+                    `template_type` ENUM('quote','notification','password_reset','contact','status_change','other') NOT NULL DEFAULT 'other',
+                    `name` VARCHAR(255) NOT NULL,
+                    `subject` VARCHAR(500) NOT NULL,
+                    `body_html` LONGTEXT NOT NULL,
+                    `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+                    `is_default` TINYINT(1) NOT NULL DEFAULT 0,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY `uq_template_key` (`template_key`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                $proPdo->exec("CREATE TABLE IF NOT EXISTS `pro_email_signatures` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `signature_key` VARCHAR(100) NOT NULL,
+                    `name` VARCHAR(255) NOT NULL,
+                    `description` TEXT,
+                    `body_html` LONGTEXT NOT NULL,
+                    `logo_url` VARCHAR(500) DEFAULT '',
+                    `photo_url` VARCHAR(500) DEFAULT '',
+                    `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+                    `is_default` TINYINT(1) NOT NULL DEFAULT 0,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY `uq_signature_key` (`signature_key`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                // ── Schema version table ───────────────────────────────────────
+                $proPdo->exec("CREATE TABLE IF NOT EXISTS `pro_schema_version` (
+                    `id`         INT NOT NULL DEFAULT 1,
+                    `version`    VARCHAR(20) NOT NULL,
+                    `applied_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    PRIMARY KEY (`id`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+                $proPdo->prepare(
+                    "INSERT INTO `pro_schema_version` (`id`, `version`) VALUES (1, ?)
+                     ON DUPLICATE KEY UPDATE `version` = VALUES(`version`), `applied_at` = NOW()"
+                )->execute([PRO_DB_SCHEMA_VERSION]);
+
+                // ── Default settings (safe: ON DUPLICATE KEY UPDATE) ──────────
                 $ins = $proPdo->prepare("
                     INSERT INTO `pro_settings` (`setting_key`, `setting_value`, `setting_group`)
                     VALUES (?, ?, ?)
                     ON DUPLICATE KEY UPDATE `setting_value` = VALUES(`setting_value`)
                 ");
                 foreach ([
-                    ['vat_rate', '15', 'general'],
-                    ['company_name', $companyName, 'company'],
-                    ['company_address', '', 'company'],
-                    ['company_phone', '', 'company'],
-                    ['company_email', '', 'company'],
-                    ['vat_number', '', 'company'],
-                    ['brn_number', '', 'company'],
+                    ['vat_rate',              '15',              'general'],
+                    ['site_under_construction','false',           'site'],
+                    ['company_name',           $companyName,      'company'],
+                    ['company_address',        '',                'company'],
+                    ['company_phone',          '',                'company'],
+                    ['company_email',          '',                'company'],
+                    ['vat_number',             '',                'company'],
+                    ['brn_number',             '',                'company'],
                 ] as $row) {
                     $ins->execute($row);
                 }
 
                 $result['schema_initialized'] = true;
+                $result['schema_version']      = PRO_DB_SCHEMA_VERSION;
             } catch (Throwable $e) {
                 $result['errors'][] = $e->getMessage();
             }

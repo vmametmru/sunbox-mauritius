@@ -140,3 +140,15 @@ INSERT INTO `pro_settings` (`setting_key`, `setting_value`, `setting_group`) VAL
 ('vat_number',             '',                'company'),
 ('brn_number',             '',                'company')
 ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value);
+
+-- ── Schema version tracking ───────────────────────────────────────────────────
+-- Single-row table. id=1 always. Inserted/updated by init_pro_db on each run.
+CREATE TABLE IF NOT EXISTS `pro_schema_version` (
+    `id`         INT NOT NULL DEFAULT 1,
+    `version`    VARCHAR(20) NOT NULL,
+    `applied_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT INTO `pro_schema_version` (`id`, `version`) VALUES (1, '1.2.0')
+ON DUPLICATE KEY UPDATE `version` = VALUES(`version`), `applied_at` = NOW();

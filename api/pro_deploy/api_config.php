@@ -5,61 +5,73 @@ declare(strict_types=1);
  * Pro Site API config
  *
  * The pro site is a SUBFOLDER of the Sunbox installation:
- *   /home/.../sunbox-mauritius.com/pros/<domain>/
+ *   sunbox-root/pros/<domain>/
  *
- * So it can directly read the Sunbox root .env (3 levels up from api/) and
- * open a PDO connection to the Sunbox DB — no HTTP bridge, no API token, no cURL.
- *
- * Loading order:
- *   1. Sunbox root .env  → DB_HOST, DB_USER, DB_PASS, DB_NAME (=sunbox main DB)
- *   2. Pro site .env     → overrides APP_URL, DB_NAME (→ pro DB), adds
- *                          SUNBOX_USER_ID, ADMIN_PASSWORD_HASH, COMPANY_NAME, etc.
- *
- * After loading, SUNBOX_DB_NAME holds the Sunbox main DB name (captured before
- * the pro .env can override DB_NAME), and DB_NAME holds the pro site's own DB.
+ * DB access strategy:
+ *  - Sunbox DB: credentials read DIRECTLY from sunbox-root/.env via
+ *    parseSunboxRootEnv() — never via getenv() which is polluted by
+ *    cPanel/Apache environment variables on shared hosting.
+ *  - Pro DB: name comes from pro .env (one level up from api/).
+ *    Host/user/pass come from the same Sunbox root .env (same server).
  */
 
-function loadSingleEnvFile(string $path, bool $override = false): void
+/** Deployed file version — must match PRO_FILE_VERSION in sunbox api/index.php. */
+define('PRO_FILE_VERSION', '1.2.0');
+
+/**
+ * Read the Sunbox root .env directly from disk — bypasses getenv() entirely.
+ * Immune to cPanel/Apache pre-set environment variables.
+ *
+ * Path: api/config.php is at sunbox-root/pros/<domain>/api/config.php
+ *       dirname(__DIR__, 3): api → domain → pros → sunbox-root
+ */
+function parseSunboxRootEnv(): array
 {
+    static $cache = null;
+    if ($cache !== null) return $cache;
+    $path = dirname(__DIR__, 3) . '/.env';
+    $cache = [];
+    if (!is_file($path) || !is_readable($path)) return $cache;
+    foreach (file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
+        $line = trim($line);
+        if ($line === '' || $line[0] === '#' || $line[0] === ';') continue;
+        if (!str_contains($line, '=')) continue;
+        [$k, $v] = explode('=', $line, 2);
+        $k = trim($k);
+        $v = trim($v);
+        if (strlen($v) >= 2 && (
+            ($v[0] === '"'  && substr($v, -1) === '"')  ||
+            ($v[0] === "'" && substr($v, -1) === "'")
+        )) {
+            $v = substr($v, 1, -1);
+        }
+        $cache[$k] = $v;
+    }
+    return $cache;
+}
+
+/** Load the pro site's own .env (one level up from api/). */
+function loadEnvFiles(): void
+{
+    $path = dirname(__DIR__) . '/.env';
     if (!is_file($path) || !is_readable($path)) return;
-    $lines = file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-    if (!$lines) return;
-    foreach ($lines as $line) {
+    foreach (file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
         $line = trim($line);
         if ($line === '' || str_starts_with($line, '#') || str_starts_with($line, ';')) continue;
         if (!str_contains($line, '=')) continue;
         [$key, $val] = explode('=', $line, 2);
         $key = trim($key);
         $val = trim($val);
-        if ((str_starts_with($val, '"') && str_ends_with($val, '"')) ||
-            (str_starts_with($val, "'") && str_ends_with($val, "'"))) {
+        if (strlen($val) >= 2 && (
+            ($val[0] === '"'  && substr($val, -1) === '"')  ||
+            ($val[0] === "'" && substr($val, -1) === "'")
+        )) {
             $val = substr($val, 1, -1);
         }
-        if (!$override && getenv($key) !== false && getenv($key) !== '') continue;
         @putenv("$key=$val");
         $_ENV[$key]    = $val;
         $_SERVER[$key] = $val;
     }
-}
-
-function loadEnvFiles(): void
-{
-    // 1. Sunbox root .env — 3 levels up from /pros/<domain>/api/
-    //    Path: sunbox-root/.env  (provides DB_HOST, DB_USER, DB_PASS, main DB_NAME)
-    $sunboxRootEnv = dirname(__DIR__, 3) . '/.env';
-    loadSingleEnvFile($sunboxRootEnv, false);
-
-    // Snapshot the Sunbox main DB name before the pro .env can override DB_NAME
-    $sunboxDbName = (string)(getenv('DB_NAME') ?: ($_ENV['DB_NAME'] ?? ''));
-    @putenv("SUNBOX_DB_NAME=$sunboxDbName");
-    $_ENV['SUNBOX_DB_NAME']   = $sunboxDbName;
-    $_SERVER['SUNBOX_DB_NAME'] = $sunboxDbName;
-
-    // 2. Pro site's own .env — one level up from api/ (at the domain root)
-    //    Overrides APP_URL, DB_NAME (→ pro DB).
-    //    Adds SUNBOX_USER_ID, ADMIN_PASSWORD_HASH, COMPANY_NAME, VAT_RATE.
-    $proEnv = dirname(__DIR__) . '/.env';
-    loadSingleEnvFile($proEnv, true);
 }
 
 loadEnvFiles();
@@ -87,18 +99,22 @@ define('VAT_RATE',       (float)env('VAT_RATE', 15));
 
 /**
  * PDO connection to the pro site's own database.
- * Uses DB_NAME from pro .env, DB_HOST/USER/PASS from Sunbox root .env.
+ * DB_NAME comes from pro .env; DB_HOST/USER/PASS from Sunbox root .env (via parseSunboxRootEnv).
  */
 function getDB(): PDO
 {
     static $pdo = null;
     if ($pdo !== null) return $pdo;
-    $host = (string)env('DB_HOST', 'localhost');
-    $name = (string)env('DB_NAME', '');
-    $user = (string)env('DB_USER', '');
-    $pass = (string)env('DB_PASS', '');
-    if (!$name || !$user) {
-        throw new \Exception('Configuration DB pro manquante (DB_NAME). Reconfigurez via sunbox-mauritius.com.');
+    $e    = parseSunboxRootEnv();
+    $host = $e['DB_HOST'] ?? 'localhost';
+    $user = $e['DB_USER'] ?? '';
+    $pass = $e['DB_PASS'] ?? '';
+    $name = (string)env('DB_NAME', '');   // Pro DB name from pro .env
+    if (!$name) {
+        throw new \Exception('DB_NAME manquant dans le .env du site pro. Configurez la BD via sunbox-mauritius.com.');
+    }
+    if (!$user) {
+        throw new \Exception('DB_USER introuvable dans le .env Sunbox racine (' . dirname(__DIR__, 3) . '/.env).');
     }
     $pdo = new PDO("mysql:host={$host};dbname={$name};charset=utf8mb4", $user, $pass, [
         PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
@@ -110,19 +126,24 @@ function getDB(): PDO
 
 /**
  * PDO connection to the Sunbox main database.
- * Uses SUNBOX_DB_NAME (captured before pro .env override) + same server credentials.
- * Allows direct model / credit / override queries — no HTTP request needed.
+ * Always reads credentials directly from sunbox-root/.env — immune to PHP env state.
  */
 function getSunboxDB(): PDO
 {
     static $pdo = null;
     if ($pdo !== null) return $pdo;
-    $host = (string)env('DB_HOST', 'localhost');
-    $name = (string)env('SUNBOX_DB_NAME', '');
-    $user = (string)env('DB_USER', '');
-    $pass = (string)env('DB_PASS', '');
+    $e    = parseSunboxRootEnv();
+    $host = $e['DB_HOST'] ?? 'localhost';
+    $name = $e['DB_NAME'] ?? '';
+    $user = $e['DB_USER'] ?? '';
+    $pass = $e['DB_PASS'] ?? '';
     if (!$name || !$user) {
-        throw new \Exception('Sunbox DB inaccessible. Vérifiez le .env à la racine Sunbox.');
+        $envPath = dirname(__DIR__, 3) . '/.env';
+        throw new \Exception(
+            "Sunbox DB inaccessible: DB_NAME='{$name}', DB_USER='{$user}'. "
+            . "Fichier .env lu: {$envPath}. "
+            . "Vérifiez que le site pro est dans sunbox-root/pros/<domaine>/."
+        );
     }
     $pdo = new PDO("mysql:host={$host};dbname={$name};charset=utf8mb4", $user, $pass, [
         PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,

@@ -878,6 +878,10 @@ export const api = {
     return this.query('init_pro_db', { user_id: userId });
   },
 
+  checkProVersions(userId: number) {
+    return this.query('check_pro_versions', { user_id: userId });
+  },
+
   buyProPack(userId: number) {
     return this.query('buy_pro_pack', { user_id: userId });
   },
