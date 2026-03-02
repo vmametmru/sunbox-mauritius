@@ -8,7 +8,9 @@ import {
   Users,
   Mail,
   RefreshCw,
-  AlertTriangle
+  AlertTriangle,
+  Database,
+  Loader2,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -33,15 +35,44 @@ interface EmailSettings {
   smtp_port?: string;
 }
 
+interface DbVersionStatus {
+  current_version: string;
+  latest_version: string;
+  is_up_to_date: boolean;
+}
+
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [emailSettings, setEmailSettings] = useState<EmailSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [dbVersion, setDbVersion]   = useState<DbVersionStatus | null>(null);
+  const [dbUpdating, setDbUpdating] = useState(false);
 
   useEffect(() => {
     loadStats();
+    loadDbVersion();
   }, []);
+
+  const loadDbVersion = async () => {
+    try {
+      const v = await api.checkDbVersion();
+      setDbVersion(v);
+    } catch { /* non-fatal — DB might not have version table yet */ }
+  };
+
+  const handleUpdateDb = async () => {
+    setDbUpdating(true);
+    try {
+      await api.updateDbSchema();
+      const v = await api.checkDbVersion();
+      setDbVersion(v);
+    } catch (err: any) {
+      alert('Erreur lors de la mise à jour : ' + err.message);
+    } finally {
+      setDbUpdating(false);
+    }
+  };
 
   const loadStats = async () => {
     try {
@@ -204,6 +235,51 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* DB Version Status */}
+      {dbVersion && (
+        dbVersion.is_up_to_date ? (
+          <Card className="border-green-200 bg-green-50">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <Database className="h-5 w-5 text-green-600 flex-shrink-0" />
+                <p className="text-sm text-green-800 font-medium">
+                  ✅ Base de données à jour <span className="font-mono">(v{dbVersion.current_version})</span>
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card className="border-amber-200 bg-amber-50">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between gap-4 flex-wrap">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 bg-amber-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <Database className="h-5 w-5 text-amber-600" />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-amber-900 text-sm">Mise à jour de la base de données disponible</p>
+                    <p className="text-xs text-amber-700 mt-0.5">
+                      Version actuelle&nbsp;:&nbsp;<span className="font-mono">{dbVersion.current_version}</span>
+                      &nbsp;→&nbsp;Version disponible&nbsp;:&nbsp;<span className="font-mono">{dbVersion.latest_version}</span>
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  className="bg-amber-600 hover:bg-amber-700 text-white"
+                  onClick={handleUpdateDb}
+                  disabled={dbUpdating}
+                >
+                  {dbUpdating
+                    ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Mise à jour…</>
+                    : <><Database className="h-4 w-4 mr-2" />Mettre à jour la BD</>}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )
+      )}
 
       {/* Quick Actions */}
       {(stats?.pending_quotes || 0) > 0 && (

@@ -19,6 +19,7 @@ import {
   BookUser,
   ChevronDown,
   ChevronRight,
+  ClipboardList,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -45,10 +46,10 @@ const sunboxNavItems = [
 // ── Deployed pro site admin nav (when window.__PRO_SITE__ === true) ───────────
 const proSiteNavGroups = [
   { icon: LayoutDashboard, label: 'Dashboard', path: '/pro', isItem: true as const },
-  {
-    icon: ShoppingCart, label: 'Commerce', key: 'commerce', isItem: false as const,
+  { icon: ShoppingCart, label: 'Commerce', key: 'commerce', isItem: false as const,
     children: [
-      { icon: FileText, label: 'Devis', path: '/pro/quotes' },
+      { icon: FileText,      label: 'Devis',            path: '/pro/quotes' },
+      { icon: ClipboardList, label: "Rapports d'Achat", path: '/pro/reports' },
     ],
   },
   {

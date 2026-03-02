@@ -33,6 +33,14 @@ export const api = {
     return this.query('get_dashboard_stats');
   },
 
+  checkDbVersion() {
+    return this.query('check_db_version');
+  },
+
+  updateDbSchema() {
+    return this.query('update_db_schema');
+  },
+
   /* =====================================================
      MODELS (DB-DRIVEN ONLY)
   ===================================================== */
@@ -930,6 +938,37 @@ export const api = {
 
   deductProCredits(amount: number, reason: string, quoteId?: number) {
     return this.query('deduct_pro_credits', { amount, reason, ...(quoteId ? { quote_id: quoteId } : {}) });
+  },
+
+  /* =====================================================
+     PURCHASE REPORTS (Rapport d'Achat)
+  ===================================================== */
+  requestBoqReport(quoteId: number) {
+    return this.query('request_boq_report', { quote_id: quoteId });
+  },
+
+  createPurchaseReport(quoteId: number) {
+    return this.query('create_purchase_report', { quote_id: quoteId });
+  },
+
+  getQuotePurchaseReport(quoteId: number) {
+    return this.query('get_quote_purchase_report', { quote_id: quoteId });
+  },
+
+  getPurchaseReports() {
+    return this.query('get_purchase_reports');
+  },
+
+  getPurchaseReport(id: number) {
+    return this.query('get_purchase_report', { id });
+  },
+
+  toggleReportItem(id: number) {
+    return this.query('toggle_report_item', { id });
+  },
+
+  updateReportStatus(id: number, status: 'in_progress' | 'completed') {
+    return this.query('update_report_status', { id, status });
   },
 };
 

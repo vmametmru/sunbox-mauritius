@@ -3,9 +3,10 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { FileText, X } from 'lucide-react';
+import { FileText, X, ClipboardList } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
+import { useNavigate } from 'react-router-dom';
 
 interface Quote {
   id: number;
@@ -23,6 +24,8 @@ interface Quote {
   status: string;
   valid_until?: string;
   created_at: string;
+  boq_requested?: number | boolean;
+  purchase_report_id?: number | null;
 }
 
 const statusLabels: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
@@ -37,6 +40,7 @@ export default function ProQuotesPage() {
   const [loading, setLoading] = useState(true);
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   useEffect(() => {
     loadQuotes();
@@ -57,7 +61,6 @@ export default function ProQuotesPage() {
   const handleValidate = async (quote: Quote) => {
     if (!confirm(`Valider et envoyer le devis ${quote.reference_number} par email ? (1 000 Rs seront déduits)`)) return;
     try {
-      // update_quote_status already deducts 1 000 Rs internally — no separate deductProCredits call
       await api.updateQuoteStatus(quote.id, 'approved');
       toast({ title: 'Succès', description: 'Devis validé. 1 000 Rs déduits.' });
       loadQuotes();
@@ -66,11 +69,21 @@ export default function ProQuotesPage() {
     }
   };
 
-  const handleBOQRequest = async (quote: Quote) => {
-    if (!confirm(`Demander le BOQ pour le devis ${quote.reference_number} ? (1 500 Rs seront déduits)`)) return;
+  const handleBoqReport = async (quote: Quote) => {
+    // If report already exists, navigate directly to it
+    if (Number(quote.boq_requested)) {
+      if (quote.purchase_report_id) {
+        navigate(`/pro/reports/${quote.purchase_report_id}`);
+      } else {
+        toast({ title: 'Info', description: 'Rapport déjà demandé.' });
+      }
+      return;
+    }
+    if (!confirm(`Générer le Rapport d'Achat pour le devis ${quote.reference_number} ? (1 500 Rs seront déduits)`)) return;
     try {
-      await api.deductProCredits(1500, 'boq_requested', quote.id);
-      toast({ title: 'Succès', description: 'Demande BOQ enregistrée. Crédits déduits.' });
+      const result = await api.requestBoqReport(quote.id);
+      toast({ title: 'Succès', description: "Rapport d'Achat généré. 1 500 Rs déduits." });
+      navigate(`/pro/reports/${result.report_id}`);
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
     }
@@ -131,23 +144,24 @@ export default function ProQuotesPage() {
                       {new Date(q.created_at).toLocaleDateString('fr-FR')}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex gap-2 flex-wrap">
-                        {isPending && (
-                          <Button size="sm" variant="outline" onClick={() => handleValidate(q)}>
-                            Valider (1 000 Rs)
-                          </Button>
-                        )}
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={!isApproved}
-                          title={!isApproved ? 'Validez le devis avant de demander le BOQ' : ''}
-                          onClick={() => handleBOQRequest(q)}
-                        >
-                          BOQ (1 500 Rs)
-                        </Button>
-                      </div>
-                    </td>
+                       <div className="flex gap-2 flex-wrap">
+                         {isPending && (
+                           <Button size="sm" variant="outline" onClick={() => handleValidate(q)}>
+                             Valider (1 000 Rs)
+                           </Button>
+                         )}
+                         {isApproved && (
+                           Number(q.boq_requested)
+                             ? <Button size="sm" variant="outline" className="text-green-700 border-green-300"
+                                 onClick={() => q.purchase_report_id && navigate(`/pro/reports/${q.purchase_report_id}`)}>
+                                 <ClipboardList className="h-3 w-3 mr-1" />Voir le rapport
+                               </Button>
+                             : <Button size="sm" variant="outline" onClick={() => handleBoqReport(q)}>
+                                 <ClipboardList className="h-3 w-3 mr-1" />Rapport d'Achat (1 500 Rs)
+                               </Button>
+                         )}
+                       </div>
+                     </td>
                   </tr>
                 );
               })}
@@ -237,27 +251,29 @@ export default function ProQuotesPage() {
                 </div>
               )}
               <div className="flex justify-end gap-2 pt-2">
-                {selectedQuote.status === 'pending' && (
-                  <Button
-                    size="sm"
-                    onClick={() => { handleValidate(selectedQuote); setSelectedQuote(null); }}
-                  >
-                    Valider (1 000 Rs)
-                  </Button>
-                )}
-                {selectedQuote.status === 'approved' && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => { handleBOQRequest(selectedQuote); setSelectedQuote(null); }}
-                  >
-                    BOQ (1 500 Rs)
-                  </Button>
-                )}
-                <Button size="sm" variant="ghost" onClick={() => setSelectedQuote(null)}>
-                  <X className="h-4 w-4 mr-1" /> Fermer
-                </Button>
-              </div>
+                 {selectedQuote.status === 'pending' && (
+                   <Button
+                     size="sm"
+                     onClick={() => { handleValidate(selectedQuote); setSelectedQuote(null); }}
+                   >
+                     Valider (1 000 Rs)
+                   </Button>
+                 )}
+                 {selectedQuote.status === 'approved' && (
+                   Number(selectedQuote.boq_requested)
+                     ? <Button size="sm" variant="outline" className="text-green-700 border-green-300"
+                         onClick={() => { selectedQuote.purchase_report_id && navigate(`/pro/reports/${selectedQuote.purchase_report_id}`); setSelectedQuote(null); }}>
+                         <ClipboardList className="h-3 w-3 mr-1" />Voir le rapport
+                       </Button>
+                     : <Button size="sm" variant="outline"
+                         onClick={() => { const q = selectedQuote; setSelectedQuote(null); handleBoqReport(q); }}>
+                         <ClipboardList className="h-3 w-3 mr-1" />Rapport d'Achat (1 500 Rs)
+                       </Button>
+                 )}
+                 <Button size="sm" variant="ghost" onClick={() => setSelectedQuote(null)}>
+                   <X className="h-4 w-4 mr-1" /> Fermer
+                 </Button>
+               </div>
             </div>
           )}
         </DialogContent>

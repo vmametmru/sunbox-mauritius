@@ -205,5 +205,43 @@ CREATE TABLE IF NOT EXISTS `pro_schema_version` (
     PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-INSERT INTO `pro_schema_version` (`id`, `version`) VALUES (1, '1.4.0')
+-- ── Purchase Reports (Rapport d'Achat) ────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `pro_purchase_reports` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `quote_id` INT NOT NULL,
+    `quote_reference` VARCHAR(50) DEFAULT '',
+    `model_name` VARCHAR(255) DEFAULT '',
+    `status` ENUM('in_progress','completed') DEFAULT 'in_progress',
+    `total_amount` DECIMAL(12,2) DEFAULT 0,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (`quote_id`) REFERENCES `pro_quotes`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `pro_purchase_report_items` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `report_id` INT NOT NULL,
+    `supplier_name` VARCHAR(255) DEFAULT 'Fournisseur non défini',
+    `category_name` VARCHAR(255) NOT NULL,
+    `description` TEXT NOT NULL,
+    `quantity` DECIMAL(10,3) DEFAULT 1,
+    `unit` VARCHAR(50) DEFAULT '',
+    `unit_price` DECIMAL(12,2) DEFAULT 0,
+    `total_price` DECIMAL(12,2) DEFAULT 0,
+    `is_ordered` TINYINT(1) DEFAULT 0,
+    `display_order` INT DEFAULT 0,
+    FOREIGN KEY (`report_id`) REFERENCES `pro_purchase_reports`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Add boq_requested to pro_quotes if missing
+SET @col_exists = (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'pro_quotes'
+      AND COLUMN_NAME = 'boq_requested'
+);
+SET @sql = IF(@col_exists > 0, 'SELECT 1', 'ALTER TABLE `pro_quotes` ADD COLUMN `boq_requested` TINYINT(1) DEFAULT 0 AFTER `valid_until`');
+PREPARE _stmt FROM @sql; EXECUTE _stmt; DEALLOCATE PREPARE _stmt;
+
+INSERT INTO `pro_schema_version` (`id`, `version`) VALUES (1, '1.5.0')
 ON DUPLICATE KEY UPDATE `version` = VALUES(`version`), `applied_at` = NOW();

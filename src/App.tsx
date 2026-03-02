@@ -52,7 +52,8 @@ import ProSettingsPage from "./pages/pro/ProSettingsPage";
 import ProModelRequestPage from "./pages/pro/ProModelRequestPage";
 import ProModelsOverridePage from "./pages/pro/ProModelsOverridePage";
 import RequirePro from "./components/RequirePro";
-// Pro site admin pages (reuse existing admin pages — all calls go to API_BASE_URL = pro site's own API)
+import PurchaseReportsPage from "./pages/admin/PurchaseReportsPage";
+import PurchaseReportDetailPage from "./pages/admin/PurchaseReportDetailPage";
 import ProAdminContactsPage from "./pages/admin/ContactsPage";
 import ProAdminDiscountsPage from "./pages/admin/DiscountsPage";
 import ProAdminEmailPage from "./pages/admin/EmailSettingsPage";
@@ -89,6 +90,8 @@ const App = () => (
                   <Route path="quotes" element={<QuotesPage />} />
                   <Route path="quotes/new" element={<CreateQuotePage />} />
                   <Route path="quotes/:id" element={<QuoteDetailPage />} />
+                  <Route path="reports" element={<PurchaseReportsPage />} />
+                  <Route path="reports/:id" element={<PurchaseReportDetailPage />} />
                   <Route path="contacts" element={<ContactsPage />} />
                   <Route path="models" element={<AdminModelsPage />} />
                   <Route path="media" element={<MediaPage />} />
@@ -112,6 +115,8 @@ const App = () => (
                 <Route path="/pro" element={<ProLayout />}>
                   <Route index element={<ProDashboardPage />} />
                   <Route path="quotes" element={<ProQuotesPage />} />
+                  <Route path="reports" element={<PurchaseReportsPage />} />
+                  <Route path="reports/:id" element={<PurchaseReportDetailPage />} />
                   <Route path="model-request" element={<ProModelRequestPage />} />
                   <Route path="models" element={<ProModelsOverridePage />} />
                   <Route path="settings" element={<ProSettingsPage />} />

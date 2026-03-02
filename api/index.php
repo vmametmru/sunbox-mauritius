@@ -6,8 +6,12 @@ handleCORS();
 
 // Pro site deployment versions — increment these when templates or DB schema change.
 // PRO_FILE_VERSION must match define('PRO_FILE_VERSION', ...) in api/pro_deploy/api_config.php
-define('PRO_FILE_VERSION',      '1.6.0');
-define('PRO_DB_SCHEMA_VERSION', '1.4.0');
+define('PRO_FILE_VERSION',      '1.7.0');
+define('PRO_DB_SCHEMA_VERSION', '1.5.0');
+
+// Sunbox main database schema version.
+// Increment when new tables or columns are added.
+define('SUNBOX_DB_SCHEMA_VERSION', '2.1.0');
 
 $action = $_GET['action'] ?? '';
 $body   = getRequestBody();
@@ -61,7 +65,104 @@ try {
             break;
         }
 
-        // === SETTINGS
+        // === SUNBOX DB VERSIONING ─────────────────────────────────────────────
+        case 'check_db_version': {
+            requireAdmin();
+            $currentVersion = '0.0.0';
+            try {
+                $row = $db->query("SELECT `version` FROM `db_schema_version` WHERE `id` = 1 LIMIT 1")->fetch();
+                if ($row) $currentVersion = $row['version'];
+            } catch (\Throwable $e) {
+                // Table doesn't exist yet — version is 0.0.0
+            }
+            ok([
+                'current_version' => $currentVersion,
+                'latest_version'  => SUNBOX_DB_SCHEMA_VERSION,
+                'is_up_to_date'   => version_compare($currentVersion, SUNBOX_DB_SCHEMA_VERSION, '>='),
+            ]);
+            break;
+        }
+
+        case 'update_db_schema': {
+            requireAdmin();
+            $messages = [];
+
+            // Helper: safely add a column only if it doesn't exist
+            $addCol = function(string $table, string $col, string $def) use ($db, &$messages): void {
+                $s = $db->prepare(
+                    "SELECT COUNT(*) FROM information_schema.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?"
+                );
+                $s->execute([$table, $col]);
+                if (!(bool)$s->fetchColumn()) {
+                    $db->exec("ALTER TABLE `{$table}` ADD COLUMN `{$col}` {$def}");
+                    $messages[] = "Colonne ajoutée : {$table}.{$col}";
+                }
+            };
+
+            // Helper: create a table only if it doesn't exist
+            $createTable = function(string $name, string $sql) use ($db, &$messages): void {
+                $s = $db->prepare(
+                    "SELECT COUNT(*) FROM information_schema.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?"
+                );
+                $s->execute([$name]);
+                if (!(bool)$s->fetchColumn()) {
+                    $db->exec($sql);
+                    $messages[] = "Table créée : {$name}";
+                }
+            };
+
+            // ── v2.1.0 ── Purchase Reports (Rapport d'Achat) ──────────────────
+            $createTable('purchase_reports', "
+                CREATE TABLE `purchase_reports` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `quote_id` INT NOT NULL,
+                    `quote_reference` VARCHAR(50) DEFAULT '',
+                    `model_name` VARCHAR(255) DEFAULT '',
+                    `status` ENUM('in_progress','completed') DEFAULT 'in_progress',
+                    `total_amount` DECIMAL(12,2) DEFAULT 0,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            ");
+
+            $createTable('purchase_report_items', "
+                CREATE TABLE `purchase_report_items` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `report_id` INT NOT NULL,
+                    `supplier_name` VARCHAR(255) DEFAULT 'Fournisseur non défini',
+                    `category_name` VARCHAR(255) NOT NULL,
+                    `description` TEXT NOT NULL,
+                    `quantity` DECIMAL(10,3) DEFAULT 1,
+                    `unit` VARCHAR(50) DEFAULT '',
+                    `unit_price` DECIMAL(12,2) DEFAULT 0,
+                    `total_price` DECIMAL(12,2) DEFAULT 0,
+                    `is_ordered` TINYINT(1) DEFAULT 0,
+                    `display_order` INT DEFAULT 0,
+                    FOREIGN KEY (`report_id`) REFERENCES `purchase_reports`(`id`) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            ");
+
+            // ── Schema version table (always create / update) ─────────────────
+            $db->exec("CREATE TABLE IF NOT EXISTS `db_schema_version` (
+                `id`         INT NOT NULL DEFAULT 1,
+                `version`    VARCHAR(20) NOT NULL,
+                `applied_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+            $db->prepare(
+                "INSERT INTO `db_schema_version` (`id`, `version`) VALUES (1, ?)
+                 ON DUPLICATE KEY UPDATE `version` = VALUES(`version`), `applied_at` = NOW()"
+            )->execute([SUNBOX_DB_SCHEMA_VERSION]);
+
+            if (empty($messages)) $messages[] = 'Base de données déjà à jour.';
+            ok(['version' => SUNBOX_DB_SCHEMA_VERSION, 'messages' => $messages]);
+            break;
+        }
+
+
         case 'get_settings': {
             $group = $body['group'] ?? null;
             $sql = "SELECT setting_key, setting_value FROM settings";
@@ -1125,7 +1226,147 @@ try {
             break;
         }
 
-        // === ADMIN QUOTES (Free-form and Model-based)
+        // === PURCHASE REPORTS (Rapport d'Achat) — no credit deduction for admin
+        case 'create_purchase_report': {
+            requireAdmin();
+            validateRequired($body, ['quote_id']);
+            $quoteId = (int)$body['quote_id'];
+
+            // Idempotent: return existing report if already generated
+            $chk = $db->prepare("SELECT id FROM purchase_reports WHERE quote_id = ? ORDER BY created_at DESC LIMIT 1");
+            $chk->execute([$quoteId]);
+            $existing = $chk->fetch();
+            if ($existing) { ok(['report_id' => (int)$existing['id'], 'already_exists' => true]); break; }
+
+            // Get quote + model
+            $qStmt = $db->prepare("
+                SELECT q.*, COALESCE(m.name, q.model_name) AS resolved_model_name
+                FROM quotes q LEFT JOIN models m ON q.model_id = m.id WHERE q.id = ?
+            ");
+            $qStmt->execute([$quoteId]);
+            $quote = $qStmt->fetch();
+            if (!$quote) fail('Devis introuvable', 404);
+
+            // Fetch BOQ lines
+            $lStmt = $db->prepare("
+                SELECT bc.name AS category_name,
+                       bl.description, bl.quantity, bl.unit, bl.margin_percent,
+                       COALESCE(pl.unit_price, bl.unit_cost_ht) AS unit_price,
+                       ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2) AS total_price,
+                       COALESCE(s.name, 'Fournisseur non défini') AS supplier_name,
+                       bc.display_order AS cat_order, bl.display_order AS line_order
+                FROM boq_categories bc
+                LEFT JOIN boq_lines bl ON bl.category_id = bc.id
+                LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
+                LEFT JOIN suppliers s ON bl.supplier_id = s.id
+                WHERE bc.model_id = ? AND bc.is_option = FALSE AND bl.id IS NOT NULL
+                ORDER BY COALESCE(s.name,'Fournisseur non défini'), bc.display_order, bl.display_order
+            ");
+            $lStmt->execute([(int)$quote['model_id']]);
+            $lines = $lStmt->fetchAll();
+
+            $totalAmount = (float)array_sum(array_column($lines, 'total_price'));
+
+            $db->beginTransaction();
+            try {
+                $db->prepare("INSERT INTO purchase_reports (quote_id, quote_reference, model_name, status, total_amount) VALUES (?,?,?,?,?)")
+                   ->execute([$quoteId, $quote['reference_number'], $quote['resolved_model_name'] ?? '', 'in_progress', $totalAmount]);
+                $reportId = (int)$db->lastInsertId();
+
+                $iStmt = $db->prepare("INSERT INTO purchase_report_items
+                    (report_id, supplier_name, category_name, description, quantity, unit, unit_price, total_price, display_order)
+                    VALUES (?,?,?,?,?,?,?,?,?)");
+                foreach ($lines as $i => $l) {
+                    $iStmt->execute([
+                        $reportId, $l['supplier_name'], $l['category_name'], $l['description'],
+                        (float)$l['quantity'], $l['unit'], (float)$l['unit_price'], (float)$l['total_price'], $i,
+                    ]);
+                }
+                $db->commit();
+                ok(['report_id' => $reportId]);
+            } catch (Exception $e) {
+                $db->rollBack();
+                throw $e;
+            }
+            break;
+        }
+
+        case 'get_quote_purchase_report': {
+            requireAdmin();
+            validateRequired($body, ['quote_id']);
+            $chk = $db->prepare("SELECT id FROM purchase_reports WHERE quote_id = ? ORDER BY created_at DESC LIMIT 1");
+            $chk->execute([(int)$body['quote_id']]);
+            $row = $chk->fetch();
+            ok($row ? ['report_id' => (int)$row['id']] : null);
+            break;
+        }
+
+        case 'get_purchase_reports': {
+            requireAdmin();
+            $rows = $db->query("
+                SELECT r.*, q.customer_name
+                FROM purchase_reports r
+                LEFT JOIN quotes q ON q.id = r.quote_id
+                ORDER BY r.created_at DESC
+            ")->fetchAll();
+            foreach ($rows as &$r) { $r['total_amount'] = (float)$r['total_amount']; }
+            ok($rows);
+            break;
+        }
+
+        case 'get_purchase_report': {
+            requireAdmin();
+            validateRequired($body, ['id']);
+            $rStmt = $db->prepare("
+                SELECT r.*, q.customer_name, q.customer_email, q.customer_phone
+                FROM purchase_reports r
+                LEFT JOIN quotes q ON q.id = r.quote_id
+                WHERE r.id = ?
+            ");
+            $rStmt->execute([(int)$body['id']]);
+            $report = $rStmt->fetch();
+            if (!$report) fail('Rapport introuvable', 404);
+
+            $iStmt = $db->prepare("SELECT * FROM purchase_report_items WHERE report_id = ? ORDER BY supplier_name, display_order");
+            $iStmt->execute([(int)$body['id']]);
+            $items = $iStmt->fetchAll();
+
+            $groups = [];
+            foreach ($items as $item) {
+                $sName = $item['supplier_name'];
+                if (!isset($groups[$sName])) {
+                    $groups[$sName] = ['supplier_name' => $sName, 'items' => [], 'subtotal' => 0.0];
+                }
+                $item['is_ordered']  = (bool)$item['is_ordered'];
+                $item['quantity']    = (float)$item['quantity'];
+                $item['unit_price']  = (float)$item['unit_price'];
+                $item['total_price'] = (float)$item['total_price'];
+                $groups[$sName]['items'][]   = $item;
+                $groups[$sName]['subtotal'] += (float)$item['total_price'];
+            }
+            $report['groups']       = array_values($groups);
+            $report['total_amount'] = (float)$report['total_amount'];
+            ok($report);
+            break;
+        }
+
+        case 'toggle_report_item': {
+            requireAdmin();
+            validateRequired($body, ['id']);
+            $db->prepare("UPDATE purchase_report_items SET is_ordered = NOT is_ordered WHERE id = ?")->execute([(int)$body['id']]);
+            ok();
+            break;
+        }
+
+        case 'update_report_status': {
+            requireAdmin();
+            validateRequired($body, ['id', 'status']);
+            $db->prepare("UPDATE purchase_reports SET status = ?, updated_at = NOW() WHERE id = ?")->execute([$body['status'], (int)$body['id']]);
+            ok();
+            break;
+        }
+
+
         case 'create_admin_quote': {
             // Required for both free and model-based quotes
             validateRequired($body, ['customer_name', 'customer_email', 'customer_phone']);
@@ -3039,6 +3280,7 @@ try {
                 $addCol('pro_quotes', 'model_type',       "VARCHAR(20) DEFAULT 'container' AFTER `model_name`");
                 $addCol('pro_quotes', 'notes',            "TEXT AFTER `total_price`");
                 $addCol('pro_quotes', 'valid_until',      "DATE DEFAULT NULL AFTER `status`");
+                $addCol('pro_quotes', 'boq_requested',    "TINYINT(1) DEFAULT 0 AFTER `valid_until`");
 
                 // ── Quote options (v1.4.0) ─────────────────────────────────────
                 $proPdo->exec("CREATE TABLE IF NOT EXISTS `pro_quote_options` (
@@ -3049,6 +3291,34 @@ try {
                     `option_price` DECIMAL(12,2) DEFAULT 0,
                     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (`quote_id`) REFERENCES `pro_quotes`(`id`) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                // ── Purchase Reports (v1.5.0) ──────────────────────────────────
+                $proPdo->exec("CREATE TABLE IF NOT EXISTS `pro_purchase_reports` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `quote_id` INT NOT NULL,
+                    `quote_reference` VARCHAR(50) DEFAULT '',
+                    `model_name` VARCHAR(255) DEFAULT '',
+                    `status` ENUM('in_progress','completed') DEFAULT 'in_progress',
+                    `total_amount` DECIMAL(12,2) DEFAULT 0,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    FOREIGN KEY (`quote_id`) REFERENCES `pro_quotes`(`id`) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                $proPdo->exec("CREATE TABLE IF NOT EXISTS `pro_purchase_report_items` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `report_id` INT NOT NULL,
+                    `supplier_name` VARCHAR(255) DEFAULT 'Fournisseur non défini',
+                    `category_name` VARCHAR(255) NOT NULL,
+                    `description` TEXT NOT NULL,
+                    `quantity` DECIMAL(10,3) DEFAULT 1,
+                    `unit` VARCHAR(50) DEFAULT '',
+                    `unit_price` DECIMAL(12,2) DEFAULT 0,
+                    `total_price` DECIMAL(12,2) DEFAULT 0,
+                    `is_ordered` TINYINT(1) DEFAULT 0,
+                    `display_order` INT DEFAULT 0,
+                    FOREIGN KEY (`report_id`) REFERENCES `pro_purchase_reports`(`id`) ON DELETE CASCADE
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 
                 // ── New tables (v1.2.0) ────────────────────────────────────────

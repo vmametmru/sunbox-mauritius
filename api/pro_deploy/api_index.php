@@ -381,7 +381,8 @@ try {
             requireAdmin();
             $db = getDB();
             $stmt = $db->query("
-                SELECT q.*, c.name AS contact_name, c.email AS contact_email
+                SELECT q.*, c.name AS contact_name, c.email AS contact_email,
+                       (SELECT id FROM pro_purchase_reports WHERE quote_id = q.id ORDER BY id DESC LIMIT 1) AS purchase_report_id
                 FROM pro_quotes q
                 LEFT JOIN pro_contacts c ON c.id = q.contact_id
                 ORDER BY q.created_at DESC
@@ -543,7 +544,149 @@ try {
             break;
         }
 
-        // ── DISCOUNTS (own DB) ─────────────────────────────────────────────────
+        // ── PURCHASE REPORTS (Rapport d'Achat) ────────────────────────────────
+        case 'request_boq_report': {
+            requireAdmin();
+            $db = getDB();
+            validateRequired($body, ['quote_id']);
+            $quoteId = (int)$body['quote_id'];
+
+            $qStmt = $db->prepare("SELECT * FROM pro_quotes WHERE id = ?");
+            $qStmt->execute([$quoteId]);
+            $quote = $qStmt->fetch();
+            if (!$quote) fail('Devis introuvable', 404);
+
+            // Idempotent: if already requested, return existing report id
+            if (!empty($quote['boq_requested'])) {
+                $rStmt = $db->prepare("SELECT id FROM pro_purchase_reports WHERE quote_id = ? ORDER BY created_at DESC LIMIT 1");
+                $rStmt->execute([$quoteId]);
+                $existing = $rStmt->fetch();
+                if ($existing) { ok(['report_id' => (int)$existing['id'], 'already_exists' => true]); break; }
+            }
+
+            // Deduct 1 500 Rs
+            $creditResult = deductCredits(1500, 'boq_report_requested', $quoteId);
+            if (!($creditResult['success'] ?? false)) {
+                fail($creditResult['error'] ?? 'Crédits insuffisants', 402);
+            }
+
+            // Fetch BOQ lines from Sunbox DB
+            $sdb   = getSunboxDB();
+            $lStmt = $sdb->prepare("
+                SELECT bc.name AS category_name,
+                       bl.description, bl.quantity, bl.unit, bl.margin_percent,
+                       COALESCE(pl.unit_price, bl.unit_cost_ht) AS unit_price,
+                       ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2) AS total_price,
+                       COALESCE(s.name, 'Fournisseur non défini') AS supplier_name,
+                       bc.display_order AS cat_order, bl.display_order AS line_order
+                FROM boq_categories bc
+                LEFT JOIN boq_lines bl ON bl.category_id = bc.id
+                LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
+                LEFT JOIN suppliers s ON bl.supplier_id = s.id
+                WHERE bc.model_id = ? AND bc.is_option = FALSE AND bl.id IS NOT NULL
+                ORDER BY COALESCE(s.name,'Fournisseur non défini'), bc.display_order, bl.display_order
+            ");
+            $lStmt->execute([(int)$quote['model_id']]);
+            $lines = $lStmt->fetchAll();
+
+            $totalAmount = (float)array_sum(array_column($lines, 'total_price'));
+
+            $db->beginTransaction();
+            try {
+                $db->prepare("INSERT INTO pro_purchase_reports (quote_id, quote_reference, model_name, status, total_amount) VALUES (?,?,?,?,?)")
+                   ->execute([$quoteId, $quote['reference_number'], $quote['model_name'], 'in_progress', $totalAmount]);
+                $reportId = (int)$db->lastInsertId();
+
+                $iStmt = $db->prepare("INSERT INTO pro_purchase_report_items
+                    (report_id, supplier_name, category_name, description, quantity, unit, unit_price, total_price, display_order)
+                    VALUES (?,?,?,?,?,?,?,?,?)");
+                foreach ($lines as $i => $l) {
+                    $iStmt->execute([
+                        $reportId, $l['supplier_name'], $l['category_name'], $l['description'],
+                        (float)$l['quantity'], $l['unit'], (float)$l['unit_price'], (float)$l['total_price'], $i,
+                    ]);
+                }
+
+                $db->prepare("UPDATE pro_quotes SET boq_requested = 1 WHERE id = ?")->execute([$quoteId]);
+                $db->commit();
+                ok(['report_id' => $reportId]);
+            } catch (Exception $e) {
+                $db->rollBack();
+                throw $e;
+            }
+            break;
+        }
+
+        case 'get_purchase_reports': {
+            requireAdmin();
+            $db   = getDB();
+            $rows = $db->query("
+                SELECT r.*, q.customer_name
+                FROM pro_purchase_reports r
+                LEFT JOIN pro_quotes q ON q.id = r.quote_id
+                ORDER BY r.created_at DESC
+            ")->fetchAll();
+            foreach ($rows as &$r) { $r['total_amount'] = (float)$r['total_amount']; }
+            ok($rows);
+            break;
+        }
+
+        case 'get_purchase_report': {
+            requireAdmin();
+            $db = getDB();
+            validateRequired($body, ['id']);
+            $rStmt = $db->prepare("
+                SELECT r.*, q.customer_name, q.customer_email, q.customer_phone
+                FROM pro_purchase_reports r
+                LEFT JOIN pro_quotes q ON q.id = r.quote_id
+                WHERE r.id = ?
+            ");
+            $rStmt->execute([(int)$body['id']]);
+            $report = $rStmt->fetch();
+            if (!$report) fail('Rapport introuvable', 404);
+
+            $iStmt = $db->prepare("SELECT * FROM pro_purchase_report_items WHERE report_id = ? ORDER BY supplier_name, display_order");
+            $iStmt->execute([(int)$body['id']]);
+            $items = $iStmt->fetchAll();
+
+            $groups = [];
+            foreach ($items as $item) {
+                $sName = $item['supplier_name'];
+                if (!isset($groups[$sName])) {
+                    $groups[$sName] = ['supplier_name' => $sName, 'items' => [], 'subtotal' => 0.0];
+                }
+                $item['is_ordered']  = (bool)$item['is_ordered'];
+                $item['quantity']    = (float)$item['quantity'];
+                $item['unit_price']  = (float)$item['unit_price'];
+                $item['total_price'] = (float)$item['total_price'];
+                $groups[$sName]['items'][]   = $item;
+                $groups[$sName]['subtotal'] += (float)$item['total_price'];
+            }
+            $report['groups']       = array_values($groups);
+            $report['total_amount'] = (float)$report['total_amount'];
+            ok($report);
+            break;
+        }
+
+        case 'toggle_report_item': {
+            requireAdmin();
+            $db = getDB();
+            validateRequired($body, ['id']);
+            $db->prepare("UPDATE pro_purchase_report_items SET is_ordered = NOT is_ordered WHERE id = ?")->execute([(int)$body['id']]);
+            ok();
+            break;
+        }
+
+        case 'update_report_status': {
+            requireAdmin();
+            $db = getDB();
+            validateRequired($body, ['id', 'status']);
+            $db->prepare("UPDATE pro_purchase_reports SET status = ?, updated_at = NOW() WHERE id = ?")->execute([$body['status'], (int)$body['id']]);
+            ok();
+            break;
+        }
+
+
         case 'get_discounts': {
             requireAdmin();
             $db = getDB();
