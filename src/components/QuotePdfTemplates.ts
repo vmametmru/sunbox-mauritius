@@ -179,7 +179,9 @@ function pdfOptBlock(opts: QuotePdfData['options']): string {
 
 /**
  * Photos + optional pool-dimensions panel in a single fixed-height row.
- * When a dims panel is provided (pool quotes): [photo | plan | dims] at height:120px.
+ * Images use height:120px + width:auto so the natural aspect ratio is preserved
+ * (html2canvas does not support object-fit, which would otherwise distort them).
+ * When a dims panel is provided (pool quotes): [photo | plan | dims] in one row.
  * Without dims (container / free quotes): original side-by-side layout unchanged.
  */
 function pdfModelRow(photo: string | undefined, plan: string | undefined, dimPanel?: string): string {
@@ -189,19 +191,25 @@ function pdfModelRow(photo: string | undefined, plan: string | undefined, dimPan
 
   if (!hasPhoto && !hasPlan && !hasDim) return '';
 
+  /** Wrap an img so it sits at exactly 120 px tall, natural width, no distortion. */
+  const imgWrap = (src: string, alt: string) =>
+    `<div style="overflow:hidden;border-radius:4px;flex-shrink:0;height:120px;">` +
+    `<img src="${src}" style="height:120px;width:auto;display:block;" alt="${alt}" />` +
+    `</div>`;
+
   if (hasDim) {
-    const photoCols = [
-      hasPhoto ? `<img src="${photo}" style="flex:1;height:120px;object-fit:cover;border-radius:4px;min-width:0;" alt="Photo" />` : '',
-      hasPlan  ? `<img src="${plan}"  style="flex:1;height:120px;object-fit:cover;border-radius:4px;min-width:0;" alt="Plan"  />` : '',
+    const cols = [
+      hasPhoto ? imgWrap(photo!, 'Photo') : '',
+      hasPlan  ? imgWrap(plan!,  'Plan')  : '',
       `<div style="flex:1;height:120px;min-width:0;">${dimPanel}</div>`,
     ].filter(Boolean).join('');
-    return `<div style="display:flex;gap:6px;margin-top:8px;height:120px;">${photoCols}</div>`;
+    return `<div style="display:flex;align-items:flex-start;gap:6px;margin-top:8px;">${cols}</div>`;
   }
 
   // No dimensions panel – original 2-photo layout (container / free quotes)
-  return `<div style="display:flex;gap:8px;margin-top:8px;">
-    ${hasPhoto ? `<img src="${photo}" style="width:${hasPlan ? '48%' : '70%'};max-height:120px;object-fit:cover;border-radius:4px;" alt="Photo" />` : ''}
-    ${hasPlan  ? `<img src="${plan}"  style="width:${hasPhoto ? '48%' : '70%'};max-height:120px;object-fit:cover;border-radius:4px;" alt="Plan"  />` : ''}
+  return `<div style="display:flex;align-items:flex-start;gap:8px;margin-top:8px;">
+    ${hasPhoto ? imgWrap(photo!, 'Photo') : ''}
+    ${hasPlan  ? imgWrap(plan!,  'Plan')  : ''}
   </div>`;
 }
 
