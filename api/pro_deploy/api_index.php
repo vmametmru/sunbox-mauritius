@@ -570,28 +570,50 @@ try {
                 fail($creditResult['error'] ?? 'Crédits insuffisants', 402);
             }
 
-            // Fetch base BOQ lines from Sunbox DB
-            $sdb   = getSunboxDB();
-            $boqSql = "
+            // Fetch base BOQ lines from Sunbox DB.
+            // Try with replace_with_sunbox column first; fall back if Sunbox DB not yet upgraded.
+            $sdb = getSunboxDB();
+
+            // Helper: build supplier_name expression (with or without replace_with_sunbox column)
+            $supplierExpr     = "IF(COALESCE(s.replace_with_sunbox,0)=1,'Sunbox',COALESCE(s.name,'Fournisseur non défini'))";
+            $supplierExprFb   = "COALESCE(s.name,'Fournisseur non défini')";   // fallback (column missing)
+
+            $boqSqlTpl = "
                 SELECT bc.name AS category_name,
                        bl.description, bl.quantity, bl.unit, bl.margin_percent,
                        COALESCE(pl.unit_price, bl.unit_cost_ht) AS unit_price,
                        ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht), 2) AS total_price,
-                       IF(COALESCE(s.replace_with_sunbox, 0) = 1, 'Sunbox', COALESCE(s.name, 'Fournisseur non défini')) AS supplier_name,
+                       %s AS supplier_name,
                        bc.display_order AS cat_order, bl.display_order AS line_order
                 FROM boq_categories bc
                 LEFT JOIN boq_lines bl ON bl.category_id = bc.id
                 LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
                 LEFT JOIN suppliers s ON bl.supplier_id = s.id
-                WHERE bc.model_id = ? AND bc.is_option = FALSE AND bl.id IS NOT NULL
+                WHERE bc.model_id = ? AND bc.is_option = %s AND bl.id IS NOT NULL
                 ORDER BY COALESCE(s.name,'Fournisseur non défini'), bc.display_order, bl.display_order
             ";
-            $lStmt = $sdb->prepare($boqSql);
-            $lStmt->execute([(int)$quote['model_id']]);
-            $lines = $lStmt->fetchAll();
+
+            // Execute a BOQ query with graceful column-missing fallback
+            $execBoqQuery = function(\PDO $pdo, string $sexpr, string $sexprFb, string $tpl, string $isOpt, array $params) {
+                $sql = sprintf($tpl, $sexpr, $isOpt);
+                try {
+                    $st = $pdo->prepare($sql);
+                    $st->execute($params);
+                    return $st->fetchAll();
+                } catch (\Throwable $e) {
+                    // Unknown column 'replace_with_sunbox' — retry with plain supplier name
+                    if (false !== stripos($e->getMessage(), 'replace_with_sunbox')) {
+                        $st = $pdo->prepare(sprintf($tpl, $sexprFb, $isOpt));
+                        $st->execute($params);
+                        return $st->fetchAll();
+                    }
+                    throw $e;
+                }
+            };
+
+            $lines = $execBoqQuery($sdb, $supplierExpr, $supplierExprFb, $boqSqlTpl, 'FALSE', [(int)$quote['model_id']]);
 
             // Fetch option BOQ lines for the options actually selected in this quote
-            // Step 1: get distinct option_name values from pro DB
             $optionLines = [];
             try {
                 $selOptStmt = $db->prepare(
@@ -600,15 +622,14 @@ try {
                 $selOptStmt->execute([$quoteId]);
                 $selectedOptionNames = array_column($selOptStmt->fetchAll(), 'option_name');
 
-                // Step 2: fetch BOQ lines for those option categories from Sunbox DB
                 if (!empty($selectedOptionNames)) {
                     $ph = implode(',', array_fill(0, count($selectedOptionNames), '?'));
-                    $optLinesStmt = $sdb->prepare("
+                    $optTpl = "
                         SELECT bc.name AS category_name,
                                bl.description, bl.quantity, bl.unit, bl.margin_percent,
                                COALESCE(pl.unit_price, bl.unit_cost_ht) AS unit_price,
                                ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht), 2) AS total_price,
-                               IF(COALESCE(s.replace_with_sunbox, 0) = 1, 'Sunbox', COALESCE(s.name, 'Fournisseur non défini')) AS supplier_name,
+                               %s AS supplier_name,
                                bc.display_order AS cat_order, bl.display_order AS line_order
                         FROM boq_categories bc
                         LEFT JOIN boq_lines bl ON bl.category_id = bc.id
@@ -616,10 +637,19 @@ try {
                         LEFT JOIN suppliers s ON bl.supplier_id = s.id
                         WHERE bc.model_id = ? AND bc.is_option = TRUE AND bc.name IN ($ph) AND bl.id IS NOT NULL
                         ORDER BY COALESCE(s.name,'Fournisseur non défini'), bc.display_order, bl.display_order
-                    ");
+                    ";
                     $params = array_merge([(int)$quote['model_id']], $selectedOptionNames);
-                    $optLinesStmt->execute($params);
-                    $optionLines = $optLinesStmt->fetchAll();
+                    try {
+                        $st = $sdb->prepare(sprintf($optTpl, $supplierExpr));
+                        $st->execute($params);
+                        $optionLines = $st->fetchAll();
+                    } catch (\Throwable $e) {
+                        if (false !== stripos($e->getMessage(), 'replace_with_sunbox')) {
+                            $st = $sdb->prepare(sprintf($optTpl, $supplierExprFb));
+                            $st->execute($params);
+                            $optionLines = $st->fetchAll();
+                        } else { throw $e; }
+                    }
                 }
             } catch (\Throwable $ignored) {
                 // pro_quote_options table may not exist yet; skip option items gracefully
@@ -706,10 +736,31 @@ try {
             $iStmt->execute([(int)$body['id']]);
             $items = $iStmt->fetchAll();
 
+            // Build a set of supplier names to replace with "Sunbox" at read time.
+            // This fixes both old reports (stored real name) and handles the case where the
+            // Sunbox DB hasn't been upgraded to v2.3.0 yet (replace_with_sunbox column missing).
+            $sunboxReplacedNames = [];
+            try {
+                $sdb = getSunboxDB();
+                // Try with the replace_with_sunbox column; fall back gracefully if missing.
+                try {
+                    $rStmt = $sdb->query("SELECT name FROM suppliers WHERE replace_with_sunbox = 1");
+                    foreach ($rStmt->fetchAll() as $row) {
+                        $sunboxReplacedNames[$row['name']] = true;
+                    }
+                } catch (\Throwable $ignored) {
+                    // Column doesn't exist yet (DB not upgraded) — no replacements applied
+                }
+            } catch (\Throwable $ignored) {
+                // getSunboxDB() unavailable — no replacements applied
+            }
+
             $buckets       = ['base' => [], 'option' => []];
             $totalAmountHT = 0.0;
             foreach ($items as $item) {
-                $sName  = $item['supplier_name'];
+                // Apply live "replace_with_sunbox" substitution — fixes old reports too
+                $rawName = $item['supplier_name'];
+                $sName   = isset($sunboxReplacedNames[$rawName]) ? 'Sunbox' : $rawName;
                 $bucket = ($item['is_option'] ?? 0) ? 'option' : 'base';
                 if (!isset($buckets[$bucket][$sName])) {
                     $buckets[$bucket][$sName] = ['supplier_name' => $sName, 'items' => [], 'subtotal_ht' => 0.0, 'subtotal_ttc' => 0.0];
