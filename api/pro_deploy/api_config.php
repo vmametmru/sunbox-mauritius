@@ -16,7 +16,7 @@ declare(strict_types=1);
  */
 
 /** Deployed file version — must match PRO_FILE_VERSION in sunbox api/index.php. */
-define('PRO_FILE_VERSION', '1.3.0');
+define('PRO_FILE_VERSION', '1.4.0');
 
 /**
  * Parse a single .env file from disk, bypassing getenv() entirely.
@@ -389,6 +389,30 @@ function fetchModels(): array
         error_log('ProSite fetchModels error: ' . $e->getMessage());
         return array_merge($empty, ['_error' => $e->getMessage()]);
     }
+}
+
+/**
+ * Return the Sunbox base URL from the root .env (e.g. https://sunbox-mauritius.com).
+ * Used to make all Sunbox-hosted image/plan URLs absolute.
+ */
+function sunboxBaseUrl(): string
+{
+    static $base = null;
+    if ($base !== null) return $base;
+    $e    = parseSunboxRootEnv();
+    $base = isset($e['APP_URL']) ? rtrim($e['APP_URL'], '/') : 'https://sunbox-mauritius.com';
+    return $base;
+}
+
+/**
+ * Make a single root-relative path absolute using the Sunbox base URL.
+ */
+function sunboxAbsUrl(?string $path): ?string
+{
+    if ($path === null || $path === '') return $path;
+    if (strpos($path, '://') !== false) return $path;  // already absolute
+    if (strlen($path) > 0 && $path[0] === '/') return sunboxBaseUrl() . $path;
+    return $path;
 }
 
 /**

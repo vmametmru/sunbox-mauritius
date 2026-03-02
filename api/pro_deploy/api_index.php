@@ -54,6 +54,201 @@ try {
             break;
         }
 
+        // ── CONFIGURATOR: all read directly from Sunbox DB ─────────────────────
+
+        case 'get_model_options': {
+            $modelId = (int)($body['model_id'] ?? 0);
+            if ($modelId <= 0) fail('model_id manquant');
+            $sdb  = getSunboxDB();
+            $stmt = $sdb->prepare("
+                SELECT mo.*, oc.name as category_name, oc.description as category_description,
+                       oc.image_id as category_image_id, mi.file_path as category_image_path
+                FROM model_options mo
+                LEFT JOIN option_categories oc ON mo.category_id = oc.id
+                LEFT JOIN model_images mi ON oc.image_id = mi.id
+                WHERE mo.model_id = ?
+                ORDER BY oc.display_order ASC, mo.display_order ASC
+            ");
+            $stmt->execute([$modelId]);
+            $options = $stmt->fetchAll();
+            foreach ($options as &$opt) {
+                $opt['category_image_url'] = sunboxAbsUrl(
+                    $opt['category_image_path'] ? '/' . ltrim($opt['category_image_path'], '/') : null
+                );
+                unset($opt['category_image_path']);
+            }
+            ok($options);
+            break;
+        }
+
+        case 'get_boq_options': {
+            $modelId = (int)($body['model_id'] ?? 0);
+            if ($modelId <= 0) fail('model_id manquant');
+            $sdb  = getSunboxDB();
+            $stmt = $sdb->prepare("
+                SELECT bc.id, bc.name, bc.display_order, bc.parent_id, bc.qty_editable,
+                       mi.file_path as image_path,
+                       COALESCE(SUM(ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS price_ht
+                FROM boq_categories bc
+                LEFT JOIN boq_lines bl ON bc.id = bl.category_id
+                LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
+                LEFT JOIN model_images mi ON bc.image_id = mi.id
+                WHERE bc.model_id = ? AND bc.is_option = TRUE
+                GROUP BY bc.id
+                ORDER BY bc.name ASC
+            ");
+            $stmt->execute([$modelId]);
+            $options = $stmt->fetchAll();
+            foreach ($options as &$opt) {
+                $opt['id']         = (int)$opt['id'];
+                $opt['parent_id']  = $opt['parent_id'] ? (int)$opt['parent_id'] : null;
+                $opt['display_order'] = (int)$opt['display_order'];
+                $opt['qty_editable']  = (bool)($opt['qty_editable'] ?? false);
+                $opt['image_url']  = sunboxAbsUrl(
+                    $opt['image_path'] ? '/' . ltrim($opt['image_path'], '/') : null
+                );
+                unset($opt['image_path']);
+            }
+            ok($options);
+            break;
+        }
+
+        case 'get_boq_base_categories': {
+            $modelId = (int)($body['model_id'] ?? 0);
+            if ($modelId <= 0) fail('model_id manquant');
+            $sdb  = getSunboxDB();
+            $stmt = $sdb->prepare("
+                SELECT bc.id, bc.name, bc.display_order, bc.parent_id
+                FROM boq_categories bc
+                WHERE bc.model_id = ? AND bc.is_option = FALSE
+                ORDER BY bc.name ASC
+            ");
+            $stmt->execute([$modelId]);
+            $categories = $stmt->fetchAll();
+            $lineStmt = $sdb->prepare("
+                SELECT id, description FROM boq_lines
+                WHERE category_id = ? ORDER BY description ASC
+            ");
+            foreach ($categories as &$cat) {
+                $cat['id']         = (int)$cat['id'];
+                $cat['parent_id']  = $cat['parent_id'] ? (int)$cat['parent_id'] : null;
+                $cat['display_order'] = (int)$cat['display_order'];
+                $lineStmt->execute([$cat['id']]);
+                $cat['lines'] = $lineStmt->fetchAll();
+            }
+            ok($categories);
+            break;
+        }
+
+        case 'get_boq_category_lines': {
+            $categoryId = (int)($body['category_id'] ?? 0);
+            if ($categoryId <= 0) fail('category_id manquant');
+            $sdb  = getSunboxDB();
+            $stmt = $sdb->prepare("
+                SELECT id, description FROM boq_lines
+                WHERE category_id = ? ORDER BY description ASC
+            ");
+            $stmt->execute([$categoryId]);
+            ok($stmt->fetchAll());
+            break;
+        }
+
+        case 'get_pool_boq_full': {
+            $modelId = (int)($body['model_id'] ?? 0);
+            if ($modelId <= 0) fail('model_id manquant');
+            $sdb  = getSunboxDB();
+            $stmt = $sdb->prepare("
+                SELECT bc.id, bc.name, bc.is_option, bc.qty_editable, bc.display_order, bc.parent_id
+                FROM boq_categories bc
+                WHERE bc.model_id = ?
+                ORDER BY bc.display_order ASC, bc.name ASC
+            ");
+            $stmt->execute([$modelId]);
+            $categories = $stmt->fetchAll();
+            $lineStmt   = $sdb->prepare("
+                SELECT bl.id, bl.description, bl.quantity, bl.quantity_formula,
+                       bl.unit, bl.unit_cost_ht, bl.unit_cost_formula,
+                       bl.price_list_id, bl.margin_percent, bl.display_order,
+                       pl.unit_price AS price_list_unit_price
+                FROM boq_lines bl
+                LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
+                WHERE bl.category_id = ?
+                ORDER BY bl.display_order ASC, bl.id ASC
+            ");
+            foreach ($categories as &$cat) {
+                $cat['id']         = (int)$cat['id'];
+                $cat['is_option']  = (bool)$cat['is_option'];
+                $cat['qty_editable'] = (bool)($cat['qty_editable'] ?? false);
+                $cat['parent_id']  = $cat['parent_id'] ? (int)$cat['parent_id'] : null;
+                $cat['display_order'] = (int)$cat['display_order'];
+                $lineStmt->execute([$cat['id']]);
+                $lines = $lineStmt->fetchAll();
+                foreach ($lines as &$ln) {
+                    $ln['id']            = (int)$ln['id'];
+                    $ln['quantity']      = (float)$ln['quantity'];
+                    $ln['unit_cost_ht']  = (float)$ln['unit_cost_ht'];
+                    $ln['margin_percent'] = (float)$ln['margin_percent'];
+                    $ln['display_order'] = (int)$ln['display_order'];
+                    $ln['price_list_id'] = $ln['price_list_id'] ? (int)$ln['price_list_id'] : null;
+                    $ln['price_list_unit_price'] = $ln['price_list_unit_price'] !== null ? (float)$ln['price_list_unit_price'] : null;
+                }
+                $cat['lines'] = $lines;
+            }
+            ok($categories);
+            break;
+        }
+
+        case 'get_model_boq_price': {
+            $modelId = (int)($body['model_id'] ?? 0);
+            if ($modelId <= 0) fail('model_id manquant');
+            $sdb      = getSunboxDB();
+            $mStmt    = $sdb->prepare("SELECT unforeseen_cost_percent FROM models WHERE id = ?");
+            $mStmt->execute([$modelId]);
+            $mRow     = $mStmt->fetch();
+            $unforeseen = (float)($mRow['unforeseen_cost_percent'] ?? 10);
+            $stmt = $sdb->prepare("
+                SELECT
+                    COALESCE(SUM(ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS base_price_ht,
+                    COALESCE(SUM(ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht), 2)), 0) AS total_cost_ht
+                FROM boq_categories bc
+                LEFT JOIN boq_lines bl ON bc.id = bl.category_id
+                LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
+                WHERE bc.model_id = ? AND bc.is_option = FALSE
+            ");
+            $stmt->execute([$modelId]);
+            $res          = $stmt->fetch();
+            $basePriceHT  = (float)$res['base_price_ht'];
+            $totalCostHT  = (float)$res['total_cost_ht'];
+            ok([
+                'model_id'                    => $modelId,
+                'base_price_ht'               => $basePriceHT,
+                'total_cost_ht'               => $totalCostHT,
+                'profit_ht'                   => round($basePriceHT - $totalCostHT, 2),
+                'unforeseen_cost_percent'      => $unforeseen,
+                'base_price_ht_with_unforeseen' => round($basePriceHT * (1 + $unforeseen / 100), 2),
+            ]);
+            break;
+        }
+
+        case 'get_pool_boq_variables': {
+            $sdb  = getSunboxDB();
+            $stmt = $sdb->query("SELECT * FROM pool_boq_variables ORDER BY display_order ASC");
+            ok($stmt->fetchAll());
+            break;
+        }
+
+        case 'get_pool_boq_price_list': {
+            $sdb  = getSunboxDB();
+            $stmt = $sdb->query("
+                SELECT pl.*, s.name AS supplier_name
+                FROM pool_boq_price_list pl
+                LEFT JOIN suppliers s ON pl.supplier_id = s.id
+                ORDER BY pl.display_order ASC
+            ");
+            ok($stmt->fetchAll());
+            break;
+        }
+
         case 'update_setting': {
             requireAdmin();
             $db = getDB();
