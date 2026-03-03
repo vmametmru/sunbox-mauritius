@@ -26,6 +26,7 @@ import {
   LogOut,
   Tag,
   ClipboardList,
+  RefreshCw,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -85,7 +86,8 @@ const navItems: NavItem[] = [
       { icon: FileCode, label: 'Modèles Piscine', path: '/admin/pool-template' },
       { icon: Mail, label: 'Email', path: '/admin/email' },
       { icon: CreditCard, label: 'Paiements', path: '/admin/payments' },
-      { icon: Settings, label: 'Site', path: '/admin/site' },
+      { icon: Settings,    label: 'Site',       path: '/admin/site' },
+      { icon: RefreshCw,   label: 'Mise à jour', path: '/admin/deploy' },
     ],
   },
   { icon: Lightbulb, label: 'Idées Dev', path: '/admin/dev-ideas' },
@@ -96,7 +98,7 @@ const navItems: NavItem[] = [
 const groupPaths: Record<string, string[]> = {
   commerce: ['/admin/quotes', '/admin/reports'],
   contacts: ['/admin/contacts', '/admin/suppliers'],
-  parametres: ['/admin/users', '/admin/models', '/admin/discounts', '/admin/media', '/admin/boq', '/admin/pool-prices', '/admin/pool-variables', '/admin/pool-template', '/admin/email', '/admin/payments', '/admin/site'],
+  parametres: ['/admin/users', '/admin/models', '/admin/discounts', '/admin/media', '/admin/boq', '/admin/pool-prices', '/admin/pool-variables', '/admin/pool-template', '/admin/email', '/admin/payments', '/admin/site', '/admin/deploy'],
 };
 
 export default function AdminLayout() {

@@ -191,7 +191,13 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
       const quote = await api.getQuoteWithDetails(id);
       
       // Load model info
-      const models = await api.getModels(quote.model_type, true);
+      // Pro API returns { models: [...], ... }; admin API returns a plain array — normalize both.
+      const modelsRaw = await api.getModels(quote.model_type, true);
+      const models: Model[] = Array.isArray(modelsRaw)
+        ? modelsRaw
+        : Array.isArray((modelsRaw as any)?.models)
+          ? (modelsRaw as any).models
+          : [];
       const modelData = models.find((m: Model) => m.id === quote.model_id);
       
       if (modelData) {

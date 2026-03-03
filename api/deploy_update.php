@@ -1,0 +1,188 @@
+<?php
+/**
+ * deploy_update.php – Self-update endpoint for Sunbox.
+ *
+ * Accepts multipart/form-data with:
+ *   - dist_zip : Vite build artifact (GitHub Actions artifact)
+ *   - api_zip  : PHP API artifact
+ *
+ * Validation before any extraction:
+ *   - dist_zip must contain "index.html" at root (Vite dist marker)
+ *   - api_zip  must contain "index.php"  at root (Sunbox API marker)
+ *
+ * Extraction targets (__DIR__ = .../sunbox-mauritius.com/api):
+ *   - dist_zip → dirname(__DIR__)       (web root)  — skips api/ sub-folder
+ *   - api_zip  → dirname(__DIR__)/api/  (api root)
+ *
+ * A deployment log line is appended to web_root/.sunbox_version.
+ */
+
+header('Content-Type: application/json; charset=utf-8');
+require_once __DIR__ . '/config.php';
+
+requireAdmin();
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    echo json_encode(['error' => 'POST requis']); exit;
+}
+
+/* ── helpers ─────────────────────────────────────────────────────────────── */
+
+function deployFail(string $msg, int $code = 400): void {
+    http_response_code($code);
+    echo json_encode(['success' => false, 'error' => $msg]);
+    exit;
+}
+
+/**
+ * Return all entry names in a zip, or throw RuntimeException.
+ */
+function zipEntryNames(string $path): array {
+    $zip = new ZipArchive();
+    $rc  = $zip->open($path, ZipArchive::RDONLY);
+    if ($rc !== true) throw new \RuntimeException("Impossible d'ouvrir le ZIP (code $rc).");
+    $names = [];
+    for ($i = 0; $i < $zip->numFiles; $i++) $names[] = $zip->getNameIndex($i);
+    $zip->close();
+    return $names;
+}
+
+/**
+ * Detect if every entry inside the zip is prefixed with a single top-level
+ * folder (e.g. "dist/" or "api/").  Returns that prefix or '' if none.
+ */
+function detectZipPrefix(array $names, string $expected): string {
+    $roots = array_unique(array_filter(
+        array_map(fn($n) => explode('/', $n)[0], $names)
+    ));
+    return (count($roots) === 1 && reset($roots) === $expected) ? $expected . '/' : '';
+}
+
+/**
+ * Extract zip to $destDir.
+ * $prefix : strip this prefix from all entry names before writing.
+ * $skip   : callable(string $relativeEntryName): bool — return true to skip.
+ */
+function extractZipTo(string $zipPath, string $destDir, string $prefix = '', ?callable $skip = null): int {
+    $zip = new ZipArchive();
+    if ($zip->open($zipPath) !== true) throw new \RuntimeException("Impossible d'ouvrir le ZIP pour extraction.");
+    $count = 0;
+    for ($i = 0; $i < $zip->numFiles; $i++) {
+        $name = $zip->getNameIndex($i);
+        // Strip prefix
+        if ($prefix !== '' && strpos($name, $prefix) === 0) {
+            $rel = substr($name, strlen($prefix));
+        } else if ($prefix !== '') {
+            continue; // entry outside expected prefix — skip
+        } else {
+            $rel = $name;
+        }
+        // Sanitise to prevent path traversal
+        $rel = ltrim(str_replace('..', '', $rel), '/\\');
+        if ($rel === '') continue;
+        if ($skip && $skip($rel)) continue;
+
+        $dest = $destDir . '/' . $rel;
+        if (substr($rel, -1) === '/') {
+            // directory entry
+            if (!is_dir($dest)) mkdir($dest, 0755, true);
+            continue;
+        }
+        $parent = dirname($dest);
+        if (!is_dir($parent)) mkdir($parent, 0755, true);
+        $data = $zip->getFromIndex($i);
+        if ($data !== false) { file_put_contents($dest, $data); $count++; }
+    }
+    $zip->close();
+    return $count;
+}
+
+/* ── paths ───────────────────────────────────────────────────────────────── */
+$webRoot = rtrim(dirname(__DIR__), '/'); // /home/mauriti2/sunbox-mauritius.com
+$apiRoot = $webRoot . '/api';
+
+/* ── shared finfo instance ───────────────────────────────────────────────── */
+$finfo = new finfo(FILEINFO_MIME_TYPE);
+
+/* ── process uploads ─────────────────────────────────────────────────────── */
+$results   = [];
+$anyChange = false;
+$allowedMimes = [
+    'application/zip',
+    'application/x-zip',
+    'application/x-zip-compressed',
+    'application/octet-stream',
+];
+
+// ── dist_zip ─────────────────────────────────────────────────────────────────
+if (isset($_FILES['dist_zip']) && $_FILES['dist_zip']['error'] === UPLOAD_ERR_OK) {
+    $tmp  = $_FILES['dist_zip']['tmp_name'];
+    $orig = basename($_FILES['dist_zip']['name'] ?? 'dist.zip');
+
+    if (!in_array($finfo->file($tmp), $allowedMimes, true)) {
+        deployFail('dist_zip: format invalide — un fichier ZIP est requis.');
+    }
+    try { $names = zipEntryNames($tmp); }
+    catch (\RuntimeException $e) { deployFail('dist_zip: ' . $e->getMessage()); }
+
+    // Must contain index.html (Vite dist marker) — case-sensitive
+    $hasIndexHtml = (bool) array_filter($names, fn($n) => preg_match('#(^|/)index\.html$#', $n));
+    if (!$hasIndexHtml) deployFail('dist_zip: index.html introuvable — ceci ne semble pas être un artefact Vite dist.');
+
+    $prefix = detectZipPrefix($names, 'dist');
+    try {
+        $count = extractZipTo($tmp, $webRoot, $prefix, fn($rel) => strpos($rel, 'api/') === 0);
+        $results['dist'] = ['status' => 'ok', 'file' => $orig, 'extracted' => $count];
+        $anyChange = true;
+    } catch (\RuntimeException $e) { deployFail('dist_zip extraction: ' . $e->getMessage(), 500); }
+
+} elseif (isset($_FILES['dist_zip']) && $_FILES['dist_zip']['error'] !== UPLOAD_ERR_NO_FILE) {
+    deployFail('dist_zip: erreur upload (code ' . $_FILES['dist_zip']['error'] . ').');
+}
+
+// ── api_zip ───────────────────────────────────────────────────────────────────
+if (isset($_FILES['api_zip']) && $_FILES['api_zip']['error'] === UPLOAD_ERR_OK) {
+    $tmp  = $_FILES['api_zip']['tmp_name'];
+    $orig = basename($_FILES['api_zip']['name'] ?? 'api.zip');
+
+    if (!in_array($finfo->file($tmp), $allowedMimes, true)) {
+        deployFail('api_zip: format invalide — un fichier ZIP est requis.');
+    }
+    try { $names = zipEntryNames($tmp); }
+    catch (\RuntimeException $e) { deployFail('api_zip: ' . $e->getMessage()); }
+
+    // Must contain index.php (Sunbox API marker) — case-sensitive
+    $hasIndexPhp = (bool) array_filter($names, fn($n) => preg_match('#(^|/)index\.php$#', $n));
+    if (!$hasIndexPhp) deployFail('api_zip: index.php introuvable — ceci ne semble pas être l\'artefact API Sunbox.');
+
+    $prefix = detectZipPrefix($names, 'api');
+    try {
+        $count = extractZipTo($tmp, $apiRoot, $prefix);
+        $results['api'] = ['status' => 'ok', 'file' => $orig, 'extracted' => $count];
+        $anyChange = true;
+    } catch (\RuntimeException $e) { deployFail('api_zip extraction: ' . $e->getMessage(), 500); }
+
+} elseif (isset($_FILES['api_zip']) && $_FILES['api_zip']['error'] !== UPLOAD_ERR_NO_FILE) {
+    deployFail('api_zip: erreur upload (code ' . $_FILES['api_zip']['error'] . ').');
+}
+
+if (!$anyChange) {
+    deployFail('Aucun fichier fourni. Envoyez dist_zip et/ou api_zip.');
+}
+
+/* ── version log ─────────────────────────────────────────────────────────── */
+$versionLine = date('Y-m-d H:i:s') . ' | ' .
+    implode(' | ', array_map(
+        fn($k, $v) => "$k: {$v['file']} ({$v['extracted']} fichiers)",
+        array_keys($results), array_values($results)
+    ));
+@file_put_contents($webRoot . '/.sunbox_version', $versionLine . "\n", FILE_APPEND);
+$versionLog = trim(@file_get_contents($webRoot . '/.sunbox_version') ?: '');
+
+echo json_encode([
+    'success'     => true,
+    'results'     => $results,
+    'version'     => $versionLine,
+    'version_log' => $versionLog,
+], JSON_UNESCAPED_UNICODE);
