@@ -44,18 +44,20 @@ jobs:
           NODE_OPTIONS: "--max-old-space-size=4096"
         run: npm run build
 
-      - name: Get sanitized branch name
+      - name: Get sanitized branch name and short SHA
         id: branch
-        run: echo "name=$(echo '${{ github.ref_name }}' | tr '/' '-')" >> $GITHUB_OUTPUT
+        run: |
+          echo "name=$(echo '${{ github.ref_name }}' | tr '/' '-')" >> $GITHUB_OUTPUT
+          echo "sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
       - name: Upload dist artifact
         uses: actions/upload-artifact@v4
         with:
-          name: dist-${{ steps.branch.outputs.name }}.zip
+          name: dist-${{ steps.branch.outputs.name }}-${{ steps.branch.outputs.sha }}.zip
           path: dist
 
       - name: Upload api artifact
         uses: actions/upload-artifact@v4
         with:
-          name: api-${{ steps.branch.outputs.name }}.zip
+          name: api-${{ steps.branch.outputs.name }}-${{ steps.branch.outputs.sha }}.zip
           path: api
