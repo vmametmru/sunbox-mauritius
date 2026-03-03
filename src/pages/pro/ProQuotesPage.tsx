@@ -7,7 +7,7 @@ import { FileText, X, ClipboardList, Download, Eye, Loader2 } from 'lucide-react
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { useNavigate } from 'react-router-dom';
-import { downloadQuotePdf, imageUrlToBase64 } from '@/components/QuotePdfGenerator';
+import { downloadQuotePdf } from '@/components/QuotePdfGenerator';
 import type { QuotePdfData, PdfDisplaySettings, CompanyInfo } from '@/components/QuotePdfTemplates';
 
 interface Quote {
@@ -95,12 +95,15 @@ export default function ProQuotesPage() {
   const handleDownloadPdf = async (quote: Quote) => {
     setGeneratingPdfId(quote.id);
     try {
-      const [pdfSettingsRaw, companySettingsRaw, siteSettingsRaw, fullQuote] = await Promise.all([
-        api.getSettings('pdf').catch(() => ({})),
-        api.getSettings('company').catch(() => ({})),
-        api.getSettings('site').catch(() => ({})),
+      // Load PDF context (Sunbox settings + logo as base64) and quote details in parallel
+      const [pdfContext, fullQuote] = await Promise.all([
+        api.query('get_pdf_context').catch(() => ({} as any)),
         api.getQuoteWithDetails(quote.id),
       ]);
+
+      const pdfSettingsRaw   = pdfContext?.pdf_settings     || {};
+      const companySettingsRaw = pdfContext?.company_settings || {};
+      const logoBase64: string = pdfContext?.logo_base64    || '';
 
       const pdfSettings: PdfDisplaySettings = {
         pdf_primary_color:     pdfSettingsRaw?.pdf_primary_color     || '#1A365D',
@@ -129,8 +132,6 @@ export default function ProQuotesPage() {
         company_address: companySettingsRaw?.company_address || '',
       };
 
-      const logoUrl: string = siteSettingsRaw?.site_logo || '';
-      const logoBase64 = logoUrl ? await imageUrlToBase64(logoUrl) : '';
       const vatRate = Number(pdfSettingsRaw?.vat_rate) || 15;
 
       const data: QuotePdfData = {
@@ -145,8 +146,9 @@ export default function ProQuotesPage() {
         customer_address: fullQuote.customer_address || '',
         model_name:       fullQuote.model_name,
         model_type:       fullQuote.model_type,
-        photo_url:        fullQuote.photo_url,
-        plan_url:         fullQuote.plan_url,
+        // Use server-side base64 if available (avoids CORS), otherwise fall back to URL
+        photo_url:        fullQuote.photo_base64 || fullQuote.photo_url,
+        plan_url:         fullQuote.plan_base64  || fullQuote.plan_url,
         pool_shape:       fullQuote.pool_shape,
         pool_longueur:    fullQuote.pool_longueur    != null ? Number(fullQuote.pool_longueur)    : null,
         pool_largeur:     fullQuote.pool_largeur     != null ? Number(fullQuote.pool_largeur)     : null,

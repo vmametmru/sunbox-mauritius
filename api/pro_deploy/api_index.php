@@ -526,12 +526,81 @@ try {
             }
             $quote['base_categories'] = $baseCategories;
 
+            // ── Encode photo/plan as base64 to avoid CORS issues on the pro site ──
+            $sunboxRoot = dirname(__DIR__, 3); // public_html/
+            $realBase = realpath($sunboxRoot) ?: $sunboxRoot;
+            foreach (['photo' => 'photo_url', 'plan' => 'plan_url'] as $type => $urlKey) {
+                $url = $quote[$urlKey] ?? '';
+                if (!$url) continue;
+                // Extract root-relative path from absolute URL (e.g. /uploads/models/x.jpg)
+                $path = parse_url($url, PHP_URL_PATH);
+                if ($path) {
+                    // Guard against path traversal
+                    $fullPath = realpath($sunboxRoot . '/' . ltrim($path, '/'));
+                    if ($fullPath && strncmp($fullPath, $realBase, strlen($realBase)) === 0 && is_file($fullPath)) {
+                        $mime = @mime_content_type($fullPath) ?: 'image/jpeg';
+                        $quote[$type . '_base64'] = 'data:' . $mime . ';base64,' . base64_encode(file_get_contents($fullPath));
+                    }
+                }
+            }
+
             ok($quote);
             break;
         }
 
+        case 'get_pdf_context': {
+            requireAdmin();
+            // Read PDF / company / site settings directly from the Sunbox DB
+            // (these live in the `settings` table, NOT in pro_settings).
+            $pdfSettings = [];
+            $companySettings = [];
+            $siteSettings = [];
+            try {
+                $sdb = getSunboxDB();
+                $stmt = $sdb->query("SELECT setting_key, setting_value, setting_group FROM settings WHERE setting_group IN ('pdf','company','site','email','general')");
+                foreach ($stmt->fetchAll() as $row) {
+                    $k = $row['setting_key']; $v = $row['setting_value'];
+                    $g = $row['setting_group'];
+                    if ($g === 'pdf') {
+                        $pdfSettings[$k] = $v;
+                    } elseif ($g === 'company' || $g === 'email') {
+                        $companySettings[$k] = $v;
+                    } elseif ($g === 'site') {
+                        $siteSettings[$k] = $v;
+                    } elseif ($g === 'general' && !isset($pdfSettings[$k])) {
+                        // only fill general keys that pdf group hasn't set (e.g. vat_rate)
+                        $pdfSettings[$k] = $v;
+                    }
+                }
+            } catch (\Throwable $e) { /* non-fatal */ }
+
+            // Convert site_logo to base64 so the browser never has to cross-origin load it
+            $logoBase64 = '';
+            $logoUrl = $siteSettings['site_logo'] ?? '';
+            if ($logoUrl) {
+                $sunboxRoot = dirname(__DIR__, 3); // public_html/
+                $logoPath = parse_url($logoUrl, PHP_URL_PATH);
+                if ($logoPath) {
+                    // Guard against path traversal
+                    $realBase = realpath($sunboxRoot) ?: $sunboxRoot;
+                    $fullPath = realpath($sunboxRoot . '/' . ltrim($logoPath, '/'));
+                    if ($fullPath && strncmp($fullPath, $realBase, strlen($realBase)) === 0 && is_file($fullPath)) {
+                        $mime = @mime_content_type($fullPath) ?: 'image/png';
+                        $logoBase64 = 'data:' . $mime . ';base64,' . base64_encode(file_get_contents($fullPath));
+                    }
+                }
+            }
+
+            ok([
+                'pdf_settings'     => $pdfSettings,
+                'company_settings' => $companySettings,
+                'site_settings'    => $siteSettings,
+                'logo_base64'      => $logoBase64,
+            ]);
+            break;
+        }
+
         case 'get_contact_by_device': {
-            // Public — no auth needed (pre-fills visitor form with saved info)
             $db = getDB();
             validateRequired($body, ['device_id']);
             $stmt = $db->prepare("
