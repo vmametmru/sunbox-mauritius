@@ -28,6 +28,26 @@ interface Quote {
   created_at: string;
   boq_requested?: number | boolean;
   purchase_report_id?: number | null;
+  // Pool dimensions (present for pool quotes)
+  pool_shape?: string | null;
+  pool_longueur?: number | null;
+  pool_largeur?: number | null;
+  pool_profondeur?: number | null;
+  pool_longueur_la?: number | null;
+  pool_largeur_la?: number | null;
+  pool_profondeur_la?: number | null;
+  pool_longueur_lb?: number | null;
+  pool_largeur_lb?: number | null;
+  pool_profondeur_lb?: number | null;
+  pool_longueur_ta?: number | null;
+  pool_largeur_ta?: number | null;
+  pool_profondeur_ta?: number | null;
+  pool_longueur_tb?: number | null;
+  pool_largeur_tb?: number | null;
+  pool_profondeur_tb?: number | null;
+  // Photos (may be null until full details are loaded)
+  photo_url?: string | null;
+  plan_url?: string | null;
 }
 
 const statusLabels: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
@@ -41,6 +61,7 @@ export default function ProQuotesPage() {
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
+  const [loadingDetails, setLoadingDetails] = useState(false);
   const [generatingPdfId, setGeneratingPdfId] = useState<number | null>(null);
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -58,6 +79,24 @@ export default function ProQuotesPage() {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
     } finally {
       setLoading(false);
+    }
+  };
+
+  /** Open the detail modal and enrich with photo_url/plan_url from full details. */
+  const openQuoteDetail = async (q: Quote) => {
+    setSelectedQuote(q);
+    if (!q.photo_url && !q.plan_url) {
+      setLoadingDetails(true);
+      try {
+        const full = await api.getQuoteWithDetails(q.id);
+        setSelectedQuote((prev) => prev?.id === q.id
+          ? { ...prev, photo_url: full.photo_url || full.photo_base64 || null, plan_url: full.plan_url || full.plan_base64 || null }
+          : prev);
+      } catch (err) {
+        console.debug('Photo/plan details load failed:', err);
+      } finally {
+        setLoadingDetails(false);
+      }
     }
   };
 
@@ -225,7 +264,7 @@ export default function ProQuotesPage() {
                     <td className="px-4 py-3 font-mono text-sm font-medium">
                       <button
                         className="text-orange-600 hover:underline focus:outline-none"
-                        onClick={() => setSelectedQuote(q)}
+                        onClick={() => openQuoteDetail(q)}
                       >
                         {q.reference_number}
                       </button>
@@ -240,7 +279,7 @@ export default function ProQuotesPage() {
                     </td>
                     <td className="px-4 py-3">
                        <div className="flex gap-2 flex-wrap">
-                         <Button size="sm" variant="ghost" onClick={() => setSelectedQuote(q)} title="Visualiser le devis">
+                         <Button size="sm" variant="ghost" onClick={() => openQuoteDetail(q)} title="Visualiser le devis">
                            <Eye className="h-3 w-3 mr-1" />Voir
                          </Button>
                          <Button size="sm" variant="ghost" disabled={generatingPdfId === q.id} onClick={() => handleDownloadPdf(q)} title="Télécharger PDF">
@@ -349,6 +388,47 @@ export default function ProQuotesPage() {
                 <div>
                   <p className="text-gray-500 text-xs mb-1">Message du client</p>
                   <p className="bg-gray-50 rounded p-2 text-gray-700">{selectedQuote.customer_message}</p>
+                </div>
+              )}
+
+              {/* Pool dimensions (pool models only) */}
+              {selectedQuote.model_type === 'pool' && selectedQuote.pool_longueur != null && (
+                <div className="border-t pt-2">
+                  <p className="text-gray-500 text-xs mb-1 font-medium">Dimensions de la piscine</p>
+                  <div className="grid grid-cols-3 gap-1 text-xs bg-gray-50 rounded p-2">
+                    {selectedQuote.pool_shape && (
+                      <div className="col-span-3 text-gray-600 mb-1">Forme : <span className="font-medium">{selectedQuote.pool_shape}</span></div>
+                    )}
+                    {selectedQuote.pool_longueur != null && <div><span className="text-gray-500">L</span> {Number(selectedQuote.pool_longueur).toFixed(2)} m</div>}
+                    {selectedQuote.pool_largeur != null && <div><span className="text-gray-500">l</span> {Number(selectedQuote.pool_largeur).toFixed(2)} m</div>}
+                    {selectedQuote.pool_profondeur != null && <div><span className="text-gray-500">P</span> {Number(selectedQuote.pool_profondeur).toFixed(2)} m</div>}
+                  </div>
+                </div>
+              )}
+
+              {/* Photos / plan */}
+              {(selectedQuote.photo_url || selectedQuote.plan_url) && (
+                <div className="border-t pt-2">
+                  <p className="text-gray-500 text-xs mb-2 font-medium">Photos du modèle</p>
+                  <div className="flex gap-3">
+                    {selectedQuote.photo_url && (
+                      <div>
+                        <p className="text-gray-400 text-xs mb-1">Photo</p>
+                        <img src={selectedQuote.photo_url} alt="Photo" className="h-24 w-auto max-w-[160px] object-contain rounded border bg-gray-50" />
+                      </div>
+                    )}
+                    {selectedQuote.plan_url && (
+                      <div>
+                        <p className="text-gray-400 text-xs mb-1">Plan</p>
+                        <img src={selectedQuote.plan_url} alt="Plan" className="h-24 w-auto max-w-[160px] object-contain rounded border bg-gray-50" />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+              {loadingDetails && !selectedQuote.photo_url && !selectedQuote.plan_url && (
+                <div className="flex items-center gap-2 text-gray-400 text-xs border-t pt-2">
+                  <Loader2 className="h-3 w-3 animate-spin" /> Chargement des photos…
                 </div>
               )}
               <div className="flex justify-end gap-2 pt-2">

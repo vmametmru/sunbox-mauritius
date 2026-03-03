@@ -148,7 +148,7 @@ export default function ProModelsOverridePage() {
                         <img
                           src={model.image_url}
                           alt={model.name}
-                          className="w-14 h-14 object-cover rounded-lg flex-shrink-0"
+                          className="h-14 w-auto max-w-[56px] object-contain rounded-lg flex-shrink-0"
                         />
                       ) : (
                         <div className="w-14 h-14 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
