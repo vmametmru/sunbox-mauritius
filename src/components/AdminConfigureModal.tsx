@@ -606,8 +606,10 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
     onClose();
   };
 
-  // Don't render anything if dialog should be closed or model is not loaded yet
-  if (!open || (!model && !loading)) {
+  // Don't render if closed.
+  // In create mode (no quoteId) we also bail out if model isn't set yet.
+  // In edit mode (quoteId set) we always render so loadQuoteData can fire and show the spinner.
+  if (!open || (!quoteId && !model && !loading)) {
     return null;
   }
 
@@ -626,11 +628,11 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
           </div>
         )}
 
-        {loading ? (
+        {(loading || !model) ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="w-8 h-8 animate-spin text-orange-500" />
           </div>
-        ) : model && (
+        ) : (
           <div className="space-y-6">
             {/* Header */}
             <div className="flex justify-between items-start border-b pb-4">
