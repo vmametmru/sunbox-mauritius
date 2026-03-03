@@ -551,8 +551,9 @@ try {
         case 'get_pdf_context': {
             requireAdmin();
             // Read PDF styling settings (template, colors, etc.) from Sunbox DB.
-            // Company info is taken from the pro user's own professional_profiles
-            // record so the PDF shows the pro user's branding, NOT Sunbox's.
+            // Company info comes from the pro user's own professional_profiles row.
+            // PDF content settings (footer, terms, bank) come from pro's own pro_settings,
+            // falling back to auto-generated values from company info.
             $pdfSettings = [];
             $siteSettings = [];
             try {
@@ -594,6 +595,42 @@ try {
                 'company_phone'   => (string)($profile['phone'] ?? ''),
                 'company_address' => (string)($profile['address'] ?? ''),
             ];
+
+            // Override PDF content keys with pro's own pro_settings values if set
+            $proContentKeys = ['pdf_footer_text', 'pdf_terms', 'pdf_bank_details',
+                               'pdf_show_bank_details', 'pdf_show_terms', 'pdf_validity_days'];
+            $proSettingsOverride = [];
+            try {
+                $db = getDB();
+                $placeholders = implode(',', array_fill(0, count($proContentKeys), '?'));
+                $pStmt = $db->prepare("SELECT setting_key, setting_value FROM pro_settings WHERE setting_key IN ($placeholders)");
+                $pStmt->execute($proContentKeys);
+                foreach ($pStmt->fetchAll() as $row) {
+                    $proSettingsOverride[$row['setting_key']] = $row['setting_value'];
+                }
+            } catch (\Throwable $e) { /* non-fatal */ }
+
+            foreach ($proSettingsOverride as $k => $v) {
+                $pdfSettings[$k] = $v;
+            }
+
+            // If pro has not explicitly set pdf_footer_text, build it from company info
+            // (this ensures the PDF never shows the Sunbox default footer)
+            if (!isset($proSettingsOverride['pdf_footer_text'])) {
+                $footerParts = array_values(array_filter([
+                    $companySettings['company_name'],
+                    $companySettings['company_address'],
+                    $companySettings['company_email'],
+                ]));
+                $pdfSettings['pdf_footer_text'] = implode(' – ', $footerParts);
+            }
+            // Clear Sunbox-specific terms/bank details if the pro user hasn't set their own
+            if (!isset($proSettingsOverride['pdf_terms'])) {
+                $pdfSettings['pdf_terms'] = '';
+            }
+            if (!isset($proSettingsOverride['pdf_bank_details'])) {
+                $pdfSettings['pdf_bank_details'] = '';
+            }
 
             // Convert the pro user's logo to base64 (logo lives on the Sunbox server)
             $sunboxRoot = dirname(__DIR__, 3); // public_html/
@@ -779,8 +816,8 @@ try {
             $id     = (int)$body['id'];
             $status = $body['status'];
 
-            // Validate quote
-            if ($status === 'approved') {
+            // Deduct validation credits only when SUNBOX_USER_ID is properly configured
+            if ($status === 'approved' && SUNBOX_USER_ID > 0) {
                 $creditResult = deductCredits(1000, 'quote_validated', $id);
                 if (!($creditResult['success'] ?? false)) {
                     fail($creditResult['error'] ?? 'Crédits insuffisants', 402);
@@ -788,6 +825,26 @@ try {
             }
 
             $db->prepare("UPDATE pro_quotes SET status = ?, updated_at = NOW() WHERE id = ?")->execute([$status, $id]);
+            ok();
+            break;
+        }
+
+        case 'update_quote': {
+            requireAdmin();
+            $db = getDB();
+            validateRequired($body, ['id']);
+            $id = (int)$body['id'];
+            $sets = []; $params = [];
+            if (array_key_exists('customer_name', $body))    { $sets[] = 'customer_name = ?';    $params[] = sanitize((string)$body['customer_name']); }
+            if (array_key_exists('customer_email', $body))   { $sets[] = 'customer_email = ?';   $params[] = sanitize((string)$body['customer_email']); }
+            if (array_key_exists('customer_phone', $body))   { $sets[] = 'customer_phone = ?';   $params[] = sanitize((string)$body['customer_phone']); }
+            if (array_key_exists('customer_address', $body)) { $sets[] = 'customer_address = ?'; $params[] = sanitize((string)$body['customer_address']); }
+            if (array_key_exists('customer_message', $body)) { $sets[] = 'customer_message = ?'; $params[] = sanitize((string)$body['customer_message']); }
+            if (!empty($sets)) {
+                $sets[] = 'updated_at = NOW()';
+                $params[] = $id;
+                $db->prepare("UPDATE pro_quotes SET " . implode(', ', $sets) . " WHERE id = ?")->execute($params);
+            }
             ok();
             break;
         }
@@ -1403,6 +1460,29 @@ try {
                 fail($result['error'] ?? 'Crédits insuffisants', 402);
             }
             ok($result['data'] ?? []);
+            break;
+        }
+
+        case 'buy_pro_pack': {
+            requireAdmin();
+            if (!SUNBOX_USER_ID) { fail('User non configuré', 400); }
+            $packAmount = 10000;
+            try {
+                $sdb = getSunboxDB();
+                $sdb->beginTransaction();
+                $sdb->prepare("UPDATE professional_profiles SET credits = credits + ?, updated_at = NOW() WHERE user_id = ?")
+                    ->execute([$packAmount, SUNBOX_USER_ID]);
+                $balStmt = $sdb->prepare("SELECT credits FROM professional_profiles WHERE user_id = ?");
+                $balStmt->execute([SUNBOX_USER_ID]);
+                $newBalance = (float)($balStmt->fetchColumn() ?: $packAmount);
+                $sdb->prepare("INSERT INTO professional_credit_transactions (user_id, amount, reason, quote_id, balance_after) VALUES (?,?,?,?,?)")
+                    ->execute([SUNBOX_USER_ID, $packAmount, 'pack_purchase', null, $newBalance]);
+                $sdb->commit();
+                ok(['credits' => $newBalance]);
+            } catch (\Throwable $e) {
+                try { $sdb->rollBack(); } catch (\Throwable $ignored) {}
+                fail(API_DEBUG ? $e->getMessage() : 'Erreur serveur', 500);
+            }
             break;
         }
 

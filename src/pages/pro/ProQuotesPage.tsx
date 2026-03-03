@@ -3,7 +3,10 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { FileText, X, ClipboardList, Download, Eye, Loader2 } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { FileText, X, ClipboardList, Download, Eye, Loader2, Pencil, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { useNavigate } from 'react-router-dom';
@@ -60,15 +63,27 @@ const statusLabels: Record<string, { label: string; variant: 'default' | 'second
 export default function ProQuotesPage() {
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [loading, setLoading] = useState(true);
+  const [vatRate, setVatRate] = useState(15);
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [generatingPdfId, setGeneratingPdfId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  // Edit dialog
+  const [editingQuote, setEditingQuote] = useState<any>(null);
+  const [loadingEditId, setLoadingEditId] = useState<number | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
   const { toast } = useToast();
   const navigate = useNavigate();
 
   useEffect(() => {
     loadQuotes();
+    // Load VAT rate for TTC display
+    api.query('get_settings', { group: 'general' })
+      .then((s: any) => { if (s?.vat_rate) setVatRate(Number(s.vat_rate) || 15); })
+      .catch(() => {});
   }, []);
+
+  const toTtc = (htPrice: number) => Math.round(htPrice * (1 + vatRate / 100));
 
   const loadQuotes = async () => {
     try {
@@ -128,6 +143,55 @@ export default function ProQuotesPage() {
       navigate(`/pro/reports/${result.report_id}`);
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    }
+  };
+
+  const handleDelete = async (quote: Quote) => {
+    if (!confirm(`Supprimer définitivement le devis ${quote.reference_number} ?`)) return;
+    setDeletingId(quote.id);
+    try {
+      await api.deleteQuote(quote.id);
+      toast({ title: 'Devis supprimé' });
+      if (selectedQuote?.id === quote.id) setSelectedQuote(null);
+      loadQuotes();
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const openEdit = async (quote: Quote) => {
+    setLoadingEditId(quote.id);
+    try {
+      const full = await api.getQuoteWithDetails(quote.id);
+      setEditingQuote({ ...full });
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setLoadingEditId(null);
+    }
+  };
+
+  const saveEdit = async () => {
+    if (!editingQuote) return;
+    setSavingEdit(true);
+    try {
+      await api.query('update_quote', {
+        id: editingQuote.id,
+        customer_name:    editingQuote.customer_name    ?? '',
+        customer_email:   editingQuote.customer_email   ?? '',
+        customer_phone:   editingQuote.customer_phone   ?? '',
+        customer_address: editingQuote.customer_address ?? '',
+        customer_message: editingQuote.customer_message ?? '',
+      });
+      toast({ title: 'Devis mis à jour' });
+      setEditingQuote(null);
+      loadQuotes();
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setSavingEdit(false);
     }
   };
 
@@ -248,7 +312,8 @@ export default function ProQuotesPage() {
               <tr className="border-b text-left">
                 <th className="px-4 py-3 text-sm font-semibold text-gray-600">Référence</th>
                 <th className="px-4 py-3 text-sm font-semibold text-gray-600">Client</th>
-                <th className="px-4 py-3 text-sm font-semibold text-gray-600">Total</th>
+                <th className="px-4 py-3 text-sm font-semibold text-gray-600">Modèle</th>
+                <th className="px-4 py-3 text-sm font-semibold text-gray-600">Total TTC</th>
                 <th className="px-4 py-3 text-sm font-semibold text-gray-600">Statut</th>
                 <th className="px-4 py-3 text-sm font-semibold text-gray-600">Date</th>
                 <th className="px-4 py-3 text-sm font-semibold text-gray-600">Actions</th>
@@ -270,7 +335,8 @@ export default function ProQuotesPage() {
                       </button>
                     </td>
                     <td className="px-4 py-3 text-sm">{q.customer_name}</td>
-                    <td className="px-4 py-3 text-sm font-medium">Rs {q.total_price?.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600">{q.model_name || '—'}</td>
+                    <td className="px-4 py-3 text-sm font-medium">Rs {toTtc(q.total_price ?? 0).toLocaleString()}</td>
                     <td className="px-4 py-3">
                       <Badge variant={status.variant}>{status.label}</Badge>
                     </td>
@@ -278,12 +344,18 @@ export default function ProQuotesPage() {
                       {new Date(q.created_at).toLocaleDateString('fr-FR')}
                     </td>
                     <td className="px-4 py-3">
-                       <div className="flex gap-2 flex-wrap">
+                       <div className="flex gap-1 flex-wrap">
                          <Button size="sm" variant="ghost" onClick={() => openQuoteDetail(q)} title="Visualiser le devis">
-                           <Eye className="h-3 w-3 mr-1" />Voir
+                           <Eye className="h-3 w-3" />
+                         </Button>
+                         <Button size="sm" variant="ghost" disabled={loadingEditId === q.id} onClick={() => openEdit(q)} title="Modifier le devis">
+                           {loadingEditId === q.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Pencil className="h-3 w-3" />}
                          </Button>
                          <Button size="sm" variant="ghost" disabled={generatingPdfId === q.id} onClick={() => handleDownloadPdf(q)} title="Télécharger PDF">
-                           {generatingPdfId === q.id ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Download className="h-3 w-3 mr-1" />}PDF
+                           {generatingPdfId === q.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
+                         </Button>
+                         <Button size="sm" variant="ghost" className="text-red-500 hover:text-red-700" disabled={deletingId === q.id} onClick={() => handleDelete(q)} title="Supprimer le devis">
+                           {deletingId === q.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
                          </Button>
                          {isPending && (
                            <Button size="sm" variant="outline" onClick={() => handleValidate(q)}>
@@ -297,7 +369,7 @@ export default function ProQuotesPage() {
                                  <ClipboardList className="h-3 w-3 mr-1" />Voir le rapport
                                </Button>
                              : <Button size="sm" variant="outline" onClick={() => handleBoqReport(q)}>
-                                 <ClipboardList className="h-3 w-3 mr-1" />Rapport d'Achat (1 500 Rs)
+                                 <ClipboardList className="h-3 w-3 mr-1" />BOQ (1 500 Rs)
                                </Button>
                          )}
                        </div>
@@ -406,7 +478,7 @@ export default function ProQuotesPage() {
                 </div>
               )}
 
-              {/* Photos / plan */}
+              {/* Photos / plan — fixed 4:3 boxes */}
               {(selectedQuote.photo_url || selectedQuote.plan_url) && (
                 <div className="border-t pt-2">
                   <p className="text-gray-500 text-xs mb-2 font-medium">Photos du modèle</p>
@@ -414,13 +486,17 @@ export default function ProQuotesPage() {
                     {selectedQuote.photo_url && (
                       <div>
                         <p className="text-gray-400 text-xs mb-1">Photo</p>
-                        <img src={selectedQuote.photo_url} alt="Photo" className="h-24 w-auto max-w-[160px] object-contain rounded border bg-gray-50" />
+                        <div className="w-[160px] aspect-[4/3] bg-gray-50 rounded border overflow-hidden flex items-center justify-center">
+                          <img src={selectedQuote.photo_url} alt="Photo" className="max-w-full max-h-full object-contain" />
+                        </div>
                       </div>
                     )}
                     {selectedQuote.plan_url && (
                       <div>
                         <p className="text-gray-400 text-xs mb-1">Plan</p>
-                        <img src={selectedQuote.plan_url} alt="Plan" className="h-24 w-auto max-w-[160px] object-contain rounded border bg-gray-50" />
+                        <div className="w-[160px] aspect-[4/3] bg-gray-50 rounded border overflow-hidden flex items-center justify-center">
+                          <img src={selectedQuote.plan_url} alt="Plan" className="max-w-full max-h-full object-contain" />
+                        </div>
                       </div>
                     )}
                   </div>
@@ -431,7 +507,7 @@ export default function ProQuotesPage() {
                   <Loader2 className="h-3 w-3 animate-spin" /> Chargement des photos…
                 </div>
               )}
-              <div className="flex justify-end gap-2 pt-2">
+              <div className="flex justify-end gap-2 pt-2 flex-wrap">
                  <Button
                    size="sm"
                    variant="outline"
@@ -439,7 +515,16 @@ export default function ProQuotesPage() {
                    onClick={() => { const q = selectedQuote!; handleDownloadPdf(q); }}
                  >
                    {generatingPdfId === selectedQuote.id ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Download className="h-4 w-4 mr-1" />}
-                   Télécharger PDF
+                   PDF
+                 </Button>
+                 <Button
+                   size="sm"
+                   variant="outline"
+                   disabled={loadingEditId === selectedQuote.id}
+                   onClick={() => { const q = selectedQuote!; setSelectedQuote(null); openEdit(q); }}
+                 >
+                   {loadingEditId === selectedQuote.id ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Pencil className="h-4 w-4 mr-1" />}
+                   Modifier
                  </Button>
                  {selectedQuote.status === 'pending' && (
                    <Button
@@ -457,13 +542,85 @@ export default function ProQuotesPage() {
                        </Button>
                      : <Button size="sm" variant="outline"
                          onClick={() => { const q = selectedQuote; setSelectedQuote(null); handleBoqReport(q); }}>
-                         <ClipboardList className="h-3 w-3 mr-1" />Rapport d'Achat (1 500 Rs)
+                         <ClipboardList className="h-3 w-3 mr-1" />BOQ (1 500 Rs)
                        </Button>
                  )}
+                 <Button
+                   size="sm"
+                   variant="ghost"
+                   className="text-red-500 hover:text-red-700"
+                   disabled={deletingId === selectedQuote.id}
+                   onClick={() => { const q = selectedQuote!; setSelectedQuote(null); handleDelete(q); }}
+                 >
+                   <Trash2 className="h-4 w-4 mr-1" /> Supprimer
+                 </Button>
                  <Button size="sm" variant="ghost" onClick={() => setSelectedQuote(null)}>
                    <X className="h-4 w-4 mr-1" /> Fermer
                  </Button>
                </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Edit quote dialog ─────────────────────────────────────── */}
+      <Dialog open={!!editingQuote} onOpenChange={(open) => { if (!open) setEditingQuote(null); }}>
+        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-mono">
+              Modifier – {editingQuote?.reference_number}
+            </DialogTitle>
+          </DialogHeader>
+          {editingQuote && (
+            <div className="space-y-4 text-sm">
+              {/* Customer info (editable) */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2">
+                  <Label className="text-xs">Nom du client</Label>
+                  <Input value={editingQuote.customer_name || ''} onChange={(e) => setEditingQuote({ ...editingQuote, customer_name: e.target.value })} />
+                </div>
+                <div>
+                  <Label className="text-xs">Email</Label>
+                  <Input value={editingQuote.customer_email || ''} onChange={(e) => setEditingQuote({ ...editingQuote, customer_email: e.target.value })} />
+                </div>
+                <div>
+                  <Label className="text-xs">Téléphone</Label>
+                  <Input value={editingQuote.customer_phone || ''} onChange={(e) => setEditingQuote({ ...editingQuote, customer_phone: e.target.value })} />
+                </div>
+                <div className="col-span-2">
+                  <Label className="text-xs">Adresse</Label>
+                  <Input value={editingQuote.customer_address || ''} onChange={(e) => setEditingQuote({ ...editingQuote, customer_address: e.target.value })} />
+                </div>
+                <div className="col-span-2">
+                  <Label className="text-xs">Message</Label>
+                  <Textarea rows={2} value={editingQuote.customer_message || ''} onChange={(e) => setEditingQuote({ ...editingQuote, customer_message: e.target.value })} />
+                </div>
+              </div>
+
+              {/* Selected options (read-only list) */}
+              {Array.isArray(editingQuote.options) && editingQuote.options.length > 0 && (
+                <div className="border-t pt-3">
+                  <p className="text-xs font-semibold text-gray-600 mb-2">Options sélectionnées</p>
+                  <div className="space-y-1">
+                    {editingQuote.options.map((opt: any, i: number) => (
+                      <div key={i} className="flex justify-between text-xs bg-gray-50 rounded px-2 py-1">
+                        <span>{opt.option_name}</span>
+                        <span className="font-medium text-gray-700">Rs {Number(opt.option_price).toLocaleString()}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-2">
+                <Button size="sm" variant="ghost" onClick={() => setEditingQuote(null)}>
+                  <X className="h-4 w-4 mr-1" /> Annuler
+                </Button>
+                <Button size="sm" disabled={savingEdit} onClick={saveEdit} className="bg-orange-500 hover:bg-orange-600">
+                  {savingEdit ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
+                  Enregistrer
+                </Button>
+              </div>
             </div>
           )}
         </DialogContent>

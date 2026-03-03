@@ -196,6 +196,15 @@ INSERT INTO `pro_settings` (`setting_key`, `setting_value`, `setting_group`) VAL
 ('brn_number',             '',                'company')
 ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value);
 
+-- ── PDF content settings (INSERT IGNORE — never overwrite admin-configured values)
+INSERT IGNORE INTO `pro_settings` (`setting_key`, `setting_value`, `setting_group`) VALUES
+('pdf_footer_text',       '', 'pdf'),
+('pdf_terms',             '', 'pdf'),
+('pdf_bank_details',      '', 'pdf'),
+('pdf_show_bank_details', 'false', 'pdf'),
+('pdf_show_terms',        'true',  'pdf'),
+('pdf_validity_days',     '30',    'pdf');
+
 -- ── Schema version tracking ───────────────────────────────────────────────────
 -- Single-row table. id=1 always. Inserted/updated by init_pro_db on each run.
 CREATE TABLE IF NOT EXISTS `pro_schema_version` (
