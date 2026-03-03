@@ -193,9 +193,9 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
     try {
       const quote = await api.getQuoteWithDetails(id);
       
-      // Load model info
+      // Load model info — include inactive models so we can edit quotes referencing deactivated models.
       // Pro API returns { models: [...], ... }; admin API returns a plain array — normalize both.
-      const modelsRaw = await api.getModels(quote.model_type, true);
+      const modelsRaw = await api.getModels(quote.model_type, false);
       const models: Model[] = Array.isArray(modelsRaw)
         ? modelsRaw
         : Array.isArray((modelsRaw as any)?.models)
@@ -615,6 +615,8 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
   // Don't render if closed.
   // In create mode (no quoteId) we also bail out if model isn't set yet and no error.
   // In edit mode (quoteId set) we always render so loadQuoteData can fire and show the spinner/error.
+  // Note: when model=null and loading=false the content section renders null (empty dialog body),
+  // which covers the brief close-animation window without showing an infinite spinner.
   if (!open || (!quoteId && !model && !loading && !loadError)) {
     return null;
   }
@@ -640,11 +642,11 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
             <p className="text-sm text-red-700 text-center max-w-sm">{loadError}</p>
             <Button variant="outline" onClick={handleClose}>Fermer</Button>
           </div>
-        ) : (loading || !model) ? (
+        ) : loading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="w-8 h-8 animate-spin text-orange-500" />
           </div>
-        ) : (
+        ) : !model ? null : (
           <div className="space-y-6">
             {/* Header */}
             <div className="flex justify-between items-start border-b pb-4">
