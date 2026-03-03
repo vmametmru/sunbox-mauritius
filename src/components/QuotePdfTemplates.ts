@@ -144,7 +144,7 @@ function getLogoOffsetStyle(settings: PdfDisplaySettings): string {
 
 // ─── PDF-model style helpers ────────────────────────────────────────────────
 
-/** Render categories in PDF-model style: bold name + comma-separated items */
+/** Render categories in PDF-model style: bold name – comma-separated items on one line */
 function pdfCatBlock(cats: QuotePdfCategory[] | undefined): string {
   if (!cats?.length) return '';
   let html = '';
@@ -152,17 +152,17 @@ function pdfCatBlock(cats: QuotePdfCategory[] | undefined): string {
     if (cat.subcategories?.length) {
       for (const sub of cat.subcategories) {
         const items = sub.lines.map(l => l.description).join(', ');
-        html += `<div style="margin-bottom:8px;">
-          <div style="font-size:12px;font-weight:700;color:#111827;">${sub.name}</div>
-          ${items ? `<div style="font-size:11px;color:#4b5563;margin-top:2px;">${items}</div>` : ''}
-        </div>`;
+        html += `<div style="margin-bottom:4px;font-size:11px;line-height:1.5;">` +
+          `<span style="font-size:12px;font-weight:700;color:#111827;">${sub.name}</span>` +
+          `${items ? `<span style="color:#4b5563;"> — ${items}</span>` : ''}` +
+          `</div>`;
       }
     } else {
       const items = cat.lines.map(l => l.description).join(', ');
-      html += `<div style="margin-bottom:8px;">
-        <div style="font-size:12px;font-weight:700;color:#111827;">${cat.name}</div>
-        ${items ? `<div style="font-size:11px;color:#4b5563;margin-top:2px;">${items}</div>` : ''}
-      </div>`;
+      html += `<div style="margin-bottom:4px;font-size:11px;line-height:1.5;">` +
+        `<span style="font-size:12px;font-weight:700;color:#111827;">${cat.name}</span>` +
+        `${items ? `<span style="color:#4b5563;"> — ${items}</span>` : ''}` +
+        `</div>`;
     }
   }
   return html;
@@ -198,12 +198,17 @@ function pdfModelRow(photo: string | undefined, plan: string | undefined, dimPan
     `</div>`;
 
   if (hasDim) {
+    /** In dims mode: cap image width so the dims panel gets enough space. */
+    const imgWrapDim = (src: string, alt: string) =>
+      `<div style="overflow:hidden;border-radius:4px;flex-shrink:0;height:120px;max-width:130px;">` +
+      `<img src="${src}" style="height:120px;width:auto;max-width:130px;display:block;" alt="${alt}" />` +
+      `</div>`;
     const cols = [
-      hasPhoto ? imgWrap(photo!, 'Photo') : '',
-      hasPlan  ? imgWrap(plan!,  'Plan')  : '',
+      hasPhoto ? imgWrapDim(photo!, 'Photo') : '',
+      hasPlan  ? imgWrapDim(plan!,  'Plan')  : '',
       `<div style="flex:1;height:120px;min-width:0;">${dimPanel}</div>`,
     ].filter(Boolean).join('');
-    return `<div style="display:flex;align-items:flex-start;gap:6px;margin-top:8px;">${cols}</div>`;
+    return `<div style="display:flex;align-items:flex-start;gap:6px;margin-top:4px;">${cols}</div>`;
   }
 
   // No dimensions panel – original 2-photo layout (container / free quotes)
@@ -269,7 +274,7 @@ function fmtM3(v: number): string {
 }
 
 /** Render pool dimensions block for pool quotes: dimensions, surface m², volume m³, périmètre m */
-function pdfPoolDimensions(data: QuotePdfData, sectionLabelColor: string): string {
+function pdfPoolDimensions(data: QuotePdfData, sectionLabelColor: string, includeTitle: boolean = true): string {
   if (data.model_type !== 'pool') return '';
 
   const shape = (data.pool_shape || 'Rectangulaire').toUpperCase();
@@ -331,7 +336,7 @@ function pdfPoolDimensions(data: QuotePdfData, sectionLabelColor: string): strin
 
   // Title style matches "Client" / "Modèle" labels: 13px, 700, sectionLabelColor
   return `<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;padding:6px 8px;height:100%;box-sizing:border-box;overflow:hidden;">
-    <div style="font-size:13px;font-weight:700;color:${sectionLabelColor};margin-bottom:4px;">Dimensions</div>
+    ${includeTitle ? `<div style="font-size:13px;font-weight:700;color:${sectionLabelColor};margin-bottom:4px;">Dimensions</div>` : ''}
     ${inner}
   </div>`;
 }
@@ -407,8 +412,17 @@ export function buildTemplate(
           </div>
         </div>
         <div style="flex:1.3;">
-          ${modelTitle ? `<div style="font-size:13px;font-weight:700;color:${theme.sectionLabelColor};margin-bottom:6px;">Modèle : <span style="font-weight:400;">${modelTitle}</span></div>` : ''}
-          ${pdfModelRow(data.photo_url, data.plan_url, pdfPoolDimensions(data, theme.sectionLabelColor))}
+          ${(() => {
+            const dimPanel = pdfPoolDimensions(data, theme.sectionLabelColor, false);
+            const hasDim = !!dimPanel;
+            return `
+              <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">
+                ${modelTitle ? `<div style="font-size:13px;font-weight:700;color:${theme.sectionLabelColor};">Modèle : <span style="font-weight:400;">${modelTitle}</span></div>` : '<div></div>'}
+                ${hasDim ? `<div style="font-size:13px;font-weight:700;color:${theme.sectionLabelColor};">Dimensions</div>` : ''}
+              </div>
+              ${pdfModelRow(data.photo_url, data.plan_url, hasDim ? dimPanel : undefined)}
+            `;
+          })()}
         </div>
       </div>
       <div style="border-bottom:1px solid ${div};margin:8px 40px 0;"></div>
