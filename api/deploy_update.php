@@ -49,14 +49,20 @@ function zipEntryNames(string $path): array {
 }
 
 /**
- * Detect if every entry inside the zip is prefixed with a single top-level
- * folder (e.g. "dist/" or "api/").  Returns that prefix or '' if none.
+ * Detect if ALL entries inside the zip are under a single top-level folder.
+ * Returns that folder prefix (e.g., "dist/") or '' if files are at root level
+ * or if the zip contains multiple top-level directories (mixed structure).
+ * This handles GitHub Actions artifacts that may wrap files in a folder with any name.
  */
-function detectZipPrefix(array $names, string $expected): string {
+function detectSingleTopLevelDir(array $names): string {
     $roots = array_unique(array_filter(
         array_map(fn($n) => explode('/', $n)[0], $names)
     ));
-    return (count($roots) === 1 && reset($roots) === $expected) ? $expected . '/' : '';
+    if (count($roots) === 1) {
+        $root = reset($roots);
+        if ($root !== '') return $root . '/';
+    }
+    return '';
 }
 
 /**
@@ -130,7 +136,7 @@ if (isset($_FILES['dist_zip']) && $_FILES['dist_zip']['error'] === UPLOAD_ERR_OK
     $hasIndexHtml = (bool) array_filter($names, fn($n) => preg_match('#(^|/)index\.html$#', $n));
     if (!$hasIndexHtml) deployFail('dist_zip: index.html introuvable — ceci ne semble pas être un artefact Vite dist.');
 
-    $prefix = detectZipPrefix($names, 'dist');
+    $prefix = detectSingleTopLevelDir($names);
     try {
         $count = extractZipTo($tmp, $webRoot, $prefix, fn($rel) => strpos($rel, 'api/') === 0);
         $results['dist'] = ['status' => 'ok', 'file' => $orig, 'extracted' => $count];
@@ -156,7 +162,7 @@ if (isset($_FILES['api_zip']) && $_FILES['api_zip']['error'] === UPLOAD_ERR_OK) 
     $hasIndexPhp = (bool) array_filter($names, fn($n) => preg_match('#(^|/)index\.php$#', $n));
     if (!$hasIndexPhp) deployFail('api_zip: index.php introuvable — ceci ne semble pas être l\'artefact API Sunbox.');
 
-    $prefix = detectZipPrefix($names, 'api');
+    $prefix = detectSingleTopLevelDir($names);
     try {
         $count = extractZipTo($tmp, $apiRoot, $prefix);
         $results['api'] = ['status' => 'ok', 'file' => $orig, 'extracted' => $count];

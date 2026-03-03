@@ -127,6 +127,7 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
   const [baseCategories, setBaseCategories] = useState<BOQBaseCategory[]>([]);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   
   // Pending options to be selected after options load (stores name and price for BOQ option matching)
   const pendingOptionsRef = React.useRef<PendingOption[]>([]);
@@ -159,6 +160,7 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
       setStep('options');
       setErrors({});
       setSavedQuote(null);
+      setLoadError(null);
     }
   }, [open, quoteId]);
 
@@ -182,6 +184,7 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
 
   const loadQuoteData = async (id: number) => {
     setLoading(true);
+    setLoadError(null);
     // Reset selected options and imported prices when loading a new quote
     setSelectedOptions([]);
     setImportedOptionPrices([]);
@@ -208,6 +211,8 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
           ...modelData,
           base_price: calculateTTC(priceHT, vatRate),
         });
+      } else {
+        setLoadError(`Modèle introuvable pour ce devis (model_id=${quote.model_id}).`);
       }
       
       // Set customer info
@@ -228,7 +233,7 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
         }));
       }
     } catch (err: any) {
-      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+      setLoadError(err.message || 'Erreur lors du chargement du devis.');
     } finally {
       setLoading(false);
     }
@@ -596,6 +601,7 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
     setCustomerMessage('');
     setContactId(null);
     setModel(null);
+    setLoadError(null);
     setOptions([]);
     setBOQOptions([]);
     setBaseCategories([]);
@@ -607,9 +613,9 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
   };
 
   // Don't render if closed.
-  // In create mode (no quoteId) we also bail out if model isn't set yet.
-  // In edit mode (quoteId set) we always render so loadQuoteData can fire and show the spinner.
-  if (!open || (!quoteId && !model && !loading)) {
+  // In create mode (no quoteId) we also bail out if model isn't set yet and no error.
+  // In edit mode (quoteId set) we always render so loadQuoteData can fire and show the spinner/error.
+  if (!open || (!quoteId && !model && !loading && !loadError)) {
     return null;
   }
 
@@ -628,7 +634,13 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
           </div>
         )}
 
-        {(loading || !model) ? (
+        {loadError ? (
+          <div className="flex flex-col items-center justify-center py-12 gap-4">
+            <AlertTriangle className="w-10 h-10 text-red-500" />
+            <p className="text-sm text-red-700 text-center max-w-sm">{loadError}</p>
+            <Button variant="outline" onClick={handleClose}>Fermer</Button>
+          </div>
+        ) : (loading || !model) ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="w-8 h-8 animate-spin text-orange-500" />
           </div>

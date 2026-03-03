@@ -46,7 +46,16 @@ export default function DeployUpdatePage() {
         body:        formData,
       });
 
-      const json = await res.json();
+      const text = await res.text();
+      if (!text.trim()) {
+        throw new Error('Réponse vide du serveur. Vérifiez que la session admin est active.');
+      }
+      let json: any;
+      try {
+        json = JSON.parse(text);
+      } catch (parseErr: any) {
+        throw new Error(`Réponse invalide du serveur (réponse non-JSON): ${parseErr.message}`);
+      }
 
       if (!res.ok || !json.success) {
         throw new Error(json.error || 'Déploiement échoué.');

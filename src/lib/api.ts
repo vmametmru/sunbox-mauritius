@@ -19,7 +19,16 @@ export const api = {
       body: JSON.stringify(data),
     });
 
-    const result = await response.json();
+    const text = await response.text();
+    if (!text.trim()) {
+      throw new Error(`Réponse vide du serveur (action: ${action})`);
+    }
+    let result: any;
+    try {
+      result = JSON.parse(text);
+    } catch (parseErr: any) {
+      throw new Error(`Réponse invalide du serveur (action: ${action}): ${parseErr.message}`);
+    }
     if (!response.ok || result.error) {
       throw new Error(result.error || 'API request failed');
     }
