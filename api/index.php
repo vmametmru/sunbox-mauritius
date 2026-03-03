@@ -7,11 +7,11 @@ handleCORS();
 // Pro site deployment versions — increment these when templates or DB schema change.
 // PRO_FILE_VERSION must match define('PRO_FILE_VERSION', ...) in api/pro_deploy/api_config.php
 define('PRO_FILE_VERSION',      '2.1.0');
-define('PRO_DB_SCHEMA_VERSION', '1.6.0');
+define('PRO_DB_SCHEMA_VERSION', '1.7.0');
 
 // Sunbox main database schema version.
 // Increment when new tables or columns are added.
-define('SUNBOX_DB_SCHEMA_VERSION', '2.3.0');
+define('SUNBOX_DB_SCHEMA_VERSION', '2.4.0');
 
 $action = $_GET['action'] ?? '';
 $body   = getRequestBody();
@@ -150,6 +150,24 @@ try {
 
             // ── v2.3.0 ── Add replace_with_sunbox flag to suppliers ──────────────
             $addCol('suppliers', 'replace_with_sunbox', "TINYINT(1) DEFAULT 0 AFTER `is_active`");
+
+            // ── v2.4.0 ── Add pool dimension columns to quotes ───────────────────
+            $addCol('quotes', 'pool_shape',         "VARCHAR(20) DEFAULT NULL AFTER `approval_token`");
+            $addCol('quotes', 'pool_longueur',      "DECIMAL(8,2) DEFAULT NULL AFTER `pool_shape`");
+            $addCol('quotes', 'pool_largeur',       "DECIMAL(8,2) DEFAULT NULL AFTER `pool_longueur`");
+            $addCol('quotes', 'pool_profondeur',    "DECIMAL(8,2) DEFAULT NULL AFTER `pool_largeur`");
+            $addCol('quotes', 'pool_longueur_la',   "DECIMAL(8,2) DEFAULT NULL AFTER `pool_profondeur`");
+            $addCol('quotes', 'pool_largeur_la',    "DECIMAL(8,2) DEFAULT NULL AFTER `pool_longueur_la`");
+            $addCol('quotes', 'pool_profondeur_la', "DECIMAL(8,2) DEFAULT NULL AFTER `pool_largeur_la`");
+            $addCol('quotes', 'pool_longueur_lb',   "DECIMAL(8,2) DEFAULT NULL AFTER `pool_profondeur_la`");
+            $addCol('quotes', 'pool_largeur_lb',    "DECIMAL(8,2) DEFAULT NULL AFTER `pool_longueur_lb`");
+            $addCol('quotes', 'pool_profondeur_lb', "DECIMAL(8,2) DEFAULT NULL AFTER `pool_largeur_lb`");
+            $addCol('quotes', 'pool_longueur_ta',   "DECIMAL(8,2) DEFAULT NULL AFTER `pool_profondeur_lb`");
+            $addCol('quotes', 'pool_largeur_ta',    "DECIMAL(8,2) DEFAULT NULL AFTER `pool_longueur_ta`");
+            $addCol('quotes', 'pool_profondeur_ta', "DECIMAL(8,2) DEFAULT NULL AFTER `pool_largeur_ta`");
+            $addCol('quotes', 'pool_longueur_tb',   "DECIMAL(8,2) DEFAULT NULL AFTER `pool_profondeur_ta`");
+            $addCol('quotes', 'pool_largeur_tb',    "DECIMAL(8,2) DEFAULT NULL AFTER `pool_longueur_tb`");
+            $addCol('quotes', 'pool_profondeur_tb', "DECIMAL(8,2) DEFAULT NULL AFTER `pool_largeur_tb`");
 
             // ── Schema version table (always create / update) ─────────────────
             $db->exec("CREATE TABLE IF NOT EXISTS `db_schema_version` (
@@ -3481,6 +3499,23 @@ try {
                 $addCol('pro_quotes', 'notes',            "TEXT AFTER `total_price`");
                 $addCol('pro_quotes', 'valid_until',      "DATE DEFAULT NULL AFTER `status`");
                 $addCol('pro_quotes', 'boq_requested',    "TINYINT(1) DEFAULT 0 AFTER `valid_until`");
+                // ── v1.7.0 ── Pool dimension columns for pro_quotes ────────────
+                $addCol('pro_quotes', 'pool_shape',         "VARCHAR(20) DEFAULT NULL AFTER `boq_requested`");
+                $addCol('pro_quotes', 'pool_longueur',      "DECIMAL(8,2) DEFAULT NULL AFTER `pool_shape`");
+                $addCol('pro_quotes', 'pool_largeur',       "DECIMAL(8,2) DEFAULT NULL AFTER `pool_longueur`");
+                $addCol('pro_quotes', 'pool_profondeur',    "DECIMAL(8,2) DEFAULT NULL AFTER `pool_largeur`");
+                $addCol('pro_quotes', 'pool_longueur_la',   "DECIMAL(8,2) DEFAULT NULL AFTER `pool_profondeur`");
+                $addCol('pro_quotes', 'pool_largeur_la',    "DECIMAL(8,2) DEFAULT NULL AFTER `pool_longueur_la`");
+                $addCol('pro_quotes', 'pool_profondeur_la', "DECIMAL(8,2) DEFAULT NULL AFTER `pool_largeur_la`");
+                $addCol('pro_quotes', 'pool_longueur_lb',   "DECIMAL(8,2) DEFAULT NULL AFTER `pool_profondeur_la`");
+                $addCol('pro_quotes', 'pool_largeur_lb',    "DECIMAL(8,2) DEFAULT NULL AFTER `pool_longueur_lb`");
+                $addCol('pro_quotes', 'pool_profondeur_lb', "DECIMAL(8,2) DEFAULT NULL AFTER `pool_largeur_lb`");
+                $addCol('pro_quotes', 'pool_longueur_ta',   "DECIMAL(8,2) DEFAULT NULL AFTER `pool_profondeur_lb`");
+                $addCol('pro_quotes', 'pool_largeur_ta',    "DECIMAL(8,2) DEFAULT NULL AFTER `pool_longueur_ta`");
+                $addCol('pro_quotes', 'pool_profondeur_ta', "DECIMAL(8,2) DEFAULT NULL AFTER `pool_largeur_ta`");
+                $addCol('pro_quotes', 'pool_longueur_tb',   "DECIMAL(8,2) DEFAULT NULL AFTER `pool_profondeur_ta`");
+                $addCol('pro_quotes', 'pool_largeur_tb',    "DECIMAL(8,2) DEFAULT NULL AFTER `pool_longueur_tb`");
+                $addCol('pro_quotes', 'pool_profondeur_tb', "DECIMAL(8,2) DEFAULT NULL AFTER `pool_largeur_tb`");
 
                 // ── Quote options (v1.4.0) ─────────────────────────────────────
                 $proPdo->exec("CREATE TABLE IF NOT EXISTS `pro_quote_options` (
