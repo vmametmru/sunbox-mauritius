@@ -853,7 +853,19 @@ try {
             requireAdmin();
             $db = getDB();
             validateRequired($body, ['id']);
-            $db->prepare("DELETE FROM pro_quotes WHERE id = ?")->execute([(int)$body['id']]);
+            $qid = (int)$body['id'];
+            // Cascade: delete purchase report items and reports linked to this quote
+            try {
+                $rStmt = $db->prepare("SELECT id FROM pro_purchase_reports WHERE quote_id = ?");
+                $rStmt->execute([$qid]);
+                $reportIds = $rStmt->fetchAll(\PDO::FETCH_COLUMN);
+                if (!empty($reportIds)) {
+                    $placeholders = implode(',', array_fill(0, count($reportIds), '?'));
+                    $db->prepare("DELETE FROM pro_purchase_report_items WHERE report_id IN ($placeholders)")->execute($reportIds);
+                    $db->prepare("DELETE FROM pro_purchase_reports WHERE id IN ($placeholders)")->execute($reportIds);
+                }
+            } catch (\PDOException $e) { error_log('delete_quote cascade error: ' . $e->getMessage()); }
+            $db->prepare("DELETE FROM pro_quotes WHERE id = ?")->execute([$qid]);
             ok();
             break;
         }
