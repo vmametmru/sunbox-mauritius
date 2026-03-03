@@ -550,42 +550,62 @@ try {
 
         case 'get_pdf_context': {
             requireAdmin();
-            // Read PDF / company / site settings directly from the Sunbox DB
-            // (these live in the `settings` table, NOT in pro_settings).
+            // Read PDF styling settings (template, colors, etc.) from Sunbox DB.
+            // Company info is taken from the pro user's own professional_profiles
+            // record so the PDF shows the pro user's branding, NOT Sunbox's.
             $pdfSettings = [];
-            $companySettings = [];
             $siteSettings = [];
             try {
                 $sdb = getSunboxDB();
-                $stmt = $sdb->query("SELECT setting_key, setting_value, setting_group FROM settings WHERE setting_group IN ('pdf','company','site','email','general')");
+                $stmt = $sdb->query("SELECT setting_key, setting_value, setting_group FROM settings WHERE setting_group IN ('pdf','site','general')");
                 foreach ($stmt->fetchAll() as $row) {
                     $k = $row['setting_key']; $v = $row['setting_value'];
                     $g = $row['setting_group'];
                     if ($g === 'pdf') {
                         $pdfSettings[$k] = $v;
-                    } elseif ($g === 'company' || $g === 'email') {
-                        $companySettings[$k] = $v;
                     } elseif ($g === 'site') {
                         $siteSettings[$k] = $v;
                     } elseif ($g === 'general' && !isset($pdfSettings[$k])) {
-                        // only fill general keys that pdf group hasn't set (e.g. vat_rate)
                         $pdfSettings[$k] = $v;
                     }
                 }
             } catch (\Throwable $e) { /* non-fatal */ }
 
-            // Convert site_logo to base64 so the browser never has to cross-origin load it
+            // Use pro VAT rate from .env (overrides Sunbox general setting)
+            $proVatRate = env('VAT_RATE', '');
+            if ($proVatRate !== '') {
+                $pdfSettings['vat_rate'] = $proVatRate;
+            }
+
+            // Build company info from this pro user's professional_profiles row
+            $profile   = getProProfile();
+            $proEmail  = '';
+            if (SUNBOX_USER_ID) {
+                try {
+                    $sdb   = getSunboxDB();
+                    $eStmt = $sdb->prepare("SELECT email FROM users WHERE id = ? LIMIT 1");
+                    $eStmt->execute([SUNBOX_USER_ID]);
+                    $proEmail = (string)($eStmt->fetchColumn() ?: '');
+                } catch (\Throwable $e) { /* non-fatal */ }
+            }
+            $companySettings = [
+                'company_name'    => (string)($profile['company_name'] ?? env('COMPANY_NAME', '')),
+                'company_email'   => $proEmail,
+                'company_phone'   => (string)($profile['phone'] ?? ''),
+                'company_address' => (string)($profile['address'] ?? ''),
+            ];
+
+            // Convert the pro user's logo to base64 (logo lives on the Sunbox server)
+            $sunboxRoot = dirname(__DIR__, 3); // public_html/
+            $realBase   = realpath($sunboxRoot) ?: $sunboxRoot;
             $logoBase64 = '';
-            $logoUrl = $siteSettings['site_logo'] ?? '';
+            $logoUrl    = (string)($profile['logo_url'] ?? '');
             if ($logoUrl) {
-                $sunboxRoot = dirname(__DIR__, 3); // public_html/
                 $logoPath = parse_url($logoUrl, PHP_URL_PATH);
                 if ($logoPath) {
-                    // Guard against path traversal
-                    $realBase = realpath($sunboxRoot) ?: $sunboxRoot;
                     $fullPath = realpath($sunboxRoot . '/' . ltrim($logoPath, '/'));
                     if ($fullPath && strncmp($fullPath, $realBase, strlen($realBase)) === 0 && is_file($fullPath)) {
-                        $mime = @mime_content_type($fullPath) ?: 'image/png';
+                        $mime = @mime_content_type($fullPath) ?: 'image/jpeg';
                         $logoBase64 = 'data:' . $mime . ';base64,' . base64_encode(file_get_contents($fullPath));
                     }
                 }
@@ -1294,6 +1314,58 @@ try {
         }
 
         // ── CREDITS (direct from Sunbox DB — no HTTP) ─────────────────────────
+        case 'get_pro_profile': {
+            requireAdmin();
+            $profile = getProProfile();
+            $email   = '';
+            if (SUNBOX_USER_ID) {
+                try {
+                    $sdb   = getSunboxDB();
+                    $eStmt = $sdb->prepare("SELECT email FROM users WHERE id = ? LIMIT 1");
+                    $eStmt->execute([SUNBOX_USER_ID]);
+                    $email = (string)($eStmt->fetchColumn() ?: '');
+                } catch (\Throwable $e) { /* non-fatal */ }
+            }
+            ok(array_merge($profile, [
+                'id'                    => SUNBOX_USER_ID,
+                'name'                  => (string)($profile['user_name'] ?? ''),
+                'email'                 => $email,
+                'credits'               => (float)($profile['credits'] ?? 0),
+                'sunbox_margin_percent' => (float)($profile['sunbox_margin_percent'] ?? 0),
+            ]));
+            break;
+        }
+
+        case 'update_pro_profile': {
+            requireAdmin();
+            if (!SUNBOX_USER_ID) { fail('User non configuré', 400); }
+            $sets = []; $params = [];
+            if (array_key_exists('company_name', $body))         { $sets[] = 'company_name = ?';         $params[] = sanitize((string)$body['company_name']); }
+            if (array_key_exists('address', $body))              { $sets[] = 'address = ?';              $params[] = sanitize((string)$body['address']); }
+            if (array_key_exists('vat_number', $body))           { $sets[] = 'vat_number = ?';           $params[] = sanitize((string)$body['vat_number']); }
+            if (array_key_exists('brn_number', $body))           { $sets[] = 'brn_number = ?';           $params[] = sanitize((string)$body['brn_number']); }
+            if (array_key_exists('phone', $body))                { $sets[] = 'phone = ?';                $params[] = sanitize((string)$body['phone']); }
+            if (array_key_exists('sunbox_margin_percent', $body)){ $sets[] = 'sunbox_margin_percent = ?'; $params[] = (float)$body['sunbox_margin_percent']; }
+            if (array_key_exists('logo_url', $body)) {
+                // Only accept root-relative paths (no arbitrary external URLs)
+                $rawLogo = (string)$body['logo_url'];
+                if ($rawLogo === '' || (strlen($rawLogo) > 0 && $rawLogo[0] === '/')) {
+                    $sets[]   = 'logo_url = ?';
+                    $params[] = $rawLogo;
+                }
+            }
+            if (!empty($sets)) {
+                $sets[] = 'updated_at = NOW()';
+                $params[] = SUNBOX_USER_ID;
+                try {
+                    $sdb = getSunboxDB();
+                    $sdb->prepare("UPDATE professional_profiles SET " . implode(', ', $sets) . " WHERE user_id = ?")->execute($params);
+                } catch (\Throwable $e) { fail('Mise à jour impossible: ' . $e->getMessage()); }
+            }
+            ok();
+            break;
+        }
+
         case 'get_pro_credits': {
             requireAdmin();
             try {
