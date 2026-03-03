@@ -280,10 +280,14 @@ function pdfPoolDimensions(data: QuotePdfData, sectionLabelColor: string, includ
   const shape = (data.pool_shape || 'Rectangulaire').toUpperCase();
 
   const row = (label: string, value: string) =>
-    `<div style="display:flex;justify-content:space-between;padding:1px 0;">
-      <span style="font-size:10px;color:#6b7280;">${label}</span>
-      <span style="font-size:10px;font-weight:600;color:#111827;">${value}</span>
-    </div>`;
+    `<div style="display:flex;justify-content:space-between;padding:1px 0;">` +
+    `<span style="font-size:10px;color:#6b7280;">${label}</span>` +
+    `<span style="font-size:10px;font-weight:600;color:#111827;">${value}</span>` +
+    `</div>`;
+
+  const colHeader = (text: string) =>
+    `<div style="font-size:9px;color:#6b7280;font-weight:600;text-align:center;` +
+    `border-bottom:1px solid #e5e7eb;padding-bottom:1px;margin-bottom:2px;">${text}</div>`;
 
   let inner = '';
 
@@ -292,33 +296,31 @@ function pdfPoolDimensions(data: QuotePdfData, sectionLabelColor: string, includ
     const lb = data.pool_longueur_lb ?? 0, lwb = data.pool_largeur_lb ?? 0, db_ = data.pool_profondeur_lb ?? 0;
     const surface = la * lwa + lb * lwb;
     const volume  = la * lwa * da + lb * lwb * db_;
-    inner += `<div style="font-size:9px;color:#6b7280;font-weight:600;margin-bottom:1px;">Partie A</div>`;
-    inner += row('Longueur A',   fmtDim(la));
-    inner += row('Largeur A',    fmtDim(lwa));
-    inner += row('Profondeur A', fmtDim(da));
-    inner += `<div style="font-size:9px;color:#6b7280;font-weight:600;margin-top:3px;margin-bottom:1px;">Partie B</div>`;
-    inner += row('Longueur B',   fmtDim(lb));
-    inner += row('Largeur B',    fmtDim(lwb));
-    inner += row('Profondeur B', fmtDim(db_));
-    if (surface > 0) inner += row('Surface totale', fmtM2(surface));
-    if (volume  > 0) inner += row('Volume total',   fmtM3(volume));
+    const colA = colHeader('Partie A') + row('Longueur', fmtDim(la)) + row('Largeur', fmtDim(lwa)) + row('Profondeur', fmtDim(da));
+    const colB = colHeader('Partie B') + row('Longueur', fmtDim(lb)) + row('Largeur', fmtDim(lwb)) + row('Profondeur', fmtDim(db_));
+    inner = `<div style="display:flex;gap:8px;"><div style="flex:1;">${colA}</div><div style="flex:1;">${colB}</div></div>`;
+    if (surface > 0 || volume > 0) {
+      inner += `<div style="border-top:1px solid #e5e7eb;margin-top:3px;padding-top:2px;">`;
+      if (surface > 0) inner += row('Surface totale', fmtM2(surface));
+      if (volume  > 0) inner += row('Volume total',   fmtM3(volume));
+      inner += `</div>`;
+    }
   } else if (shape === 'T') {
     const ta = data.pool_longueur_ta ?? 0, twa = data.pool_largeur_ta ?? 0, tda = data.pool_profondeur_ta ?? 0;
     const tb = data.pool_longueur_tb ?? 0, twb = data.pool_largeur_tb ?? 0, tdb = data.pool_profondeur_tb ?? 0;
     const surface = ta * twa + tb * twb;
     const volume  = ta * twa * tda + tb * twb * tdb;
-    inner += `<div style="font-size:9px;color:#6b7280;font-weight:600;margin-bottom:1px;">Partie A</div>`;
-    inner += row('Longueur A',   fmtDim(ta));
-    inner += row('Largeur A',    fmtDim(twa));
-    inner += row('Profondeur A', fmtDim(tda));
-    inner += `<div style="font-size:9px;color:#6b7280;font-weight:600;margin-top:3px;margin-bottom:1px;">Partie B</div>`;
-    inner += row('Longueur B',   fmtDim(tb));
-    inner += row('Largeur B',    fmtDim(twb));
-    inner += row('Profondeur B', fmtDim(tdb));
-    if (surface > 0) inner += row('Surface totale', fmtM2(surface));
-    if (volume  > 0) inner += row('Volume total',   fmtM3(volume));
+    const colA = colHeader('Partie A') + row('Longueur', fmtDim(ta)) + row('Largeur', fmtDim(twa)) + row('Profondeur', fmtDim(tda));
+    const colB = colHeader('Partie B') + row('Longueur', fmtDim(tb)) + row('Largeur', fmtDim(twb)) + row('Profondeur', fmtDim(tdb));
+    inner = `<div style="display:flex;gap:8px;"><div style="flex:1;">${colA}</div><div style="flex:1;">${colB}</div></div>`;
+    if (surface > 0 || volume > 0) {
+      inner += `<div style="border-top:1px solid #e5e7eb;margin-top:3px;padding-top:2px;">`;
+      if (surface > 0) inner += row('Surface totale', fmtM2(surface));
+      if (volume  > 0) inner += row('Volume total',   fmtM3(volume));
+      inner += `</div>`;
+    }
   } else {
-    // Rectangular (default) – and any other named shape
+    // Rectangular (default) – single column, fills all available space
     const l = data.pool_longueur ?? 0, w = data.pool_largeur ?? 0, d = data.pool_profondeur ?? 0;
     const surface   = l * w;
     const volume    = l * w * d;
@@ -334,11 +336,9 @@ function pdfPoolDimensions(data: QuotePdfData, sectionLabelColor: string, includ
     if (perimetre > 0) inner += row('Périmètre',   fmtDim(perimetre));
   }
 
-  // Title style matches "Client" / "Modèle" labels: 13px, 700, sectionLabelColor
-  return `<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;padding:6px 8px;height:100%;box-sizing:border-box;overflow:hidden;">
-    ${includeTitle ? `<div style="font-size:13px;font-weight:700;color:${sectionLabelColor};margin-bottom:4px;">Dimensions</div>` : ''}
-    ${inner}
-  </div>`;
+  return `<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;padding:6px 8px;height:100%;box-sizing:border-box;overflow:hidden;">` +
+    `${includeTitle ? `<div style="font-size:13px;font-weight:700;color:${sectionLabelColor};margin-bottom:4px;">Dimensions</div>` : ''}` +
+    `${inner}</div>`;
 }
 
 // ─── Internal template builder ──────────────────────────────────────────────
@@ -375,13 +375,17 @@ export function buildTemplate(
     ? `<img src="${logoBase64}" style="${offsetStyle}height:48px;max-width:160px;object-fit:contain;display:block;margin-bottom:8px;" alt="Logo" />`
     : '';
 
+  // Pre-compute dim panel (title suppressed here; rendered above the row)
+  const dimPanel = pdfPoolDimensions(data, theme.sectionLabelColor, false);
+  const hasDim = !!dimPanel;
+
   return `<div style="font-family:${font};width:794px;background:#fff;color:#1f2937;">
 
-    <!-- BLOCK A: HEADER -->
+    <!-- BLOCK A: HEADER (Company | Devis | Client on same line) -->
     <div data-pdf-block="a">
       <div style="background:${theme.barColor};height:${theme.barHeight}px;"></div>
-      <div style="padding:22px 40px 16px;display:flex;justify-content:space-between;align-items:flex-start;">
-        <div>
+      <div style="padding:22px 40px 16px;display:flex;justify-content:space-between;align-items:flex-start;gap:16px;">
+        <div style="flex:1.2;min-width:0;">
           ${logoHtml}
           <div style="font-size:11px;color:#4b5563;line-height:1.7;">
             ${company.company_name ? `<div style="font-weight:600;color:#374151;">${company.company_name}</div>` : ''}
@@ -390,20 +394,13 @@ export function buildTemplate(
             ${company.company_email ? `<div>${company.company_email}</div>` : ''}
           </div>
         </div>
-        <div style="text-align:right;">
+        <div style="flex-shrink:0;text-align:center;">
           <div style="${theme.titleStyle}">Devis</div>
           <div style="font-size:12px;color:#374151;margin-top:4px;">${data.reference_number}</div>
           <div style="font-size:11px;color:${theme.accent};font-weight:600;margin-top:2px;">envoyé le ${fmtDate(data.created_at)}</div>
         </div>
-      </div>
-      <div style="border-bottom:1px solid ${div};margin:0 40px;"></div>
-    </div>
-
-    <!-- BLOCK B: CLIENT + MODEL -->
-    <div data-pdf-block="b">
-      <div style="padding:12px 40px 8px;display:flex;gap:32px;">
-        <div style="flex:1;">
-          <div style="font-size:13px;font-weight:700;color:${theme.sectionLabelColor};margin-bottom:6px;">Client</div>
+        <div style="flex:1;min-width:0;text-align:right;">
+          <div style="font-size:13px;font-weight:700;color:${theme.sectionLabelColor};margin-bottom:4px;">Client</div>
           <div style="font-size:11px;color:#374151;line-height:1.7;">
             <div>${data.customer_name}</div>
             ${data.customer_address ? `<div>${data.customer_address}</div>` : ''}
@@ -411,19 +408,18 @@ export function buildTemplate(
             ${data.customer_phone ? `<div>${data.customer_phone}</div>` : ''}
           </div>
         </div>
-        <div style="flex:1.3;">
-          ${(() => {
-            const dimPanel = pdfPoolDimensions(data, theme.sectionLabelColor, false);
-            const hasDim = !!dimPanel;
-            return `
-              <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">
-                ${modelTitle ? `<div style="font-size:13px;font-weight:700;color:${theme.sectionLabelColor};">Modèle : <span style="font-weight:400;">${modelTitle}</span></div>` : '<div></div>'}
-                ${hasDim ? `<div style="font-size:13px;font-weight:700;color:${theme.sectionLabelColor};">Dimensions</div>` : ''}
-              </div>
-              ${pdfModelRow(data.photo_url, data.plan_url, hasDim ? dimPanel : undefined)}
-            `;
-          })()}
+      </div>
+      <div style="border-bottom:1px solid ${div};margin:0 40px;"></div>
+    </div>
+
+    <!-- BLOCK B: MODEL + PHOTOS + DIMENSIONS (full width) -->
+    <div data-pdf-block="b">
+      <div style="padding:12px 40px 8px;">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">
+          ${modelTitle ? `<div style="font-size:13px;font-weight:700;color:${theme.sectionLabelColor};">Modèle : <span style="font-weight:400;">${modelTitle}</span></div>` : '<div></div>'}
+          ${hasDim ? `<div style="font-size:13px;font-weight:700;color:${theme.sectionLabelColor};">Dimensions</div>` : ''}
         </div>
+        ${pdfModelRow(data.photo_url, data.plan_url, hasDim ? dimPanel : undefined)}
       </div>
       <div style="border-bottom:1px solid ${div};margin:8px 40px 0;"></div>
     </div>
