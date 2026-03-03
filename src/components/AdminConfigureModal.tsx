@@ -211,6 +211,22 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
           ...modelData,
           base_price: calculateTTC(priceHT, vatRate),
         });
+      } else if (quote.model_id && quote.model_name) {
+        // Fallback: model was not returned by getModels (e.g. disabled via pro_model_overrides).
+        // Construct a minimal model from the quote data so the configurator can still open.
+        // The quote's base_price is the historical price; options are loaded by model id below.
+        const priceHT = parseFloat(quote.base_price) || 0;
+        setModel({
+          id: parseInt(quote.model_id, 10),
+          name: quote.model_name,
+          type: (quote.model_type ?? 'container') as 'container' | 'pool',
+          description: '',
+          base_price: calculateTTC(priceHT, vatRate),
+          calculated_base_price: priceHT,
+          surface_m2: 0,
+          image_url: quote.photo_url || '',
+          plan_url: quote.plan_url || undefined,
+        });
       } else {
         setLoadError(`Modèle introuvable pour ce devis (model_id=${quote.model_id}).`);
       }

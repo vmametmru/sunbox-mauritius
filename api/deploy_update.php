@@ -17,8 +17,10 @@
  * A deployment log line is appended to web_root/.sunbox_version.
  */
 
-header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/config.php';
+handleCORS(); // sets CORS headers and handles OPTIONS preflight
+
+try {
 
 requireAdmin();
 
@@ -192,3 +194,11 @@ echo json_encode([
     'version'     => $versionLine,
     'version_log' => $versionLog,
 ], JSON_UNESCAPED_UNICODE);
+
+} catch (\Throwable $e) {
+    http_response_code(500);
+    echo json_encode([
+        'success' => false,
+        'error'   => API_DEBUG ? $e->getMessage() : 'Erreur interne du serveur.',
+    ], JSON_UNESCAPED_UNICODE);
+}
