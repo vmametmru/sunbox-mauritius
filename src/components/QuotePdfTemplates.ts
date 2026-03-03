@@ -44,6 +44,9 @@ export interface QuotePdfData {
   quote_title?: string;
   photo_url?: string;
   plan_url?: string;
+  // Pre-computed display widths for photo/plan (px at 120 px height, set by PDF generator)
+  photo_natural_w?: number;
+  plan_natural_w?: number;
   // Pool dimensions (only for model_type === 'pool')
   pool_shape?: string;
   pool_longueur?: number | null;
@@ -131,6 +134,11 @@ function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+/** Strip "(Forfait)" suffix (case-insensitive) from BOQ line descriptions. */
+function stripForfait(s: string): string {
+  return s.replace(/\s*\(forfait\)/gi, '').trim();
+}
+
 function getLogoOffsetStyle(settings: PdfDisplaySettings): string {
   const left   = parseInt(settings.pdf_logo_offset_left   || '0') || 0;
   const right  = parseInt(settings.pdf_logo_offset_right  || '0') || 0;
@@ -151,14 +159,14 @@ function pdfCatBlock(cats: QuotePdfCategory[] | undefined): string {
   for (const cat of cats) {
     if (cat.subcategories?.length) {
       for (const sub of cat.subcategories) {
-        const items = sub.lines.map(l => l.description).join(', ');
+        const items = sub.lines.map(l => stripForfait(l.description)).join(', ');
         html += `<div style="margin-bottom:4px;font-size:11px;line-height:1.5;">` +
           `<span style="font-size:12px;font-weight:700;color:#111827;">${sub.name}</span>` +
           `${items ? `<span style="color:#4b5563;"> — ${items}</span>` : ''}` +
           `</div>`;
       }
     } else {
-      const items = cat.lines.map(l => l.description).join(', ');
+      const items = cat.lines.map(l => stripForfait(l.description)).join(', ');
       html += `<div style="margin-bottom:4px;font-size:11px;line-height:1.5;">` +
         `<span style="font-size:12px;font-weight:700;color:#111827;">${cat.name}</span>` +
         `${items ? `<span style="color:#4b5563;"> — ${items}</span>` : ''}` +
@@ -173,48 +181,57 @@ function pdfOptBlock(opts: QuotePdfData['options']): string {
   if (!opts?.length) return '';
   return opts.map(o => `<div style="margin-bottom:8px;">
     <div style="font-size:12px;font-weight:700;color:#111827;">${esc(o.option_name)}</div>
-    ${o.option_details ? `<div style="font-size:11px;color:#4b5563;margin-top:2px;">${esc(o.option_details)}</div>` : ''}
+    ${o.option_details ? `<div style="font-size:11px;color:#4b5563;margin-top:2px;">${esc(stripForfait(o.option_details))}</div>` : ''}
   </div>`).join('');
 }
 
 /**
  * Photos + optional pool-dimensions panel in a single fixed-height row.
- * Images use height:120px + width:auto so the natural aspect ratio is preserved
- * (html2canvas does not support object-fit, which would otherwise distort them).
+ * When photoW/planW are provided (pixels at 120 px height), images use explicit
+ * width+height so html2canvas renders them at the correct aspect ratio.
  * When a dims panel is provided (pool quotes): [photo | plan | dims] in one row.
  * Without dims (container / free quotes): original side-by-side layout unchanged.
  */
-function pdfModelRow(photo: string | undefined, plan: string | undefined, dimPanel?: string): string {
+function pdfModelRow(photo: string | undefined, plan: string | undefined, dimPanel?: string, photoW?: number, planW?: number): string {
   const hasPhoto = !!photo;
   const hasPlan  = !!plan;
   const hasDim   = !!dimPanel;
 
   if (!hasPhoto && !hasPlan && !hasDim) return '';
 
-  /** Wrap an img so it sits at exactly 120 px tall, natural width, no distortion. */
-  const imgWrap = (src: string, alt: string) =>
-    `<div style="overflow:hidden;border-radius:4px;flex-shrink:0;height:120px;">` +
-    `<img src="${src}" style="height:120px;width:auto;display:block;" alt="${alt}" />` +
-    `</div>`;
+  const IMG_H = 120; // fixed display height in px
+
+  /** Render an img at explicit pixel size so html2canvas preserves aspect ratio. */
+  const imgTag = (src: string, w: number, alt: string) =>
+    `<img src="${src}" style="width:${w}px;height:${IMG_H}px;display:block;" alt="${alt}" />`;
 
   if (hasDim) {
     /** In dims mode: cap image width so the dims panel gets enough space. */
-    const imgWrapDim = (src: string, alt: string) =>
-      `<div style="overflow:hidden;border-radius:4px;flex-shrink:0;height:120px;max-width:130px;">` +
-      `<img src="${src}" style="height:120px;width:auto;max-width:130px;display:block;" alt="${alt}" />` +
+    const MAX_W_DIM = 130;
+    const photoDisplayW = photoW ? Math.min(photoW, MAX_W_DIM) : IMG_H;
+    const planDisplayW  = planW  ? Math.min(planW,  MAX_W_DIM) : IMG_H;
+    const imgWrapDim = (src: string, w: number, alt: string) =>
+      `<div style="overflow:hidden;border-radius:4px;flex-shrink:0;height:${IMG_H}px;width:${w}px;">` +
+      imgTag(src, w, alt) +
       `</div>`;
     const cols = [
-      hasPhoto ? imgWrapDim(photo!, 'Photo') : '',
-      hasPlan  ? imgWrapDim(plan!,  'Plan')  : '',
-      `<div style="flex:1;height:120px;min-width:0;">${dimPanel}</div>`,
+      hasPhoto ? imgWrapDim(photo!, photoDisplayW, 'Photo') : '',
+      hasPlan  ? imgWrapDim(plan!,  planDisplayW,  'Plan')  : '',
+      `<div style="flex:1;height:${IMG_H}px;min-width:0;">${dimPanel}</div>`,
     ].filter(Boolean).join('');
     return `<div style="display:flex;align-items:flex-start;gap:6px;margin-top:4px;">${cols}</div>`;
   }
 
-  // No dimensions panel – original 2-photo layout (container / free quotes)
+  // No dimensions panel – 2-photo layout (container / free quotes)
+  const photoDisplayW = photoW || IMG_H;
+  const planDisplayW  = planW  || IMG_H;
+  const imgWrap = (src: string, w: number, alt: string) =>
+    `<div style="overflow:hidden;border-radius:4px;flex-shrink:0;height:${IMG_H}px;width:${w}px;">` +
+    imgTag(src, w, alt) +
+    `</div>`;
   return `<div style="display:flex;align-items:flex-start;gap:8px;margin-top:8px;">
-    ${hasPhoto ? imgWrap(photo!, 'Photo') : ''}
-    ${hasPlan  ? imgWrap(plan!,  'Plan')  : ''}
+    ${hasPhoto ? imgWrap(photo!, photoDisplayW, 'Photo') : ''}
+    ${hasPlan  ? imgWrap(plan!,  planDisplayW,  'Plan')  : ''}
   </div>`;
 }
 
@@ -379,6 +396,10 @@ export function buildTemplate(
   const dimPanel = pdfPoolDimensions(data, theme.sectionLabelColor, false);
   const hasDim = !!dimPanel;
 
+  // When a logo is shown, pad the client column down so it starts at the same
+  // vertical level as the company name (below the 48 px logo + 8 px margin).
+  const clientTopPad = (settings.pdf_show_logo === 'true' && logoBase64) ? 'padding-top:56px;' : '';
+
   return `<div style="font-family:${font};width:794px;background:#fff;color:#1f2937;">
 
     <!-- BLOCK A: HEADER (Company | Devis | Client on same line) -->
@@ -399,7 +420,7 @@ export function buildTemplate(
           <div style="font-size:12px;color:#374151;margin-top:4px;">${data.reference_number}</div>
           <div style="font-size:11px;color:${theme.accent};font-weight:600;margin-top:2px;">envoyé le ${fmtDate(data.created_at)}</div>
         </div>
-        <div style="flex:1;min-width:0;text-align:right;">
+        <div style="flex:1;min-width:0;text-align:right;${clientTopPad}">
           <div style="font-size:13px;font-weight:700;color:${theme.sectionLabelColor};margin-bottom:4px;">Client</div>
           <div style="font-size:11px;color:#374151;line-height:1.7;">
             <div>${data.customer_name}</div>
@@ -419,7 +440,7 @@ export function buildTemplate(
           ${modelTitle ? `<div style="font-size:13px;font-weight:700;color:${theme.sectionLabelColor};">Modèle : <span style="font-weight:400;">${modelTitle}</span></div>` : '<div></div>'}
           ${hasDim ? `<div style="font-size:13px;font-weight:700;color:${theme.sectionLabelColor};">Dimensions</div>` : ''}
         </div>
-        ${pdfModelRow(data.photo_url, data.plan_url, hasDim ? dimPanel : undefined)}
+        ${pdfModelRow(data.photo_url, data.plan_url, hasDim ? dimPanel : undefined, data.photo_natural_w, data.plan_natural_w)}
       </div>
       <div style="border-bottom:1px solid ${div};margin:8px 40px 0;"></div>
     </div>

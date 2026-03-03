@@ -6,7 +6,7 @@ handleCORS();
 
 // Pro site deployment versions — increment these when templates or DB schema change.
 // PRO_FILE_VERSION must match define('PRO_FILE_VERSION', ...) in api/pro_deploy/api_config.php
-define('PRO_FILE_VERSION',      '2.2.0');
+define('PRO_FILE_VERSION',      '2.3.0');
 define('PRO_DB_SCHEMA_VERSION', '1.7.0');
 
 // Sunbox main database schema version.

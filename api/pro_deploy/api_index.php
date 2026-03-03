@@ -403,6 +403,133 @@ try {
             break;
         }
 
+        case 'get_quote_with_details': {
+            requireAdmin();
+            $db = getDB();
+            validateRequired($body, ['id']);
+            $id = (int)$body['id'];
+
+            $stmt = $db->prepare("
+                SELECT q.*,
+                       COALESCE(q.customer_name, c.name)    AS customer_name,
+                       COALESCE(q.customer_email, c.email)  AS customer_email,
+                       COALESCE(q.customer_phone, c.phone)  AS customer_phone,
+                       COALESCE(q.customer_address, c.address) AS customer_address
+                FROM pro_quotes q
+                LEFT JOIN pro_contacts c ON c.id = q.contact_id
+                WHERE q.id = ?
+            ");
+            $stmt->execute([$id]);
+            $quote = $stmt->fetch();
+            if (!$quote) fail('Devis introuvable', 404);
+
+            // Pro quotes are never free-form quotes
+            $quote['is_free_quote'] = false;
+
+            $modelId = (int)($quote['model_id'] ?? 0);
+
+            // ── Fallback: model photo/plan from Sunbox DB ───────────────────
+            if ($modelId > 0) {
+                try {
+                    $sdb = getSunboxDB();
+                    if (empty($quote['photo_url'])) {
+                        $r = $sdb->prepare("SELECT file_path FROM model_images WHERE model_id = ? AND media_type = 'photo' ORDER BY is_primary DESC, id DESC LIMIT 1");
+                        $r->execute([$modelId]);
+                        $row = $r->fetch();
+                        if ($row) $quote['photo_url'] = sunboxAbsUrl('/' . ltrim($row['file_path'], '/'));
+                    }
+                    if (empty($quote['plan_url'])) {
+                        $r = $sdb->prepare("SELECT file_path FROM model_images WHERE model_id = ? AND media_type = 'plan' ORDER BY is_primary DESC, id DESC LIMIT 1");
+                        $r->execute([$modelId]);
+                        $row = $r->fetch();
+                        if ($row) $quote['plan_url'] = sunboxAbsUrl('/' . ltrim($row['file_path'], '/'));
+                    }
+                } catch (\Throwable $e) { /* non-fatal */ }
+            }
+
+            // ── Selected options with BOQ detail lines ──────────────────────
+            $options = [];
+            try {
+                $optStmt = $db->prepare("SELECT option_id, option_name, option_price FROM pro_quote_options WHERE quote_id = ? ORDER BY id ASC");
+                $optStmt->execute([$id]);
+                $proOpts = $optStmt->fetchAll();
+                if (!empty($proOpts) && $modelId > 0) {
+                    $sdb = getSunboxDB();
+                    foreach ($proOpts as $opt) {
+                        $details = '';
+                        try {
+                            $dStmt = $sdb->prepare("
+                                SELECT GROUP_CONCAT(bl.description ORDER BY bl.display_order ASC, bl.id ASC SEPARATOR ', ') AS details
+                                FROM boq_categories bc
+                                LEFT JOIN boq_lines bl ON bl.category_id = bc.id
+                                WHERE bc.model_id = ? AND bc.name = ? AND bc.is_option = TRUE
+                                GROUP BY bc.id LIMIT 1
+                            ");
+                            $dStmt->execute([$modelId, $opt['option_name']]);
+                            $row = $dStmt->fetch();
+                            $details = $row['details'] ?? '';
+                        } catch (\Throwable $e) { /* non-fatal */ }
+                        $options[] = [
+                            'option_id'      => $opt['option_id'],
+                            'option_name'    => $opt['option_name'],
+                            'option_price'   => (float)$opt['option_price'],
+                            'option_details' => $details,
+                        ];
+                    }
+                } else {
+                    foreach ($proOpts as $opt) {
+                        $options[] = ['option_id' => $opt['option_id'], 'option_name' => $opt['option_name'], 'option_price' => (float)$opt['option_price'], 'option_details' => ''];
+                    }
+                }
+            } catch (\Throwable $e) { /* pro_quote_options table may not exist yet */ }
+            $quote['options'] = $options;
+
+            // ── Base categories from Sunbox BOQ ─────────────────────────────
+            $baseCategories = [];
+            if ($modelId > 0) {
+                try {
+                    $sdb = getSunboxDB();
+                    $castLine = function(array $ln): array {
+                        return ['description' => $ln['description'], 'quantity' => (float)$ln['quantity'], 'unit' => $ln['unit'],
+                                'unit_cost_ht' => (float)$ln['unit_cost_ht'], 'margin_percent' => (float)$ln['margin_percent'],
+                                'sale_price_ht' => (float)$ln['sale_price_ht']];
+                    };
+                    $sumLines = function(array $lines): float {
+                        return round(array_sum(array_map(fn($ln) => (float)$ln['sale_price_ht'], $lines)), 2);
+                    };
+                    $topStmt = $sdb->prepare("SELECT bc.id, bc.name, bc.display_order FROM boq_categories bc WHERE bc.model_id = ? AND bc.is_option = FALSE AND bc.parent_id IS NULL ORDER BY bc.display_order ASC, bc.name ASC");
+                    $topStmt->execute([$modelId]);
+                    $topCats = $topStmt->fetchAll();
+                    $subStmt = $sdb->prepare("SELECT bc.id, bc.name FROM boq_categories bc WHERE bc.model_id = ? AND bc.is_option = FALSE AND bc.parent_id = ? ORDER BY bc.display_order ASC, bc.name ASC");
+                    $lineStmt = $sdb->prepare("SELECT bl.description, bl.quantity, bl.unit, COALESCE(pl.unit_price, bl.unit_cost_ht) AS unit_cost_ht, bl.margin_percent, ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2) AS sale_price_ht FROM boq_lines bl LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id WHERE bl.category_id = ? ORDER BY bl.display_order ASC, bl.id ASC");
+                    foreach ($topCats as $topCat) {
+                        $topId = (int)$topCat['id'];
+                        $subStmt->execute([$modelId, $topId]);
+                        $subCats = $subStmt->fetchAll();
+                        if (!empty($subCats)) {
+                            $subcats = []; $catTotal = 0.0;
+                            foreach ($subCats as $sub) {
+                                $lineStmt->execute([(int)$sub['id']]);
+                                $rawLines = $lineStmt->fetchAll();
+                                $subTotal = $sumLines($rawLines);
+                                $catTotal += $subTotal;
+                                $subcats[] = ['name' => $sub['name'], 'total_sale_price_ht' => $subTotal, 'lines' => array_map($castLine, $rawLines)];
+                            }
+                            $baseCategories[] = ['name' => $topCat['name'], 'total_sale_price_ht' => round($catTotal, 2), 'subcategories' => $subcats, 'lines' => []];
+                        } else {
+                            $lineStmt->execute([$topId]);
+                            $rawLines = $lineStmt->fetchAll();
+                            $baseCategories[] = ['name' => $topCat['name'], 'total_sale_price_ht' => $sumLines($rawLines), 'subcategories' => [], 'lines' => array_map($castLine, $rawLines)];
+                        }
+                    }
+                } catch (\Throwable $e) { /* non-fatal */ }
+            }
+            $quote['base_categories'] = $baseCategories;
+
+            ok($quote);
+            break;
+        }
+
         case 'get_contact_by_device': {
             // Public — no auth needed (pre-fills visitor form with saved info)
             $db = getDB();

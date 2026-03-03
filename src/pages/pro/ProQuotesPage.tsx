@@ -3,10 +3,12 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { FileText, X, ClipboardList } from 'lucide-react';
+import { FileText, X, ClipboardList, Download, Eye, Loader2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { useNavigate } from 'react-router-dom';
+import { downloadQuotePdf, imageUrlToBase64 } from '@/components/QuotePdfGenerator';
+import type { QuotePdfData, PdfDisplaySettings, CompanyInfo } from '@/components/QuotePdfTemplates';
 
 interface Quote {
   id: number;
@@ -39,6 +41,7 @@ export default function ProQuotesPage() {
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
+  const [generatingPdfId, setGeneratingPdfId] = useState<number | null>(null);
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -86,6 +89,96 @@ export default function ProQuotesPage() {
       navigate(`/pro/reports/${result.report_id}`);
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    }
+  };
+
+  const handleDownloadPdf = async (quote: Quote) => {
+    setGeneratingPdfId(quote.id);
+    try {
+      const [pdfSettingsRaw, companySettingsRaw, siteSettingsRaw, fullQuote] = await Promise.all([
+        api.getSettings('pdf').catch(() => ({})),
+        api.getSettings('company').catch(() => ({})),
+        api.getSettings('site').catch(() => ({})),
+        api.getQuoteWithDetails(quote.id),
+      ]);
+
+      const pdfSettings: PdfDisplaySettings = {
+        pdf_primary_color:     pdfSettingsRaw?.pdf_primary_color     || '#1A365D',
+        pdf_accent_color:      pdfSettingsRaw?.pdf_accent_color      || '#f97316',
+        pdf_footer_text:       pdfSettingsRaw?.pdf_footer_text       || '',
+        pdf_terms:             pdfSettingsRaw?.pdf_terms             || '',
+        pdf_bank_details:      pdfSettingsRaw?.pdf_bank_details      || '',
+        pdf_validity_days:     pdfSettingsRaw?.pdf_validity_days     || '30',
+        pdf_show_logo:         pdfSettingsRaw?.pdf_show_logo         || 'true',
+        pdf_show_vat:          pdfSettingsRaw?.pdf_show_vat          || 'true',
+        pdf_show_bank_details: pdfSettingsRaw?.pdf_show_bank_details || 'false',
+        pdf_show_terms:        pdfSettingsRaw?.pdf_show_terms        || 'true',
+        pdf_template:          pdfSettingsRaw?.pdf_template          || '1',
+        pdf_font:              pdfSettingsRaw?.pdf_font              || 'inter',
+        pdf_logo_position:     pdfSettingsRaw?.pdf_logo_position     || 'left',
+        pdf_logo_offset_left:  pdfSettingsRaw?.pdf_logo_offset_left  || '0',
+        pdf_logo_offset_right: pdfSettingsRaw?.pdf_logo_offset_right || '0',
+        pdf_logo_offset_top:   pdfSettingsRaw?.pdf_logo_offset_top   || '0',
+        pdf_logo_offset_bottom:pdfSettingsRaw?.pdf_logo_offset_bottom|| '0',
+      };
+
+      const company: CompanyInfo = {
+        company_name:    companySettingsRaw?.company_name    || '',
+        company_email:   companySettingsRaw?.company_email   || '',
+        company_phone:   companySettingsRaw?.company_phone   || '',
+        company_address: companySettingsRaw?.company_address || '',
+      };
+
+      const logoUrl: string = siteSettingsRaw?.site_logo || '';
+      const logoBase64 = logoUrl ? await imageUrlToBase64(logoUrl) : '';
+      const vatRate = Number(pdfSettingsRaw?.vat_rate) || 15;
+
+      const data: QuotePdfData = {
+        id:               fullQuote.id,
+        reference_number: fullQuote.reference_number,
+        created_at:       fullQuote.created_at,
+        valid_until:      fullQuote.valid_until,
+        status:           fullQuote.status,
+        customer_name:    fullQuote.customer_name  || fullQuote.contact_name  || '',
+        customer_email:   fullQuote.customer_email || fullQuote.contact_email || '',
+        customer_phone:   fullQuote.customer_phone || fullQuote.contact_phone || '',
+        customer_address: fullQuote.customer_address || '',
+        model_name:       fullQuote.model_name,
+        model_type:       fullQuote.model_type,
+        photo_url:        fullQuote.photo_url,
+        plan_url:         fullQuote.plan_url,
+        pool_shape:       fullQuote.pool_shape,
+        pool_longueur:    fullQuote.pool_longueur    != null ? Number(fullQuote.pool_longueur)    : null,
+        pool_largeur:     fullQuote.pool_largeur     != null ? Number(fullQuote.pool_largeur)     : null,
+        pool_profondeur:  fullQuote.pool_profondeur  != null ? Number(fullQuote.pool_profondeur)  : null,
+        pool_longueur_la: fullQuote.pool_longueur_la != null ? Number(fullQuote.pool_longueur_la) : null,
+        pool_largeur_la:  fullQuote.pool_largeur_la  != null ? Number(fullQuote.pool_largeur_la)  : null,
+        pool_profondeur_la: fullQuote.pool_profondeur_la != null ? Number(fullQuote.pool_profondeur_la) : null,
+        pool_longueur_lb: fullQuote.pool_longueur_lb != null ? Number(fullQuote.pool_longueur_lb) : null,
+        pool_largeur_lb:  fullQuote.pool_largeur_lb  != null ? Number(fullQuote.pool_largeur_lb)  : null,
+        pool_profondeur_lb: fullQuote.pool_profondeur_lb != null ? Number(fullQuote.pool_profondeur_lb) : null,
+        pool_longueur_ta: fullQuote.pool_longueur_ta != null ? Number(fullQuote.pool_longueur_ta) : null,
+        pool_largeur_ta:  fullQuote.pool_largeur_ta  != null ? Number(fullQuote.pool_largeur_ta)  : null,
+        pool_profondeur_ta: fullQuote.pool_profondeur_ta != null ? Number(fullQuote.pool_profondeur_ta) : null,
+        pool_longueur_tb: fullQuote.pool_longueur_tb != null ? Number(fullQuote.pool_longueur_tb) : null,
+        pool_largeur_tb:  fullQuote.pool_largeur_tb  != null ? Number(fullQuote.pool_largeur_tb)  : null,
+        pool_profondeur_tb: fullQuote.pool_profondeur_tb != null ? Number(fullQuote.pool_profondeur_tb) : null,
+        base_price:       Number(fullQuote.base_price),
+        options_total:    Number(fullQuote.options_total),
+        total_price:      Number(fullQuote.total_price),
+        vat_rate:         vatRate,
+        notes:            fullQuote.notes,
+        options:          fullQuote.options,
+        base_categories:  fullQuote.base_categories,
+        is_free_quote:    false,
+      };
+
+      await downloadQuotePdf({ data, settings: pdfSettings, company, logoBase64 });
+      toast({ title: 'PDF téléchargé', description: `Devis-${quote.reference_number}.pdf` });
+    } catch (err: any) {
+      toast({ title: 'Erreur PDF', description: err.message, variant: 'destructive' });
+    } finally {
+      setGeneratingPdfId(null);
     }
   };
 
@@ -145,6 +238,12 @@ export default function ProQuotesPage() {
                     </td>
                     <td className="px-4 py-3">
                        <div className="flex gap-2 flex-wrap">
+                         <Button size="sm" variant="ghost" onClick={() => setSelectedQuote(q)} title="Visualiser le devis">
+                           <Eye className="h-3 w-3 mr-1" />Voir
+                         </Button>
+                         <Button size="sm" variant="ghost" disabled={generatingPdfId === q.id} onClick={() => handleDownloadPdf(q)} title="Télécharger PDF">
+                           {generatingPdfId === q.id ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Download className="h-3 w-3 mr-1" />}PDF
+                         </Button>
                          {isPending && (
                            <Button size="sm" variant="outline" onClick={() => handleValidate(q)}>
                              Valider (1 000 Rs)
@@ -251,6 +350,15 @@ export default function ProQuotesPage() {
                 </div>
               )}
               <div className="flex justify-end gap-2 pt-2">
+                 <Button
+                   size="sm"
+                   variant="outline"
+                   disabled={generatingPdfId === selectedQuote.id}
+                   onClick={() => { const q = selectedQuote!; handleDownloadPdf(q); }}
+                 >
+                   {generatingPdfId === selectedQuote.id ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Download className="h-4 w-4 mr-1" />}
+                   Télécharger PDF
+                 </Button>
                  {selectedQuote.status === 'pending' && (
                    <Button
                      size="sm"
