@@ -1556,38 +1556,85 @@ try {
                 $totalPrice = (float)($body['total_price'] ?? ($basePrice + $optionsTotal));
                 
                 // Insert quote
-                $stmt = $db->prepare("
-                    INSERT INTO quotes (
-                        reference_number, model_id, model_name, model_type,
-                        base_price, options_total, total_price,
-                        customer_name, customer_email, customer_phone,
-                        customer_address, customer_message, contact_id,
-                        status, valid_until, is_free_quote, quote_title,
-                        margin_percent, photo_url, plan_url, cloned_from_id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)
-                ");
-                $stmt->execute([
-                    $reference,
-                    $body['model_id'] ? (int)$body['model_id'] : null,
-                    sanitize($body['model_name'] ?? 'Devis libre'),
-                    $modelType,
-                    $basePrice,
-                    $optionsTotal,
-                    $totalPrice,
-                    $customerName,
-                    $customerEmail,
-                    $customerPhone,
-                    $customerAddress,
-                    sanitize($body['customer_message'] ?? ''),
-                    $contactId,
-                    $validUntil,
-                    $isFreeQuote ? 1 : 0,
-                    sanitize($body['quote_title'] ?? ''),
-                    (float)($body['margin_percent'] ?? 30),
-                    sanitize($body['photo_url'] ?? ''),
-                    sanitize($body['plan_url'] ?? ''),
-                    $body['cloned_from_id'] ? (int)$body['cloned_from_id'] : null,
-                ]);
+                // Try with pool dimension columns first; fall back gracefully if migration not yet applied.
+                $toNullFloat = fn($k) => isset($body[$k]) && $body[$k] !== null ? (float)$body[$k] : null;
+                $inserted = false;
+                try {
+                    $stmt = $db->prepare("
+                        INSERT INTO quotes (
+                            reference_number, model_id, model_name, model_type,
+                            base_price, options_total, total_price,
+                            customer_name, customer_email, customer_phone,
+                            customer_address, customer_message, contact_id,
+                            status, valid_until, is_free_quote, quote_title,
+                            margin_percent, photo_url, plan_url, cloned_from_id,
+                            pool_shape,
+                            pool_longueur, pool_largeur, pool_profondeur
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?,
+                                  ?, ?, ?, ?)
+                    ");
+                    $stmt->execute([
+                        $reference,
+                        $body['model_id'] ? (int)$body['model_id'] : null,
+                        sanitize($body['model_name'] ?? 'Devis libre'),
+                        $modelType,
+                        $basePrice,
+                        $optionsTotal,
+                        $totalPrice,
+                        $customerName,
+                        $customerEmail,
+                        $customerPhone,
+                        $customerAddress,
+                        sanitize($body['customer_message'] ?? ''),
+                        $contactId,
+                        $validUntil,
+                        $isFreeQuote ? 1 : 0,
+                        sanitize($body['quote_title'] ?? ''),
+                        (float)($body['margin_percent'] ?? 30),
+                        sanitize($body['photo_url'] ?? ''),
+                        sanitize($body['plan_url'] ?? ''),
+                        $body['cloned_from_id'] ? (int)$body['cloned_from_id'] : null,
+                        isset($body['pool_shape']) ? sanitize($body['pool_shape']) : null,
+                        $toNullFloat('pool_longueur'), $toNullFloat('pool_largeur'), $toNullFloat('pool_profondeur'),
+                    ]);
+                    $inserted = true;
+                } catch (\Throwable $insertEx) {
+                    // pool_dimensions columns not yet added – fall back to base INSERT
+                }
+                if (!$inserted) {
+                    $stmt = $db->prepare("
+                        INSERT INTO quotes (
+                            reference_number, model_id, model_name, model_type,
+                            base_price, options_total, total_price,
+                            customer_name, customer_email, customer_phone,
+                            customer_address, customer_message, contact_id,
+                            status, valid_until, is_free_quote, quote_title,
+                            margin_percent, photo_url, plan_url, cloned_from_id
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)
+                    ");
+                    $stmt->execute([
+                        $reference,
+                        $body['model_id'] ? (int)$body['model_id'] : null,
+                        sanitize($body['model_name'] ?? 'Devis libre'),
+                        $modelType,
+                        $basePrice,
+                        $optionsTotal,
+                        $totalPrice,
+                        $customerName,
+                        $customerEmail,
+                        $customerPhone,
+                        $customerAddress,
+                        sanitize($body['customer_message'] ?? ''),
+                        $contactId,
+                        $validUntil,
+                        $isFreeQuote ? 1 : 0,
+                        sanitize($body['quote_title'] ?? ''),
+                        (float)($body['margin_percent'] ?? 30),
+                        sanitize($body['photo_url'] ?? ''),
+                        sanitize($body['plan_url'] ?? ''),
+                        $body['cloned_from_id'] ? (int)$body['cloned_from_id'] : null,
+                    ]);
+                }
                 
                 $quoteId = $db->lastInsertId();
                 
@@ -1678,41 +1725,66 @@ try {
             $db->beginTransaction();
             
             try {
-                // Build update query dynamically
-                $updates = [];
-                $params = [];
-                
+                // Build update query dynamically.
+                // Separate pool-dimension fields so they can be updated in a
+                // graceful try/catch (columns may not exist until migration is run).
+                $poolDimFieldNames = ['pool_shape', 'pool_longueur', 'pool_largeur', 'pool_profondeur'];
+                $toNullFloat = fn($k) => isset($body[$k]) && $body[$k] !== null ? (float)$body[$k] : null;
+                $updates    = [];
+                $params     = [];
+                $dimUpdates = [];
+                $dimParams  = [];
+
                 $allowedFields = [
                     'model_id', 'model_name', 'model_type', 'base_price', 'options_total', 
                     'total_price', 'customer_name', 'customer_email', 'customer_phone',
                     'customer_address', 'customer_message', 'status', 'quote_title',
-                    'margin_percent', 'photo_url', 'plan_url', 'notes'
+                    'margin_percent', 'photo_url', 'plan_url', 'notes',
+                    'pool_shape',
+                    'pool_longueur', 'pool_largeur', 'pool_profondeur',
                 ];
-                
+
                 foreach ($allowedFields as $field) {
-                    if (isset($body[$field])) {
-                        $updates[] = "$field = ?";
+                    if (array_key_exists($field, $body)) {
                         if (in_array($field, ['base_price', 'options_total', 'total_price', 'margin_percent'])) {
-                            $params[] = (float)$body[$field];
+                            $val = $body[$field] !== null ? (float)$body[$field] : null;
+                        } elseif (in_array($field, ['pool_longueur', 'pool_largeur', 'pool_profondeur'])) {
+                            $val = $toNullFloat($field);
                         } elseif ($field === 'model_id') {
-                            $params[] = $body[$field] ? (int)$body[$field] : null;
+                            $val = $body[$field] ? (int)$body[$field] : null;
                         } else {
-                            $params[] = sanitize($body[$field]);
+                            $val = $body[$field] !== null ? sanitize($body[$field]) : null;
+                        }
+                        if (in_array($field, $poolDimFieldNames)) {
+                            $dimUpdates[] = "$field = ?";
+                            $dimParams[]  = $val;
+                        } else {
+                            $updates[] = "$field = ?";
+                            $params[]  = $val;
                         }
                     }
                 }
-                
+
                 // Generate reference when status changes to validated
                 if (isset($body['status']) && $body['status'] === 'validated' && $existingQuote['status'] !== 'validated') {
                     // Reference already exists, no need to regenerate
                 }
-                
+
                 if (!empty($updates)) {
                     $updates[] = "updated_at = NOW()";
                     $params[] = $id;
                     $sql = "UPDATE quotes SET " . implode(', ', $updates) . " WHERE id = ?";
                     $stmt = $db->prepare($sql);
                     $stmt->execute($params);
+                }
+
+                // Update pool dimensions separately (graceful – columns may not exist yet)
+                if (!empty($dimUpdates)) {
+                    try {
+                        $dimParams[] = $id;
+                        $sql = "UPDATE quotes SET " . implode(', ', $dimUpdates) . " WHERE id = ?";
+                        $db->prepare($sql)->execute($dimParams);
+                    } catch (\Throwable $dimEx) { /* pool_dimensions_migration.sql not yet applied */ }
                 }
                 
                 // Update categories and lines for free quotes

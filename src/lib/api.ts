@@ -338,6 +338,11 @@ export const api = {
     model_id?: number;
     model_name?: string;
     model_type?: 'container' | 'pool';
+    // Pool dimensions (for pool model-based quotes)
+    pool_shape?: string;
+    pool_longueur?: number | null;
+    pool_largeur?: number | null;
+    pool_profondeur?: number | null;
     // Pricing
     base_price?: number;
     options_total?: number;
@@ -377,6 +382,11 @@ export const api = {
     model_id?: number;
     model_name?: string;
     model_type?: 'container' | 'pool';
+    // Pool dimensions (for pool model-based quotes)
+    pool_shape?: string;
+    pool_longueur?: number | null;
+    pool_largeur?: number | null;
+    pool_profondeur?: number | null;
     base_price?: number;
     options_total?: number;
     total_price?: number;
