@@ -37,17 +37,50 @@ function deployFail(string $msg, int $code = 400): void {
     exit;
 }
 
+/** Returns true if the PHP zip extension (ZipArchive) is available. */
+function hasZipArchive(): bool {
+    return class_exists('ZipArchive');
+}
+
+/** Returns true if exec() is available and not disabled. */
+function hasExec(): bool {
+    if (!function_exists('exec')) return false;
+    $disabled = array_map('trim', explode(',', (string)ini_get('disable_functions')));
+    return !in_array('exec', $disabled, true);
+}
+
 /**
  * Return all entry names in a zip, or throw RuntimeException.
+ * Uses ZipArchive if available, falls back to exec('unzip -l').
  */
 function zipEntryNames(string $path): array {
-    $zip = new ZipArchive();
-    $rc  = $zip->open($path, ZipArchive::RDONLY);
-    if ($rc !== true) throw new \RuntimeException("Impossible d'ouvrir le ZIP (code $rc).");
-    $names = [];
-    for ($i = 0; $i < $zip->numFiles; $i++) $names[] = $zip->getNameIndex($i);
-    $zip->close();
-    return $names;
+    if (hasZipArchive()) {
+        $zip = new \ZipArchive();
+        $rc  = $zip->open($path, \ZipArchive::RDONLY);
+        if ($rc !== true) throw new \RuntimeException("Impossible d'ouvrir le ZIP (code $rc).");
+        $names = [];
+        for ($i = 0; $i < $zip->numFiles; $i++) $names[] = $zip->getNameIndex($i);
+        $zip->close();
+        return $names;
+    }
+    if (hasExec()) {
+        if (!is_file($path)) throw new \RuntimeException("Fichier ZIP introuvable: {$path}");
+        $escaped = escapeshellarg($path);
+        exec("unzip -l {$escaped} 2>&1", $output, $rc);
+        if ($rc !== 0) throw new \RuntimeException("Impossible de lister le ZIP via unzip (code $rc).");
+        $names = [];
+        foreach ($output as $line) {
+            // Lines look like: "  12345  2024-01-01 00:00:00  path/to/file"
+            if (preg_match('/^\s*\d+\s+[\d-]+\s+[\d:]+\s+(.+)$/', $line, $m)) {
+                $names[] = $m[1];
+            }
+        }
+        return $names;
+    }
+    throw new \RuntimeException(
+        "Impossible de lire le ZIP : l'extension PHP zip et la commande exec() sont toutes deux indisponibles. " .
+        "Veuillez activer l'extension zip dans cPanel (Sélectionner la version PHP → Extensions → zip)."
+    );
 }
 
 /**
@@ -71,39 +104,95 @@ function detectSingleTopLevelDir(array $names): string {
  * Extract zip to $destDir.
  * $prefix : strip this prefix from all entry names before writing.
  * $skip   : callable(string $relativeEntryName): bool — return true to skip.
+ * Uses ZipArchive if available, falls back to exec('unzip').
  */
 function extractZipTo(string $zipPath, string $destDir, string $prefix = '', ?callable $skip = null): int {
-    $zip = new ZipArchive();
-    if ($zip->open($zipPath) !== true) throw new \RuntimeException("Impossible d'ouvrir le ZIP pour extraction.");
-    $count = 0;
-    for ($i = 0; $i < $zip->numFiles; $i++) {
-        $name = $zip->getNameIndex($i);
-        // Strip prefix
-        if ($prefix !== '' && strpos($name, $prefix) === 0) {
-            $rel = substr($name, strlen($prefix));
-        } else if ($prefix !== '') {
-            continue; // entry outside expected prefix — skip
-        } else {
-            $rel = $name;
-        }
-        // Sanitise to prevent path traversal
-        $rel = ltrim(str_replace('..', '', $rel), '/\\');
-        if ($rel === '') continue;
-        if ($skip && $skip($rel)) continue;
+    if (hasZipArchive()) {
+        $zip = new \ZipArchive();
+        if ($zip->open($zipPath) !== true) throw new \RuntimeException("Impossible d'ouvrir le ZIP pour extraction.");
+        $count = 0;
+        for ($i = 0; $i < $zip->numFiles; $i++) {
+            $name = $zip->getNameIndex($i);
+            // Strip prefix
+            if ($prefix !== '' && strpos($name, $prefix) === 0) {
+                $rel = substr($name, strlen($prefix));
+            } else if ($prefix !== '') {
+                continue; // entry outside expected prefix — skip
+            } else {
+                $rel = $name;
+            }
+            // Sanitise to prevent path traversal
+            $rel = ltrim(str_replace('..', '', $rel), '/\\');
+            if ($rel === '') continue;
+            if ($skip && $skip($rel)) continue;
 
-        $dest = $destDir . '/' . $rel;
-        if (substr($rel, -1) === '/') {
-            // directory entry
-            if (!is_dir($dest)) mkdir($dest, 0755, true);
-            continue;
+            $dest = $destDir . '/' . $rel;
+            if (substr($rel, -1) === '/') {
+                if (!is_dir($dest)) mkdir($dest, 0755, true);
+                continue;
+            }
+            $parent = dirname($dest);
+            if (!is_dir($parent)) mkdir($parent, 0755, true);
+            $data = $zip->getFromIndex($i);
+            if ($data !== false) { file_put_contents($dest, $data); $count++; }
         }
-        $parent = dirname($dest);
-        if (!is_dir($parent)) mkdir($parent, 0755, true);
-        $data = $zip->getFromIndex($i);
-        if ($data !== false) { file_put_contents($dest, $data); $count++; }
+        $zip->close();
+        return $count;
     }
-    $zip->close();
-    return $count;
+
+    if (hasExec()) {
+        if (!is_file($zipPath)) throw new \RuntimeException("Fichier ZIP introuvable: {$zipPath}");
+        // exec fallback: extract to a temp dir then move files (to support prefix stripping and skip)
+        $tmpDir = sys_get_temp_dir() . '/sunbox_deploy_' . bin2hex(random_bytes(8));
+        mkdir($tmpDir, 0755, true);
+        $escaped = escapeshellarg($zipPath);
+        $escapedDest = escapeshellarg($tmpDir);
+        // -o = overwrite existing files without prompting (required for site updates)
+        exec("unzip -o {$escaped} -d {$escapedDest} 2>&1", $out, $rc);
+        if ($rc !== 0) {
+            // Clean up and fail
+            exec("rm -rf " . escapeshellarg($tmpDir));
+            throw new \RuntimeException("Extraction ZIP échouée via unzip (code $rc): " . implode('; ', array_slice($out, -3)));
+        }
+
+        // Now walk the extracted files and apply prefix/skip logic
+        $count = 0;
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($tmpDir, \RecursiveDirectoryIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::SELF_FIRST
+        );
+        foreach ($iterator as $item) {
+            $rel = str_replace($tmpDir . DIRECTORY_SEPARATOR, '', $item->getPathname());
+            $rel = str_replace('\\', '/', $rel);
+            if ($prefix !== '') {
+                if (strpos($rel, $prefix) === 0) {
+                    $rel = substr($rel, strlen($prefix));
+                } else {
+                    continue;
+                }
+            }
+            $rel = ltrim(str_replace('..', '', $rel), '/\\');
+            if ($rel === '') continue;
+            if ($skip && $skip($rel)) continue;
+
+            $dest = $destDir . '/' . $rel;
+            if ($item->isDir()) {
+                if (!is_dir($dest)) mkdir($dest, 0755, true);
+                continue;
+            }
+            $parent = dirname($dest);
+            if (!is_dir($parent)) mkdir($parent, 0755, true);
+            copy($item->getPathname(), $dest);
+            $count++;
+        }
+        exec("rm -rf " . escapeshellarg($tmpDir));
+        return $count;
+    }
+
+    throw new \RuntimeException(
+        "Impossible d'extraire le ZIP : l'extension PHP zip et la commande exec() sont toutes deux indisponibles. " .
+        "Veuillez activer l'extension zip dans cPanel (Sélectionner la version PHP → Extensions → zip)."
+    );
 }
 
 /* ── paths ───────────────────────────────────────────────────────────────── */

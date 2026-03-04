@@ -1,9 +1,9 @@
-import React, { useRef, useState } from 'react';
-import { Upload, CheckCircle2, AlertCircle, Loader2, RefreshCw, Package, Code2 } from 'lucide-react';
+import React, { useRef, useState, useEffect } from 'react';
+import { Upload, CheckCircle2, AlertCircle, Loader2, RefreshCw, Package, Code2, History } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { API_BASE_URL } from '@/lib/api';
+import { API_BASE_URL, api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 
 type UploadStatus = 'idle' | 'uploading' | 'success' | 'error';
@@ -26,6 +26,14 @@ export default function DeployUpdatePage() {
   const [status,  setStatus]  = useState<UploadStatus>('idle');
   const [error,   setError]   = useState<string | null>(null);
   const [results, setResults] = useState<Record<string, DeployResult> | null>(null);
+  const [versionLog, setVersionLog] = useState<string | null>(null);
+  const [currentVersion, setCurrentVersion] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.query('get_sunbox_version').then((data: any) => {
+      setCurrentVersion(data?.version_log ?? null);
+    }).catch((err) => { console.error('Failed to load version log:', err); });
+  }, []);
 
   const handleDeploy = async () => {
     if (!distFile && !apiFile) return;
@@ -62,6 +70,8 @@ export default function DeployUpdatePage() {
       }
 
       setResults(json.results);
+      setVersionLog(json.version_log ?? null);
+      setCurrentVersion(json.version_log ?? null);
       setStatus('success');
 
       // If both files were deployed, hard-refresh and go to Dashboard
@@ -108,6 +118,23 @@ export default function DeployUpdatePage() {
           Uploadez les artefacts téléchargés depuis GitHub Actions pour mettre à jour le site sans passer par cPanel.
         </p>
       </div>
+
+      {/* Current version */}
+      {currentVersion && (
+        <Card className="border-gray-200">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <History className="h-4 w-4 text-gray-500" />
+              Historique des déploiements
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <pre className="text-xs text-gray-600 whitespace-pre-wrap font-mono bg-gray-50 p-3 rounded border max-h-40 overflow-y-auto">
+              {currentVersion}
+            </pre>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Instructions */}
       <Card className="border-blue-100 bg-blue-50">

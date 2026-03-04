@@ -134,6 +134,9 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
   
   // Imported option prices to show variance when current model price differs
   const [importedOptionPrices, setImportedOptionPrices] = useState<ImportedOptionPrice[]>([]);
+
+  // Stored discount ratio from the original quote (0 = no discount, 0.1 = 10%)
+  const [storedDiscountRatio, setStoredDiscountRatio] = useState(0);
   
   // Contact selection
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -161,6 +164,7 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
       setErrors({});
       setSavedQuote(null);
       setLoadError(null);
+      setStoredDiscountRatio(0);
     }
   }, [open, quoteId]);
 
@@ -238,6 +242,15 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
       setCustomerAddress(quote.customer_address || '');
       setCustomerMessage(quote.customer_message || '');
       setContactId(quote.contact_id || null);
+
+      // Compute stored discount ratio (applies when quote total < base + options, e.g. a promo was active).
+      // Both base_price and options_total are stored as HT in quotes created via the public configurator.
+      const storedBase    = parseFloat(quote.base_price)    || 0;
+      const storedOptions = parseFloat(quote.options_total) || 0;
+      const storedTotal   = parseFloat(quote.total_price)   || 0;
+      const storedGross   = storedBase + storedOptions;
+      const discountAmt   = storedGross > 0.01 ? storedGross - storedTotal : 0;
+      setStoredDiscountRatio(storedGross > 0.01 && discountAmt > 1 ? discountAmt / storedGross : 0);
       
       // Store options with name and price to be selected after options are loaded
       // This stores the saved quote prices for variance display against current BOQ prices
@@ -485,24 +498,21 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
     }, 0);
   };
   
-  const calculateOptionsTotalTTC = () => {
-    return selectedOptions.reduce((sum, opt) => {
-      const importedPrice = getImportedPrice(opt.id);
-      const priceToUse = importedPrice !== null ? importedPrice : Number(opt.price || 0);
-      return sum + calculateTTC(priceToUse, vatRate);
-    }, 0);
-  };
-  
   // Get base price HT (reverse TTC to HT)
   const basePriceHT = Number(model?.base_price ?? 0) / (1 + vatRate / 100);
-  const basePriceTTC = Number(model?.base_price ?? 0);
-  
+
+  // Discount amount in HT (updated as options change, based on the stored ratio)
+  const discountAmountHT = () => {
+    if (storedDiscountRatio <= 0) return 0;
+    return (basePriceHT + calculateOptionsTotalHT()) * storedDiscountRatio;
+  };
+
   const calculateTotalHT = () => {
-    return basePriceHT + calculateOptionsTotalHT();
+    return basePriceHT + calculateOptionsTotalHT() - discountAmountHT();
   };
 
   const calculateTotalTTC = () => {
-    return basePriceTTC + calculateOptionsTotalTTC();
+    return calculateTTC(calculateTotalHT(), vatRate);
   };
 
   // Contact selection
@@ -550,16 +560,18 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
     setIsSubmitting(true);
     
     try {
-      const optionsTotal = calculateOptionsTotalTTC();
-      const totalPrice = calculateTotalTTC();
-      
+      // Store all prices as HT, consistent with the public ConfigureModal.
+      // The PDF generator and quote views treat stored prices as HT and apply VAT on display.
+      const optionsTotalHT = calculateOptionsTotalHT();
+      const totalHT        = calculateTotalHT(); // already applies storedDiscountRatio
+
       const quoteData = {
         model_id: model.id,
         model_name: model.name,
         model_type: model.type,
-        base_price: Number(model.base_price ?? 0),
-        options_total: optionsTotal,
-        total_price: totalPrice,
+        base_price:    Math.round(basePriceHT),
+        options_total: Math.round(optionsTotalHT),
+        total_price:   Math.round(totalHT),
         customer_name: customerName,
         customer_email: customerEmail,
         customer_phone: customerPhone,
@@ -567,13 +579,14 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
         customer_message: customerMessage || '',
         contact_id: contactId || undefined,
         selected_options: selectedOptions.map(opt => {
-          // Use imported price if available, otherwise current BOQ price
+          // Store option prices as HT (consistent with ConfigureModal / public configurator).
+          // This ensures correct variance display on next edit: both values will be HT.
           const importedPrice = getImportedPrice(opt.id);
           const priceToUse = importedPrice !== null ? importedPrice : opt.price;
           return {
             option_id: opt.id,
             option_name: opt.name,
-            option_price: calculateTTC(priceToUse, vatRate),
+            option_price: Math.round(priceToUse), // HT
           };
         }),
       };
@@ -622,7 +635,9 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
     setBOQOptions([]);
     setBaseCategories([]);
     setStep('options');
-    pendingOptionIdsRef.current = [];
+    pendingOptionsRef.current = [];
+    setImportedOptionPrices([]);
+    setStoredDiscountRatio(0);
     setErrors({});
     setSavedQuote(null);
     onClose();
@@ -777,7 +792,7 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
                   <div className="flex justify-between items-center">
                     <p className="text-sm text-gray-500">Prix de base TTC</p>
                     <p className="text-sm font-medium text-gray-700">
-                      Rs {basePriceTTC.toLocaleString()}
+                      Rs {Math.round(calculateTTC(basePriceHT, vatRate)).toLocaleString()}
                     </p>
                   </div>
                   <div className="flex justify-between items-center">
@@ -789,9 +804,21 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
                   <div className="flex justify-between items-center">
                     <p className="text-sm text-gray-500">Total options TTC</p>
                     <p className="text-sm font-medium text-gray-700">
-                      Rs {calculateOptionsTotalTTC().toLocaleString()}
+                      Rs {Math.round(calculateTTC(calculateOptionsTotalHT(), vatRate)).toLocaleString()}
                     </p>
                   </div>
+                  {storedDiscountRatio > 0 && (
+                    <div className="flex justify-between items-center pt-1 border-t border-green-200">
+                      <p className="text-sm text-green-700 font-medium">
+                        Remise ({(storedDiscountRatio * 100).toFixed(1)}%)
+                      </p>
+                      <p className="text-sm font-medium text-green-700">
+                        -Rs {Math.round(discountAmountHT()).toLocaleString()} HT
+                        {' / '}
+                        -Rs {Math.round(calculateTTC(discountAmountHT(), vatRate)).toLocaleString()} TTC
+                      </p>
+                    </div>
+                  )}
                   <div className="flex justify-between items-center pt-2 border-t border-gray-200">
                     <p className="text-sm text-gray-500">Total général HT</p>
                     <p className="text-lg font-bold text-gray-700">
@@ -801,7 +828,7 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
                   <div className="flex justify-between items-center">
                     <p className="text-sm text-gray-500">Total général TTC</p>
                     <p className="text-xl font-bold text-orange-600">
-                      Rs {calculateTotalTTC().toLocaleString()}
+                      Rs {Math.round(calculateTotalTTC()).toLocaleString()}
                     </p>
                   </div>
                 </div>
@@ -1074,7 +1101,7 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
                   </div>
                   <div className="flex justify-between items-center text-sm">
                     <span className="text-gray-600">Prix de base TTC</span>
-                    <span className="font-medium">Rs {basePriceTTC.toLocaleString()}</span>
+                    <span className="font-medium">Rs {Math.round(calculateTTC(basePriceHT, vatRate)).toLocaleString()}</span>
                   </div>
                   {selectedOptions.length > 0 && (
                     <>
@@ -1084,9 +1111,15 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
                       </div>
                       <div className="flex justify-between items-center text-sm">
                         <span className="text-gray-600">Options TTC ({selectedOptions.length})</span>
-                        <span className="font-medium">Rs {calculateOptionsTotalTTC().toLocaleString()}</span>
+                        <span className="font-medium">Rs {Math.round(calculateTTC(calculateOptionsTotalHT(), vatRate)).toLocaleString()}</span>
                       </div>
                     </>
+                  )}
+                  {storedDiscountRatio > 0 && (
+                    <div className="flex justify-between items-center text-sm border-t border-green-200 pt-1">
+                      <span className="text-green-700 font-medium">Remise ({(storedDiscountRatio * 100).toFixed(1)}%)</span>
+                      <span className="text-green-700 font-medium">-Rs {Math.round(discountAmountHT()).toLocaleString()} HT</span>
+                    </div>
                   )}
                   <div className="flex justify-between items-center pt-2 border-t border-gray-200">
                     <span className="font-semibold">Total HT</span>
@@ -1094,7 +1127,7 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="font-semibold">Total TTC</span>
-                    <span className="text-xl font-bold text-orange-600">Rs {calculateTotalTTC().toLocaleString()}</span>
+                    <span className="text-xl font-bold text-orange-600">Rs {Math.round(calculateTotalTTC()).toLocaleString()}</span>
                   </div>
                 </div>
 
