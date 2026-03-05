@@ -84,11 +84,13 @@ try {
         case 'get_boq_options': {
             $modelId = (int)($body['model_id'] ?? 0);
             if ($modelId <= 0) fail('model_id manquant');
-            $sdb  = getSunboxDB();
+            $sdb = getSunboxDB();
+
+            // Step 1: Fetch ALL option categories (including sub-categories) with their own direct-line prices.
             $stmt = $sdb->prepare("
-                SELECT bc.id, bc.name, bc.display_order, bc.parent_id, bc.qty_editable,
+                SELECT bc.id, bc.name, bc.parent_id, bc.display_order, bc.qty_editable,
                        mi.file_path as image_path,
-                       COALESCE(SUM(ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS price_ht
+                       COALESCE(SUM(ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS own_price_ht
                 FROM boq_categories bc
                 LEFT JOIN boq_lines bl ON bc.id = bl.category_id
                 LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
@@ -98,16 +100,45 @@ try {
                 ORDER BY bc.name ASC
             ");
             $stmt->execute([$modelId]);
-            $options = $stmt->fetchAll();
-            foreach ($options as &$opt) {
-                $opt['id']         = (int)$opt['id'];
-                $opt['parent_id']  = $opt['parent_id'] ? (int)$opt['parent_id'] : null;
-                $opt['display_order'] = (int)$opt['display_order'];
-                $opt['qty_editable']  = (bool)($opt['qty_editable'] ?? false);
-                $opt['image_url']  = sunboxAbsUrl(
-                    $opt['image_path'] ? '/' . ltrim($opt['image_path'], '/') : null
-                );
-                unset($opt['image_path']);
+            $allOptCats = $stmt->fetchAll();
+
+            // Step 2: Build maps for PHP-side recursive aggregation.
+            $priceMap = []; // id -> own_price_ht (float)
+            $childMap = []; // parent_id -> [child_ids]
+            foreach ($allOptCats as $cat) {
+                $id            = (int)$cat['id'];
+                $priceMap[$id] = (float)$cat['own_price_ht'];
+                if ($cat['parent_id'] !== null) {
+                    $pid = (int)$cat['parent_id'];
+                    if (!isset($childMap[$pid])) $childMap[$pid] = [];
+                    $childMap[$pid][] = $id;
+                }
+            }
+
+            // Recursive function: returns total price for a category (own lines + all descendants).
+            $getTotalPrice = function(int $id) use (&$getTotalPrice, $priceMap, $childMap): float {
+                $total = $priceMap[$id] ?? 0.0;
+                foreach ($childMap[$id] ?? [] as $childId) {
+                    $total += $getTotalPrice($childId);
+                }
+                return $total;
+            };
+
+            // Step 3: Build result from root option categories only.
+            $options = [];
+            foreach ($allOptCats as $cat) {
+                if ($cat['parent_id'] !== null) continue;
+                $id = (int)$cat['id'];
+                $options[] = [
+                    'id'            => $id,
+                    'name'          => $cat['name'],
+                    'display_order' => (int)$cat['display_order'],
+                    'qty_editable'  => (bool)($cat['qty_editable'] ?? false),
+                    'image_url'     => sunboxAbsUrl(
+                        $cat['image_path'] ? '/' . ltrim($cat['image_path'], '/') : null
+                    ),
+                    'price_ht'      => round($getTotalPrice($id), 2),
+                ];
             }
             ok($options);
             break;
@@ -143,12 +174,22 @@ try {
         case 'get_boq_category_lines': {
             $categoryId = (int)($body['category_id'] ?? 0);
             if ($categoryId <= 0) fail('category_id manquant');
-            $sdb  = getSunboxDB();
+            $sdb = getSunboxDB();
+
+            // Return direct lines of this category AND lines of its sub-categories,
+            // tagged with sub_category_name so the frontend can group them.
             $stmt = $sdb->prepare("
-                SELECT id, description FROM boq_lines
-                WHERE category_id = ? ORDER BY description ASC
+                SELECT bl.id, bl.description, NULL AS sub_category_name
+                FROM boq_lines bl
+                WHERE bl.category_id = ?
+                UNION ALL
+                SELECT bl.id, bl.description, bc.name AS sub_category_name
+                FROM boq_lines bl
+                INNER JOIN boq_categories bc ON bl.category_id = bc.id
+                WHERE bc.parent_id = ?
+                ORDER BY sub_category_name ASC, description ASC
             ");
-            $stmt->execute([$categoryId]);
+            $stmt->execute([$categoryId, $categoryId]);
             ok($stmt->fetchAll());
             break;
         }
@@ -403,8 +444,261 @@ try {
             break;
         }
 
+        case 'get_quote_with_details': {
+            requireAdmin();
+            $db = getDB();
+            validateRequired($body, ['id']);
+            $id = (int)$body['id'];
+
+            $stmt = $db->prepare("
+                SELECT q.*,
+                       COALESCE(q.customer_name, c.name)    AS customer_name,
+                       COALESCE(q.customer_email, c.email)  AS customer_email,
+                       COALESCE(q.customer_phone, c.phone)  AS customer_phone,
+                       COALESCE(q.customer_address, c.address) AS customer_address
+                FROM pro_quotes q
+                LEFT JOIN pro_contacts c ON c.id = q.contact_id
+                WHERE q.id = ?
+            ");
+            $stmt->execute([$id]);
+            $quote = $stmt->fetch();
+            if (!$quote) fail('Devis introuvable', 404);
+
+            // Pro quotes are never free-form quotes
+            $quote['is_free_quote'] = false;
+
+            $modelId = (int)($quote['model_id'] ?? 0);
+
+            // ── Fallback: model photo/plan from Sunbox DB ───────────────────
+            if ($modelId > 0) {
+                try {
+                    $sdb = getSunboxDB();
+                    if (empty($quote['photo_url'])) {
+                        $r = $sdb->prepare("SELECT file_path FROM model_images WHERE model_id = ? AND media_type = 'photo' ORDER BY is_primary DESC, id DESC LIMIT 1");
+                        $r->execute([$modelId]);
+                        $row = $r->fetch();
+                        if ($row) $quote['photo_url'] = sunboxAbsUrl('/' . ltrim($row['file_path'], '/'));
+                    }
+                    if (empty($quote['plan_url'])) {
+                        $r = $sdb->prepare("SELECT file_path FROM model_images WHERE model_id = ? AND media_type = 'plan' ORDER BY is_primary DESC, id DESC LIMIT 1");
+                        $r->execute([$modelId]);
+                        $row = $r->fetch();
+                        if ($row) $quote['plan_url'] = sunboxAbsUrl('/' . ltrim($row['file_path'], '/'));
+                    }
+                } catch (\Throwable $e) { /* non-fatal */ }
+            }
+
+            // ── Selected options with BOQ detail lines ──────────────────────
+            $options = [];
+            try {
+                $optStmt = $db->prepare("SELECT option_id, option_name, option_price FROM pro_quote_options WHERE quote_id = ? ORDER BY id ASC");
+                $optStmt->execute([$id]);
+                $proOpts = $optStmt->fetchAll();
+                if (!empty($proOpts) && $modelId > 0) {
+                    $sdb = getSunboxDB();
+                    foreach ($proOpts as $opt) {
+                        $details = '';
+                        try {
+                            $dStmt = $sdb->prepare("
+                                SELECT GROUP_CONCAT(bl.description ORDER BY bl.display_order ASC, bl.id ASC SEPARATOR ', ') AS details
+                                FROM boq_categories bc
+                                LEFT JOIN boq_lines bl ON bl.category_id = bc.id
+                                WHERE bc.model_id = ? AND bc.name = ? AND bc.is_option = TRUE
+                                GROUP BY bc.id LIMIT 1
+                            ");
+                            $dStmt->execute([$modelId, $opt['option_name']]);
+                            $row = $dStmt->fetch();
+                            $details = $row['details'] ?? '';
+                        } catch (\Throwable $e) { /* non-fatal */ }
+                        $options[] = [
+                            'option_id'      => $opt['option_id'],
+                            'option_name'    => $opt['option_name'],
+                            'option_price'   => (float)$opt['option_price'],
+                            'option_details' => $details,
+                        ];
+                    }
+                } else {
+                    foreach ($proOpts as $opt) {
+                        $options[] = ['option_id' => $opt['option_id'], 'option_name' => $opt['option_name'], 'option_price' => (float)$opt['option_price'], 'option_details' => ''];
+                    }
+                }
+            } catch (\Throwable $e) { /* pro_quote_options table may not exist yet */ }
+            $quote['options'] = $options;
+
+            // ── Base categories from Sunbox BOQ ─────────────────────────────
+            $baseCategories = [];
+            if ($modelId > 0) {
+                try {
+                    $sdb = getSunboxDB();
+                    $castLine = function(array $ln): array {
+                        return ['description' => $ln['description'], 'quantity' => (float)$ln['quantity'], 'unit' => $ln['unit'],
+                                'unit_cost_ht' => (float)$ln['unit_cost_ht'], 'margin_percent' => (float)$ln['margin_percent'],
+                                'sale_price_ht' => (float)$ln['sale_price_ht']];
+                    };
+                    $sumLines = function(array $lines): float {
+                        return round(array_sum(array_map(fn($ln) => (float)$ln['sale_price_ht'], $lines)), 2);
+                    };
+                    $topStmt = $sdb->prepare("SELECT bc.id, bc.name, bc.display_order FROM boq_categories bc WHERE bc.model_id = ? AND bc.is_option = FALSE AND bc.parent_id IS NULL ORDER BY bc.display_order ASC, bc.name ASC");
+                    $topStmt->execute([$modelId]);
+                    $topCats = $topStmt->fetchAll();
+                    $subStmt = $sdb->prepare("SELECT bc.id, bc.name FROM boq_categories bc WHERE bc.model_id = ? AND bc.is_option = FALSE AND bc.parent_id = ? ORDER BY bc.display_order ASC, bc.name ASC");
+                    $lineStmt = $sdb->prepare("SELECT bl.description, bl.quantity, bl.unit, COALESCE(pl.unit_price, bl.unit_cost_ht) AS unit_cost_ht, bl.margin_percent, ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2) AS sale_price_ht FROM boq_lines bl LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id WHERE bl.category_id = ? ORDER BY bl.display_order ASC, bl.id ASC");
+                    foreach ($topCats as $topCat) {
+                        $topId = (int)$topCat['id'];
+                        $subStmt->execute([$modelId, $topId]);
+                        $subCats = $subStmt->fetchAll();
+                        if (!empty($subCats)) {
+                            $subcats = []; $catTotal = 0.0;
+                            foreach ($subCats as $sub) {
+                                $lineStmt->execute([(int)$sub['id']]);
+                                $rawLines = $lineStmt->fetchAll();
+                                $subTotal = $sumLines($rawLines);
+                                $catTotal += $subTotal;
+                                $subcats[] = ['name' => $sub['name'], 'total_sale_price_ht' => $subTotal, 'lines' => array_map($castLine, $rawLines)];
+                            }
+                            $baseCategories[] = ['name' => $topCat['name'], 'total_sale_price_ht' => round($catTotal, 2), 'subcategories' => $subcats, 'lines' => []];
+                        } else {
+                            $lineStmt->execute([$topId]);
+                            $rawLines = $lineStmt->fetchAll();
+                            $baseCategories[] = ['name' => $topCat['name'], 'total_sale_price_ht' => $sumLines($rawLines), 'subcategories' => [], 'lines' => array_map($castLine, $rawLines)];
+                        }
+                    }
+                } catch (\Throwable $e) { /* non-fatal */ }
+            }
+            $quote['base_categories'] = $baseCategories;
+
+            // ── Encode photo/plan as base64 to avoid CORS issues on the pro site ──
+            $sunboxRoot = dirname(__DIR__, 3); // public_html/
+            $realBase = realpath($sunboxRoot) ?: $sunboxRoot;
+            foreach (['photo' => 'photo_url', 'plan' => 'plan_url'] as $type => $urlKey) {
+                $url = $quote[$urlKey] ?? '';
+                if (!$url) continue;
+                // Extract root-relative path from absolute URL (e.g. /uploads/models/x.jpg)
+                $path = parse_url($url, PHP_URL_PATH);
+                if ($path) {
+                    // Guard against path traversal
+                    $fullPath = realpath($sunboxRoot . '/' . ltrim($path, '/'));
+                    if ($fullPath && strncmp($fullPath, $realBase, strlen($realBase)) === 0 && is_file($fullPath)) {
+                        $mime = @mime_content_type($fullPath) ?: 'image/jpeg';
+                        $quote[$type . '_base64'] = 'data:' . $mime . ';base64,' . base64_encode(file_get_contents($fullPath));
+                    }
+                }
+            }
+
+            ok($quote);
+            break;
+        }
+
+        case 'get_pdf_context': {
+            requireAdmin();
+            // Read PDF styling settings (template, colors, etc.) from Sunbox DB.
+            // Company info comes from the pro user's own professional_profiles row.
+            // PDF content settings (footer, terms, bank) come from pro's own pro_settings,
+            // falling back to auto-generated values from company info.
+            $pdfSettings = [];
+            $siteSettings = [];
+            try {
+                $sdb = getSunboxDB();
+                $stmt = $sdb->query("SELECT setting_key, setting_value, setting_group FROM settings WHERE setting_group IN ('pdf','site','general')");
+                foreach ($stmt->fetchAll() as $row) {
+                    $k = $row['setting_key']; $v = $row['setting_value'];
+                    $g = $row['setting_group'];
+                    if ($g === 'pdf') {
+                        $pdfSettings[$k] = $v;
+                    } elseif ($g === 'site') {
+                        $siteSettings[$k] = $v;
+                    } elseif ($g === 'general' && !isset($pdfSettings[$k])) {
+                        $pdfSettings[$k] = $v;
+                    }
+                }
+            } catch (\Throwable $e) { /* non-fatal */ }
+
+            // Use pro VAT rate from .env (overrides Sunbox general setting)
+            $proVatRate = env('VAT_RATE', '');
+            if ($proVatRate !== '') {
+                $pdfSettings['vat_rate'] = $proVatRate;
+            }
+
+            // Build company info from this pro user's professional_profiles row
+            $profile   = getProProfile();
+            $proEmail  = '';
+            if (SUNBOX_USER_ID) {
+                try {
+                    $sdb   = getSunboxDB();
+                    $eStmt = $sdb->prepare("SELECT email FROM users WHERE id = ? LIMIT 1");
+                    $eStmt->execute([SUNBOX_USER_ID]);
+                    $proEmail = (string)($eStmt->fetchColumn() ?: '');
+                } catch (\Throwable $e) { /* non-fatal */ }
+            }
+            $companySettings = [
+                'company_name'    => (string)($profile['company_name'] ?? env('COMPANY_NAME', '')),
+                'company_email'   => $proEmail,
+                'company_phone'   => (string)($profile['phone'] ?? ''),
+                'company_address' => (string)($profile['address'] ?? ''),
+            ];
+
+            // Override PDF content keys with pro's own pro_settings values if set
+            $proContentKeys = ['pdf_footer_text', 'pdf_terms', 'pdf_bank_details',
+                               'pdf_show_bank_details', 'pdf_show_terms', 'pdf_validity_days'];
+            $proSettingsOverride = [];
+            try {
+                $db = getDB();
+                $placeholders = implode(',', array_fill(0, count($proContentKeys), '?'));
+                $pStmt = $db->prepare("SELECT setting_key, setting_value FROM pro_settings WHERE setting_key IN ($placeholders)");
+                $pStmt->execute($proContentKeys);
+                foreach ($pStmt->fetchAll() as $row) {
+                    $proSettingsOverride[$row['setting_key']] = $row['setting_value'];
+                }
+            } catch (\Throwable $e) { /* non-fatal */ }
+
+            foreach ($proSettingsOverride as $k => $v) {
+                $pdfSettings[$k] = $v;
+            }
+
+            // If pro has not explicitly set pdf_footer_text, build it from company info
+            // (this ensures the PDF never shows the Sunbox default footer)
+            if (!isset($proSettingsOverride['pdf_footer_text'])) {
+                $footerParts = array_values(array_filter([
+                    $companySettings['company_name'],
+                    $companySettings['company_address'],
+                    $companySettings['company_email'],
+                ]));
+                $pdfSettings['pdf_footer_text'] = implode(' – ', $footerParts);
+            }
+            // Clear Sunbox-specific terms/bank details if the pro user hasn't set their own
+            if (!isset($proSettingsOverride['pdf_terms'])) {
+                $pdfSettings['pdf_terms'] = '';
+            }
+            if (!isset($proSettingsOverride['pdf_bank_details'])) {
+                $pdfSettings['pdf_bank_details'] = '';
+            }
+
+            // Convert the pro user's logo to base64 (logo lives on the Sunbox server)
+            $sunboxRoot = dirname(__DIR__, 3); // public_html/
+            $realBase   = realpath($sunboxRoot) ?: $sunboxRoot;
+            $logoBase64 = '';
+            $logoUrl    = (string)($profile['logo_url'] ?? '');
+            if ($logoUrl) {
+                $logoPath = parse_url($logoUrl, PHP_URL_PATH);
+                if ($logoPath) {
+                    $fullPath = realpath($sunboxRoot . '/' . ltrim($logoPath, '/'));
+                    if ($fullPath && strncmp($fullPath, $realBase, strlen($realBase)) === 0 && is_file($fullPath)) {
+                        $mime = @mime_content_type($fullPath) ?: 'image/jpeg';
+                        $logoBase64 = 'data:' . $mime . ';base64,' . base64_encode(file_get_contents($fullPath));
+                    }
+                }
+            }
+
+            ok([
+                'pdf_settings'     => $pdfSettings,
+                'company_settings' => $companySettings,
+                'site_settings'    => $siteSettings,
+                'logo_base64'      => $logoBase64,
+            ]);
+            break;
+        }
+
         case 'get_contact_by_device': {
-            // Public — no auth needed (pre-fills visitor form with saved info)
             $db = getDB();
             validateRequired($body, ['device_id']);
             $stmt = $db->prepare("
@@ -461,27 +755,68 @@ try {
                     $contactId = (int)$db->lastInsertId();
                 }
 
-                // Insert quote
-                $db->prepare("
-                    INSERT INTO pro_quotes
-                        (reference_number, contact_id, customer_name, customer_email, customer_phone,
-                         customer_address, customer_message, model_id, model_name, model_type,
-                         base_price, options_total, total_price, status, valid_until)
-                    VALUES (?,?,?,?,?, ?,?,?,?,?, ?,?,?,'pending',?)
-                ")->execute([
-                    $reference,
-                    $contactId,
-                    $customerName, $customerEmail, $customerPhone,
-                    $customerAddress,
-                    sanitize($body['customer_message'] ?? ''),
-                    (int)$body['model_id'],
-                    sanitize($body['model_name']),
-                    $modelType,
-                    (float)$body['base_price'],
-                    (float)($body['options_total'] ?? 0),
-                    (float)$body['total_price'],
-                    $validUntil,
-                ]);
+                // Insert quote (try with pool dimension columns first; fall back if migration not applied)
+                $nullFloat = fn($k) => isset($body[$k]) && $body[$k] !== null ? (float)$body[$k] : null;
+                $proInserted = false;
+                try {
+                    $db->prepare("
+                        INSERT INTO pro_quotes
+                            (reference_number, contact_id, customer_name, customer_email, customer_phone,
+                             customer_address, customer_message, model_id, model_name, model_type,
+                             base_price, options_total, total_price, status, valid_until,
+                             pool_shape,
+                             pool_longueur, pool_largeur, pool_profondeur,
+                             pool_longueur_la, pool_largeur_la, pool_profondeur_la,
+                             pool_longueur_lb, pool_largeur_lb, pool_profondeur_lb,
+                             pool_longueur_ta, pool_largeur_ta, pool_profondeur_ta,
+                             pool_longueur_tb, pool_largeur_tb, pool_profondeur_tb)
+                        VALUES (?,?,?,?,?, ?,?,?,?,?, ?,?,?,'pending',?,
+                                ?, ?,?,?, ?,?,?, ?,?,?, ?,?,?, ?,?,?)
+                    ")->execute([
+                        $reference,
+                        $contactId,
+                        $customerName, $customerEmail, $customerPhone,
+                        $customerAddress,
+                        sanitize($body['customer_message'] ?? ''),
+                        (int)$body['model_id'],
+                        sanitize($body['model_name']),
+                        $modelType,
+                        (float)$body['base_price'],
+                        (float)($body['options_total'] ?? 0),
+                        (float)$body['total_price'],
+                        $validUntil,
+                        isset($body['pool_shape']) ? sanitize($body['pool_shape']) : null,
+                        $nullFloat('pool_longueur'),    $nullFloat('pool_largeur'),    $nullFloat('pool_profondeur'),
+                        $nullFloat('pool_longueur_la'), $nullFloat('pool_largeur_la'), $nullFloat('pool_profondeur_la'),
+                        $nullFloat('pool_longueur_lb'), $nullFloat('pool_largeur_lb'), $nullFloat('pool_profondeur_lb'),
+                        $nullFloat('pool_longueur_ta'), $nullFloat('pool_largeur_ta'), $nullFloat('pool_profondeur_ta'),
+                        $nullFloat('pool_longueur_tb'), $nullFloat('pool_largeur_tb'), $nullFloat('pool_profondeur_tb'),
+                    ]);
+                    $proInserted = true;
+                } catch (PDOException $dimEx) { /* pool dimension columns not yet added – fall through */ }
+
+                if (!$proInserted) {
+                    $db->prepare("
+                        INSERT INTO pro_quotes
+                            (reference_number, contact_id, customer_name, customer_email, customer_phone,
+                             customer_address, customer_message, model_id, model_name, model_type,
+                             base_price, options_total, total_price, status, valid_until)
+                        VALUES (?,?,?,?,?, ?,?,?,?,?, ?,?,?,'pending',?)
+                    ")->execute([
+                        $reference,
+                        $contactId,
+                        $customerName, $customerEmail, $customerPhone,
+                        $customerAddress,
+                        sanitize($body['customer_message'] ?? ''),
+                        (int)$body['model_id'],
+                        sanitize($body['model_name']),
+                        $modelType,
+                        (float)$body['base_price'],
+                        (float)($body['options_total'] ?? 0),
+                        (float)$body['total_price'],
+                        $validUntil,
+                    ]);
+                }
                 $quoteId = (int)$db->lastInsertId();
 
                 // Update reference with actual quote ID for uniqueness guarantee
@@ -522,8 +857,8 @@ try {
             $id     = (int)$body['id'];
             $status = $body['status'];
 
-            // Validate quote
-            if ($status === 'approved') {
+            // Deduct validation credits only when SUNBOX_USER_ID is properly configured
+            if ($status === 'approved' && SUNBOX_USER_ID > 0) {
                 $creditResult = deductCredits(1000, 'quote_validated', $id);
                 if (!($creditResult['success'] ?? false)) {
                     fail($creditResult['error'] ?? 'Crédits insuffisants', 402);
@@ -535,11 +870,43 @@ try {
             break;
         }
 
+        case 'update_quote': {
+            requireAdmin();
+            $db = getDB();
+            validateRequired($body, ['id']);
+            $id = (int)$body['id'];
+            $sets = []; $params = [];
+            if (array_key_exists('customer_name', $body))    { $sets[] = 'customer_name = ?';    $params[] = sanitize((string)$body['customer_name']); }
+            if (array_key_exists('customer_email', $body))   { $sets[] = 'customer_email = ?';   $params[] = sanitize((string)$body['customer_email']); }
+            if (array_key_exists('customer_phone', $body))   { $sets[] = 'customer_phone = ?';   $params[] = sanitize((string)$body['customer_phone']); }
+            if (array_key_exists('customer_address', $body)) { $sets[] = 'customer_address = ?'; $params[] = sanitize((string)$body['customer_address']); }
+            if (array_key_exists('customer_message', $body)) { $sets[] = 'customer_message = ?'; $params[] = sanitize((string)$body['customer_message']); }
+            if (!empty($sets)) {
+                $sets[] = 'updated_at = NOW()';
+                $params[] = $id;
+                $db->prepare("UPDATE pro_quotes SET " . implode(', ', $sets) . " WHERE id = ?")->execute($params);
+            }
+            ok();
+            break;
+        }
+
         case 'delete_quote': {
             requireAdmin();
             $db = getDB();
             validateRequired($body, ['id']);
-            $db->prepare("DELETE FROM pro_quotes WHERE id = ?")->execute([(int)$body['id']]);
+            $qid = (int)$body['id'];
+            // Cascade: delete purchase report items and reports linked to this quote
+            try {
+                $rStmt = $db->prepare("SELECT id FROM pro_purchase_reports WHERE quote_id = ?");
+                $rStmt->execute([$qid]);
+                $reportIds = $rStmt->fetchAll(\PDO::FETCH_COLUMN);
+                if (!empty($reportIds)) {
+                    $placeholders = implode(',', array_fill(0, count($reportIds), '?'));
+                    $db->prepare("DELETE FROM pro_purchase_report_items WHERE report_id IN ($placeholders)")->execute($reportIds);
+                    $db->prepare("DELETE FROM pro_purchase_reports WHERE id IN ($placeholders)")->execute($reportIds);
+                }
+            } catch (\PDOException $e) { error_log('delete_quote cascade error: ' . $e->getMessage()); }
+            $db->prepare("DELETE FROM pro_quotes WHERE id = ?")->execute([$qid]);
             ok();
             break;
         }
@@ -1057,6 +1424,58 @@ try {
         }
 
         // ── CREDITS (direct from Sunbox DB — no HTTP) ─────────────────────────
+        case 'get_pro_profile': {
+            requireAdmin();
+            $profile = getProProfile();
+            $email   = '';
+            if (SUNBOX_USER_ID) {
+                try {
+                    $sdb   = getSunboxDB();
+                    $eStmt = $sdb->prepare("SELECT email FROM users WHERE id = ? LIMIT 1");
+                    $eStmt->execute([SUNBOX_USER_ID]);
+                    $email = (string)($eStmt->fetchColumn() ?: '');
+                } catch (\Throwable $e) { /* non-fatal */ }
+            }
+            ok(array_merge($profile, [
+                'id'                    => SUNBOX_USER_ID,
+                'name'                  => (string)($profile['user_name'] ?? ''),
+                'email'                 => $email,
+                'credits'               => (float)($profile['credits'] ?? 0),
+                'sunbox_margin_percent' => (float)($profile['sunbox_margin_percent'] ?? 0),
+            ]));
+            break;
+        }
+
+        case 'update_pro_profile': {
+            requireAdmin();
+            if (!SUNBOX_USER_ID) { fail('User non configuré', 400); }
+            $sets = []; $params = [];
+            if (array_key_exists('company_name', $body))         { $sets[] = 'company_name = ?';         $params[] = sanitize((string)$body['company_name']); }
+            if (array_key_exists('address', $body))              { $sets[] = 'address = ?';              $params[] = sanitize((string)$body['address']); }
+            if (array_key_exists('vat_number', $body))           { $sets[] = 'vat_number = ?';           $params[] = sanitize((string)$body['vat_number']); }
+            if (array_key_exists('brn_number', $body))           { $sets[] = 'brn_number = ?';           $params[] = sanitize((string)$body['brn_number']); }
+            if (array_key_exists('phone', $body))                { $sets[] = 'phone = ?';                $params[] = sanitize((string)$body['phone']); }
+            if (array_key_exists('sunbox_margin_percent', $body)){ $sets[] = 'sunbox_margin_percent = ?'; $params[] = (float)$body['sunbox_margin_percent']; }
+            if (array_key_exists('logo_url', $body)) {
+                // Only accept root-relative paths (no arbitrary external URLs)
+                $rawLogo = (string)$body['logo_url'];
+                if ($rawLogo === '' || (strlen($rawLogo) > 0 && $rawLogo[0] === '/')) {
+                    $sets[]   = 'logo_url = ?';
+                    $params[] = $rawLogo;
+                }
+            }
+            if (!empty($sets)) {
+                $sets[] = 'updated_at = NOW()';
+                $params[] = SUNBOX_USER_ID;
+                try {
+                    $sdb = getSunboxDB();
+                    $sdb->prepare("UPDATE professional_profiles SET " . implode(', ', $sets) . " WHERE user_id = ?")->execute($params);
+                } catch (\Throwable $e) { fail('Mise à jour impossible: ' . $e->getMessage()); }
+            }
+            ok();
+            break;
+        }
+
         case 'get_pro_credits': {
             requireAdmin();
             try {
@@ -1094,6 +1513,29 @@ try {
                 fail($result['error'] ?? 'Crédits insuffisants', 402);
             }
             ok($result['data'] ?? []);
+            break;
+        }
+
+        case 'buy_pro_pack': {
+            requireAdmin();
+            if (!SUNBOX_USER_ID) { fail('User non configuré', 400); }
+            $packAmount = 10000;
+            try {
+                $sdb = getSunboxDB();
+                $sdb->beginTransaction();
+                $sdb->prepare("UPDATE professional_profiles SET credits = credits + ?, updated_at = NOW() WHERE user_id = ?")
+                    ->execute([$packAmount, SUNBOX_USER_ID]);
+                $balStmt = $sdb->prepare("SELECT credits FROM professional_profiles WHERE user_id = ?");
+                $balStmt->execute([SUNBOX_USER_ID]);
+                $newBalance = (float)($balStmt->fetchColumn() ?: $packAmount);
+                $sdb->prepare("INSERT INTO professional_credit_transactions (user_id, amount, reason, quote_id, balance_after) VALUES (?,?,?,?,?)")
+                    ->execute([SUNBOX_USER_ID, $packAmount, 'pack_purchase', null, $newBalance]);
+                $sdb->commit();
+                ok(['credits' => $newBalance]);
+            } catch (\Throwable $e) {
+                try { $sdb->rollBack(); } catch (\Throwable $ignored) {}
+                fail(API_DEBUG ? $e->getMessage() : 'Erreur serveur', 500);
+            }
             break;
         }
 

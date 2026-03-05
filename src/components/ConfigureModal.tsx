@@ -365,6 +365,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
         })),
         // Include pool dimensions in quote if pool model
         ...(isPoolModel ? {
+          pool_shape: poolShape,
           pool_longueur: poolDimensions.longueur,
           pool_largeur: poolDimensions.largeur,
           pool_profondeur: poolDimensions.profondeur,

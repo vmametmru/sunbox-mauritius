@@ -6,12 +6,12 @@ handleCORS();
 
 // Pro site deployment versions — increment these when templates or DB schema change.
 // PRO_FILE_VERSION must match define('PRO_FILE_VERSION', ...) in api/pro_deploy/api_config.php
-define('PRO_FILE_VERSION',      '2.1.0');
-define('PRO_DB_SCHEMA_VERSION', '1.6.0');
+define('PRO_FILE_VERSION',      '2.7.0');
+define('PRO_DB_SCHEMA_VERSION', '1.7.0');
 
 // Sunbox main database schema version.
 // Increment when new tables or columns are added.
-define('SUNBOX_DB_SCHEMA_VERSION', '2.3.0');
+define('SUNBOX_DB_SCHEMA_VERSION', '2.4.0');
 
 $action = $_GET['action'] ?? '';
 $body   = getRequestBody();
@@ -150,6 +150,24 @@ try {
 
             // ── v2.3.0 ── Add replace_with_sunbox flag to suppliers ──────────────
             $addCol('suppliers', 'replace_with_sunbox', "TINYINT(1) DEFAULT 0 AFTER `is_active`");
+
+            // ── v2.4.0 ── Add pool dimension columns to quotes ───────────────────
+            $addCol('quotes', 'pool_shape',         "VARCHAR(20) DEFAULT NULL AFTER `approval_token`");
+            $addCol('quotes', 'pool_longueur',      "DECIMAL(8,2) DEFAULT NULL AFTER `pool_shape`");
+            $addCol('quotes', 'pool_largeur',       "DECIMAL(8,2) DEFAULT NULL AFTER `pool_longueur`");
+            $addCol('quotes', 'pool_profondeur',    "DECIMAL(8,2) DEFAULT NULL AFTER `pool_largeur`");
+            $addCol('quotes', 'pool_longueur_la',   "DECIMAL(8,2) DEFAULT NULL AFTER `pool_profondeur`");
+            $addCol('quotes', 'pool_largeur_la',    "DECIMAL(8,2) DEFAULT NULL AFTER `pool_longueur_la`");
+            $addCol('quotes', 'pool_profondeur_la', "DECIMAL(8,2) DEFAULT NULL AFTER `pool_largeur_la`");
+            $addCol('quotes', 'pool_longueur_lb',   "DECIMAL(8,2) DEFAULT NULL AFTER `pool_profondeur_la`");
+            $addCol('quotes', 'pool_largeur_lb',    "DECIMAL(8,2) DEFAULT NULL AFTER `pool_longueur_lb`");
+            $addCol('quotes', 'pool_profondeur_lb', "DECIMAL(8,2) DEFAULT NULL AFTER `pool_largeur_lb`");
+            $addCol('quotes', 'pool_longueur_ta',   "DECIMAL(8,2) DEFAULT NULL AFTER `pool_profondeur_lb`");
+            $addCol('quotes', 'pool_largeur_ta',    "DECIMAL(8,2) DEFAULT NULL AFTER `pool_longueur_ta`");
+            $addCol('quotes', 'pool_profondeur_ta', "DECIMAL(8,2) DEFAULT NULL AFTER `pool_largeur_ta`");
+            $addCol('quotes', 'pool_longueur_tb',   "DECIMAL(8,2) DEFAULT NULL AFTER `pool_profondeur_ta`");
+            $addCol('quotes', 'pool_largeur_tb',    "DECIMAL(8,2) DEFAULT NULL AFTER `pool_longueur_tb`");
+            $addCol('quotes', 'pool_profondeur_tb', "DECIMAL(8,2) DEFAULT NULL AFTER `pool_largeur_tb`");
 
             // ── Schema version table (always create / update) ─────────────────
             $db->exec("CREATE TABLE IF NOT EXISTS `db_schema_version` (
@@ -933,10 +951,12 @@ try {
         case 'get_boq_options': {
             $modelId = (int)($body['model_id'] ?? 0);
             if ($modelId <= 0) fail("model_id manquant");
-            
+
+            // Step 1: Fetch ALL option categories (including sub-categories) with their own direct-line prices.
             $stmt = $db->prepare("
-                SELECT bc.id, bc.name, bc.display_order, bc.parent_id, bc.qty_editable, mi.file_path as image_path,
-                    COALESCE(SUM(ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS price_ht
+                SELECT bc.id, bc.name, bc.parent_id, bc.display_order, bc.qty_editable,
+                       mi.file_path as image_path,
+                       COALESCE(SUM(ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS own_price_ht
                 FROM boq_categories bc
                 LEFT JOIN boq_lines bl ON bc.id = bl.category_id
                 LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
@@ -946,14 +966,43 @@ try {
                 ORDER BY bc.name ASC
             ");
             $stmt->execute([$modelId]);
-            $options = $stmt->fetchAll();
-            foreach ($options as &$opt) {
-                $opt['id'] = (int)$opt['id'];
-                $opt['parent_id'] = $opt['parent_id'] ? (int)$opt['parent_id'] : null;
-                $opt['display_order'] = (int)$opt['display_order'];
-                $opt['qty_editable'] = (bool)($opt['qty_editable'] ?? false);
-                $opt['image_url'] = $opt['image_path'] ? '/' . ltrim($opt['image_path'], '/') : null;
-                unset($opt['image_path']);
+            $allOptCats = $stmt->fetchAll();
+
+            // Step 2: Build maps for PHP-side recursive aggregation.
+            $priceMap = []; // id -> own_price_ht (float)
+            $childMap = []; // parent_id -> [child_ids]
+            foreach ($allOptCats as $cat) {
+                $id            = (int)$cat['id'];
+                $priceMap[$id] = (float)$cat['own_price_ht'];
+                if ($cat['parent_id'] !== null) {
+                    $pid = (int)$cat['parent_id'];
+                    if (!isset($childMap[$pid])) $childMap[$pid] = [];
+                    $childMap[$pid][] = $id;
+                }
+            }
+
+            // Recursive function: returns total price for a category (own lines + all descendants).
+            $getTotalPrice = function(int $id) use (&$getTotalPrice, $priceMap, $childMap): float {
+                $total = $priceMap[$id] ?? 0.0;
+                foreach ($childMap[$id] ?? [] as $childId) {
+                    $total += $getTotalPrice($childId);
+                }
+                return $total;
+            };
+
+            // Step 3: Build result from root option categories only.
+            $options = [];
+            foreach ($allOptCats as $cat) {
+                if ($cat['parent_id'] !== null) continue; // skip child categories
+                $id = (int)$cat['id'];
+                $options[] = [
+                    'id'            => $id,
+                    'name'          => $cat['name'],
+                    'display_order' => (int)$cat['display_order'],
+                    'qty_editable'  => (bool)($cat['qty_editable'] ?? false),
+                    'image_url'     => $cat['image_path'] ? '/' . ltrim($cat['image_path'], '/') : null,
+                    'price_ht'      => round($getTotalPrice($id), 2),
+                ];
             }
             ok($options);
             break;
@@ -998,14 +1047,21 @@ try {
         case 'get_boq_category_lines': {
             $categoryId = (int)($body['category_id'] ?? 0);
             if ($categoryId <= 0) fail("category_id manquant");
-            
+
+            // Return direct lines of this category AND lines of its sub-categories,
+            // tagged with sub_category_name so the frontend can group them.
             $stmt = $db->prepare("
-                SELECT id, description
-                FROM boq_lines
-                WHERE category_id = ?
-                ORDER BY description ASC
+                SELECT bl.id, bl.description, NULL AS sub_category_name
+                FROM boq_lines bl
+                WHERE bl.category_id = ?
+                UNION ALL
+                SELECT bl.id, bl.description, bc.name AS sub_category_name
+                FROM boq_lines bl
+                INNER JOIN boq_categories bc ON bl.category_id = bc.id
+                WHERE bc.parent_id = ?
+                ORDER BY sub_category_name ASC, description ASC
             ");
-            $stmt->execute([$categoryId]);
+            $stmt->execute([$categoryId, $categoryId]);
             ok($stmt->fetchAll());
             break;
         }
@@ -1141,31 +1197,79 @@ try {
                     $contactId = $db->lastInsertId();
                 }
                 
-                $stmt = $db->prepare("
-                    INSERT INTO quotes (
-                        reference_number, model_id, model_name, model_type,
-                        base_price, options_total, total_price,
-                        customer_name, customer_email, customer_phone,
-                        customer_address, customer_message, contact_id,
-                        status, valid_until
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
-                ");
-                $stmt->execute([
-                    $reference,
-                    (int)$body['model_id'],
-                    sanitize($body['model_name']),
-                    $body['model_type'],
-                    (float)$body['base_price'],
-                    (float)($body['options_total'] ?? 0),
-                    (float)$body['total_price'],
-                    $customerName,
-                    $customerEmail,
-                    $customerPhone,
-                    $customerAddress,
-                    sanitize($body['customer_message'] ?? ''),
-                    $contactId,
-                    $validUntil,
-                ]);
+                $nullFloat = fn($k) => isset($body[$k]) && $body[$k] !== null ? (float)$body[$k] : null;
+                // Try to INSERT with pool dimension columns (requires pool_dimensions_migration.sql).
+                // Fall back to the base INSERT if the columns don't exist yet.
+                $inserted = false;
+                try {
+                    $stmt = $db->prepare("
+                        INSERT INTO quotes (
+                            reference_number, model_id, model_name, model_type,
+                            base_price, options_total, total_price,
+                            customer_name, customer_email, customer_phone,
+                            customer_address, customer_message, contact_id,
+                            status, valid_until,
+                            pool_shape,
+                            pool_longueur, pool_largeur, pool_profondeur,
+                            pool_longueur_la, pool_largeur_la, pool_profondeur_la,
+                            pool_longueur_lb, pool_largeur_lb, pool_profondeur_lb,
+                            pool_longueur_ta, pool_largeur_ta, pool_profondeur_ta,
+                            pool_longueur_tb, pool_largeur_tb, pool_profondeur_tb
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?,
+                                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ");
+                    $stmt->execute([
+                        $reference,
+                        (int)$body['model_id'],
+                        sanitize($body['model_name']),
+                        $body['model_type'],
+                        (float)$body['base_price'],
+                        (float)($body['options_total'] ?? 0),
+                        (float)$body['total_price'],
+                        $customerName,
+                        $customerEmail,
+                        $customerPhone,
+                        $customerAddress,
+                        sanitize($body['customer_message'] ?? ''),
+                        $contactId,
+                        $validUntil,
+                        isset($body['pool_shape']) ? sanitize($body['pool_shape']) : null,
+                        $nullFloat('pool_longueur'),    $nullFloat('pool_largeur'),    $nullFloat('pool_profondeur'),
+                        $nullFloat('pool_longueur_la'), $nullFloat('pool_largeur_la'), $nullFloat('pool_profondeur_la'),
+                        $nullFloat('pool_longueur_lb'), $nullFloat('pool_largeur_lb'), $nullFloat('pool_profondeur_lb'),
+                        $nullFloat('pool_longueur_ta'), $nullFloat('pool_largeur_ta'), $nullFloat('pool_profondeur_ta'),
+                        $nullFloat('pool_longueur_tb'), $nullFloat('pool_largeur_tb'), $nullFloat('pool_profondeur_tb'),
+                    ]);
+                    $inserted = true;
+                } catch (PDOException $dimEx) { /* pool dimension columns not yet added – fall through */ }
+
+                if (!$inserted) {
+                    $stmt = $db->prepare("
+                        INSERT INTO quotes (
+                            reference_number, model_id, model_name, model_type,
+                            base_price, options_total, total_price,
+                            customer_name, customer_email, customer_phone,
+                            customer_address, customer_message, contact_id,
+                            status, valid_until
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+                    ");
+                    $stmt->execute([
+                        $reference,
+                        (int)$body['model_id'],
+                        sanitize($body['model_name']),
+                        $body['model_type'],
+                        (float)$body['base_price'],
+                        (float)($body['options_total'] ?? 0),
+                        (float)$body['total_price'],
+                        $customerName,
+                        $customerEmail,
+                        $customerPhone,
+                        $customerAddress,
+                        sanitize($body['customer_message'] ?? ''),
+                        $contactId,
+                        $validUntil,
+                    ]);
+                }
                 
                 $quoteId = $db->lastInsertId();
                 
@@ -1508,38 +1612,85 @@ try {
                 $totalPrice = (float)($body['total_price'] ?? ($basePrice + $optionsTotal));
                 
                 // Insert quote
-                $stmt = $db->prepare("
-                    INSERT INTO quotes (
-                        reference_number, model_id, model_name, model_type,
-                        base_price, options_total, total_price,
-                        customer_name, customer_email, customer_phone,
-                        customer_address, customer_message, contact_id,
-                        status, valid_until, is_free_quote, quote_title,
-                        margin_percent, photo_url, plan_url, cloned_from_id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)
-                ");
-                $stmt->execute([
-                    $reference,
-                    $body['model_id'] ? (int)$body['model_id'] : null,
-                    sanitize($body['model_name'] ?? 'Devis libre'),
-                    $modelType,
-                    $basePrice,
-                    $optionsTotal,
-                    $totalPrice,
-                    $customerName,
-                    $customerEmail,
-                    $customerPhone,
-                    $customerAddress,
-                    sanitize($body['customer_message'] ?? ''),
-                    $contactId,
-                    $validUntil,
-                    $isFreeQuote ? 1 : 0,
-                    sanitize($body['quote_title'] ?? ''),
-                    (float)($body['margin_percent'] ?? 30),
-                    sanitize($body['photo_url'] ?? ''),
-                    sanitize($body['plan_url'] ?? ''),
-                    $body['cloned_from_id'] ? (int)$body['cloned_from_id'] : null,
-                ]);
+                // Try with pool dimension columns first; fall back gracefully if migration not yet applied.
+                $toNullFloat = fn($k) => isset($body[$k]) && $body[$k] !== null ? (float)$body[$k] : null;
+                $inserted = false;
+                try {
+                    $stmt = $db->prepare("
+                        INSERT INTO quotes (
+                            reference_number, model_id, model_name, model_type,
+                            base_price, options_total, total_price,
+                            customer_name, customer_email, customer_phone,
+                            customer_address, customer_message, contact_id,
+                            status, valid_until, is_free_quote, quote_title,
+                            margin_percent, photo_url, plan_url, cloned_from_id,
+                            pool_shape,
+                            pool_longueur, pool_largeur, pool_profondeur
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?,
+                                  ?, ?, ?, ?)
+                    ");
+                    $stmt->execute([
+                        $reference,
+                        $body['model_id'] ? (int)$body['model_id'] : null,
+                        sanitize($body['model_name'] ?? 'Devis libre'),
+                        $modelType,
+                        $basePrice,
+                        $optionsTotal,
+                        $totalPrice,
+                        $customerName,
+                        $customerEmail,
+                        $customerPhone,
+                        $customerAddress,
+                        sanitize($body['customer_message'] ?? ''),
+                        $contactId,
+                        $validUntil,
+                        $isFreeQuote ? 1 : 0,
+                        sanitize($body['quote_title'] ?? ''),
+                        (float)($body['margin_percent'] ?? 30),
+                        sanitize($body['photo_url'] ?? ''),
+                        sanitize($body['plan_url'] ?? ''),
+                        $body['cloned_from_id'] ? (int)$body['cloned_from_id'] : null,
+                        isset($body['pool_shape']) ? sanitize($body['pool_shape']) : null,
+                        $toNullFloat('pool_longueur'), $toNullFloat('pool_largeur'), $toNullFloat('pool_profondeur'),
+                    ]);
+                    $inserted = true;
+                } catch (\Throwable $insertEx) {
+                    // pool_dimensions columns not yet added – fall back to base INSERT
+                }
+                if (!$inserted) {
+                    $stmt = $db->prepare("
+                        INSERT INTO quotes (
+                            reference_number, model_id, model_name, model_type,
+                            base_price, options_total, total_price,
+                            customer_name, customer_email, customer_phone,
+                            customer_address, customer_message, contact_id,
+                            status, valid_until, is_free_quote, quote_title,
+                            margin_percent, photo_url, plan_url, cloned_from_id
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)
+                    ");
+                    $stmt->execute([
+                        $reference,
+                        $body['model_id'] ? (int)$body['model_id'] : null,
+                        sanitize($body['model_name'] ?? 'Devis libre'),
+                        $modelType,
+                        $basePrice,
+                        $optionsTotal,
+                        $totalPrice,
+                        $customerName,
+                        $customerEmail,
+                        $customerPhone,
+                        $customerAddress,
+                        sanitize($body['customer_message'] ?? ''),
+                        $contactId,
+                        $validUntil,
+                        $isFreeQuote ? 1 : 0,
+                        sanitize($body['quote_title'] ?? ''),
+                        (float)($body['margin_percent'] ?? 30),
+                        sanitize($body['photo_url'] ?? ''),
+                        sanitize($body['plan_url'] ?? ''),
+                        $body['cloned_from_id'] ? (int)$body['cloned_from_id'] : null,
+                    ]);
+                }
                 
                 $quoteId = $db->lastInsertId();
                 
@@ -1630,41 +1781,66 @@ try {
             $db->beginTransaction();
             
             try {
-                // Build update query dynamically
-                $updates = [];
-                $params = [];
-                
+                // Build update query dynamically.
+                // Separate pool-dimension fields so they can be updated in a
+                // graceful try/catch (columns may not exist until migration is run).
+                $poolDimFieldNames = ['pool_shape', 'pool_longueur', 'pool_largeur', 'pool_profondeur'];
+                $toNullFloat = fn($k) => isset($body[$k]) && $body[$k] !== null ? (float)$body[$k] : null;
+                $updates    = [];
+                $params     = [];
+                $dimUpdates = [];
+                $dimParams  = [];
+
                 $allowedFields = [
                     'model_id', 'model_name', 'model_type', 'base_price', 'options_total', 
                     'total_price', 'customer_name', 'customer_email', 'customer_phone',
                     'customer_address', 'customer_message', 'status', 'quote_title',
-                    'margin_percent', 'photo_url', 'plan_url', 'notes'
+                    'margin_percent', 'photo_url', 'plan_url', 'notes',
+                    'pool_shape',
+                    'pool_longueur', 'pool_largeur', 'pool_profondeur',
                 ];
-                
+
                 foreach ($allowedFields as $field) {
-                    if (isset($body[$field])) {
-                        $updates[] = "$field = ?";
+                    if (array_key_exists($field, $body)) {
                         if (in_array($field, ['base_price', 'options_total', 'total_price', 'margin_percent'])) {
-                            $params[] = (float)$body[$field];
+                            $val = $body[$field] !== null ? (float)$body[$field] : null;
+                        } elseif (in_array($field, ['pool_longueur', 'pool_largeur', 'pool_profondeur'])) {
+                            $val = $toNullFloat($field);
                         } elseif ($field === 'model_id') {
-                            $params[] = $body[$field] ? (int)$body[$field] : null;
+                            $val = $body[$field] ? (int)$body[$field] : null;
                         } else {
-                            $params[] = sanitize($body[$field]);
+                            $val = $body[$field] !== null ? sanitize($body[$field]) : null;
+                        }
+                        if (in_array($field, $poolDimFieldNames)) {
+                            $dimUpdates[] = "$field = ?";
+                            $dimParams[]  = $val;
+                        } else {
+                            $updates[] = "$field = ?";
+                            $params[]  = $val;
                         }
                     }
                 }
-                
+
                 // Generate reference when status changes to validated
                 if (isset($body['status']) && $body['status'] === 'validated' && $existingQuote['status'] !== 'validated') {
                     // Reference already exists, no need to regenerate
                 }
-                
+
                 if (!empty($updates)) {
                     $updates[] = "updated_at = NOW()";
                     $params[] = $id;
                     $sql = "UPDATE quotes SET " . implode(', ', $updates) . " WHERE id = ?";
                     $stmt = $db->prepare($sql);
                     $stmt->execute($params);
+                }
+
+                // Update pool dimensions separately (graceful – columns may not exist yet)
+                if (!empty($dimUpdates)) {
+                    try {
+                        $dimParams[] = $id;
+                        $sql = "UPDATE quotes SET " . implode(', ', $dimUpdates) . " WHERE id = ?";
+                        $db->prepare($sql)->execute($dimParams);
+                    } catch (\Throwable $dimEx) { /* pool_dimensions_migration.sql not yet applied */ }
                 }
                 
                 // Update categories and lines for free quotes
@@ -2998,6 +3174,16 @@ try {
             break;
         }
 
+        // ── Get Sunbox site deployment version log ────────────────────────────
+        case 'get_sunbox_version': {
+            requireAdmin();
+            $webRoot    = rtrim(dirname(dirname(__FILE__)), '/'); // .../sunbox-mauritius.com
+            $vFile      = $webRoot . '/.sunbox_version';
+            $versionLog = is_file($vFile) ? trim((string)file_get_contents($vFile)) : '';
+            ok(['version_log' => $versionLog ?: null]);
+            break;
+        }
+
         // ── Check deployed versions (files + DB schema) ───────────────────────
         case 'check_pro_versions': {
             validateRequired($body, ['user_id']);
@@ -3361,6 +3547,23 @@ try {
                 $addCol('pro_quotes', 'notes',            "TEXT AFTER `total_price`");
                 $addCol('pro_quotes', 'valid_until',      "DATE DEFAULT NULL AFTER `status`");
                 $addCol('pro_quotes', 'boq_requested',    "TINYINT(1) DEFAULT 0 AFTER `valid_until`");
+                // ── v1.7.0 ── Pool dimension columns for pro_quotes ────────────
+                $addCol('pro_quotes', 'pool_shape',         "VARCHAR(20) DEFAULT NULL AFTER `boq_requested`");
+                $addCol('pro_quotes', 'pool_longueur',      "DECIMAL(8,2) DEFAULT NULL AFTER `pool_shape`");
+                $addCol('pro_quotes', 'pool_largeur',       "DECIMAL(8,2) DEFAULT NULL AFTER `pool_longueur`");
+                $addCol('pro_quotes', 'pool_profondeur',    "DECIMAL(8,2) DEFAULT NULL AFTER `pool_largeur`");
+                $addCol('pro_quotes', 'pool_longueur_la',   "DECIMAL(8,2) DEFAULT NULL AFTER `pool_profondeur`");
+                $addCol('pro_quotes', 'pool_largeur_la',    "DECIMAL(8,2) DEFAULT NULL AFTER `pool_longueur_la`");
+                $addCol('pro_quotes', 'pool_profondeur_la', "DECIMAL(8,2) DEFAULT NULL AFTER `pool_largeur_la`");
+                $addCol('pro_quotes', 'pool_longueur_lb',   "DECIMAL(8,2) DEFAULT NULL AFTER `pool_profondeur_la`");
+                $addCol('pro_quotes', 'pool_largeur_lb',    "DECIMAL(8,2) DEFAULT NULL AFTER `pool_longueur_lb`");
+                $addCol('pro_quotes', 'pool_profondeur_lb', "DECIMAL(8,2) DEFAULT NULL AFTER `pool_largeur_lb`");
+                $addCol('pro_quotes', 'pool_longueur_ta',   "DECIMAL(8,2) DEFAULT NULL AFTER `pool_profondeur_lb`");
+                $addCol('pro_quotes', 'pool_largeur_ta',    "DECIMAL(8,2) DEFAULT NULL AFTER `pool_longueur_ta`");
+                $addCol('pro_quotes', 'pool_profondeur_ta', "DECIMAL(8,2) DEFAULT NULL AFTER `pool_largeur_ta`");
+                $addCol('pro_quotes', 'pool_longueur_tb',   "DECIMAL(8,2) DEFAULT NULL AFTER `pool_profondeur_ta`");
+                $addCol('pro_quotes', 'pool_largeur_tb',    "DECIMAL(8,2) DEFAULT NULL AFTER `pool_longueur_tb`");
+                $addCol('pro_quotes', 'pool_profondeur_tb', "DECIMAL(8,2) DEFAULT NULL AFTER `pool_largeur_tb`");
 
                 // ── Quote options (v1.4.0) ─────────────────────────────────────
                 $proPdo->exec("CREATE TABLE IF NOT EXISTS `pro_quote_options` (

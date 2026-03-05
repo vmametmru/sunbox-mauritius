@@ -22,6 +22,60 @@ import {
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
+/** Convert an external image URL to a base64 data URL scaled to targetH pixels tall.
+ * Returns { src: data URL, w: displayed width in px } so the template can set
+ * explicit width/height and html2canvas renders the image without distortion.
+ */
+async function imageUrlToBase64AtHeight(url: string, targetH: number): Promise<{ src: string; w: number }> {
+  if (!url) return { src: '', w: 0 };
+  if (url.startsWith('data:')) {
+    // Already base64 — decode dimensions from the image
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const naturalH = img.naturalHeight || img.height || targetH;
+        const naturalW = img.naturalWidth  || img.width  || targetH;
+        const scale = targetH / naturalH;
+        const w = Math.round(naturalW * scale);
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = w; canvas.height = targetH;
+          const ctx = canvas.getContext('2d');
+          if (ctx) { ctx.drawImage(img, 0, 0, w, targetH); resolve({ src: canvas.toDataURL('image/jpeg', 0.85), w }); }
+          else resolve({ src: url, w: targetH });
+        } catch { resolve({ src: url, w: targetH }); }
+      };
+      img.onerror = () => resolve({ src: '', w: 0 });
+      img.src = url;
+    });
+  }
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const naturalH = img.naturalHeight || img.height || targetH;
+        const naturalW = img.naturalWidth  || img.width  || targetH;
+        const scale = targetH / naturalH;
+        const w = Math.round(naturalW * scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = targetH;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, w, targetH);
+          resolve({ src: canvas.toDataURL('image/jpeg', 0.85), w });
+        } else {
+          resolve({ src: '', w: 0 });
+        }
+      } catch {
+        resolve({ src: '', w: 0 });
+      }
+    };
+    img.onerror = () => resolve({ src: '', w: 0 });
+    img.src = url + (url.includes('?') ? '&' : '?') + '_cb=' + Date.now();
+  });
+}
+
 /** Convert an external image URL to a base64 data URL (CORS-safe). */
 export async function imageUrlToBase64(url: string): Promise<string> {
   if (!url) return '';
@@ -205,12 +259,20 @@ export interface GeneratePdfOptions {
 export async function generateQuotePdf(opts: GeneratePdfOptions): Promise<jsPDF> {
   const { data, settings, company, logoBase64 = '', actionBaseUrl = window.location.origin } = opts;
 
-  // ── 1. Pre-convert images ──────────────────────────────────────────────────
-  const [safePhoto, safePlan] = await Promise.all([
-    data.photo_url ? imageUrlToBase64(data.photo_url) : Promise.resolve(''),
-    data.plan_url  ? imageUrlToBase64(data.plan_url)  : Promise.resolve(''),
+  // ── 1. Pre-convert images at target height (120 px) so html2canvas renders
+  //         them at the exact pixel size — no aspect-ratio distortion.
+  const IMG_H = 120;
+  const [photoResult, planResult] = await Promise.all([
+    data.photo_url ? imageUrlToBase64AtHeight(data.photo_url, IMG_H) : Promise.resolve({ src: '', w: 0 }),
+    data.plan_url  ? imageUrlToBase64AtHeight(data.plan_url,  IMG_H) : Promise.resolve({ src: '', w: 0 }),
   ]);
-  const safeData: QuotePdfData = { ...data, photo_url: safePhoto, plan_url: safePlan };
+  const safeData: QuotePdfData = {
+    ...data,
+    photo_url:      photoResult.src,
+    plan_url:       planResult.src,
+    photo_natural_w: photoResult.w || undefined,
+    plan_natural_w:  planResult.w  || undefined,
+  };
 
   // ── 2. Build main HTML ─────────────────────────────────────────────────────
   const templateFn  = getTemplate(settings.pdf_template || '1');
