@@ -940,6 +940,9 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
                             <div className="flex-1 divide-y">
                               {opts.map(opt => {
                                 const priceInfo = getOptionPriceInfo(opt.id, opt.price);
+                                const devisTTC  = Math.round(calculateTTC(priceInfo.displayPrice, vatRate));
+                                const boqTTC    = Math.round(calculateTTC(priceInfo.boqPrice, vatRate));
+                                const deltaTTC  = boqTTC - devisTTC;
                                 return (
                                   <div
                                     key={opt.id}
@@ -957,7 +960,7 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
                                           HT: Rs {Math.round(priceInfo.displayPrice).toLocaleString()}
                                         </p>
                                         <p className="text-sm text-orange-600 font-medium">
-                                          TTC: Rs {calculateTTC(priceInfo.displayPrice, vatRate).toLocaleString()}
+                                          TTC: Rs {devisTTC.toLocaleString()}
                                         </p>
                                       </div>
                                       <Switch
@@ -969,13 +972,16 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
                                     {priceInfo.hasVariance && isSelected(opt.id) && (
                                       <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded flex items-center justify-between text-sm">
                                         <div className="flex items-center gap-2 text-amber-600">
-                                          <AlertTriangle className="h-4 w-4" />
+                                          <AlertTriangle className="h-4 w-4 shrink-0" />
                                           <span>
-                                            Prix BOQ actuel: Rs {calculateTTC(priceInfo.boqPrice, vatRate).toLocaleString()}
-                                            {priceInfo.variance > 0 ? (
-                                              <span className="text-red-600 ml-1">(+Rs {calculateTTC(priceInfo.variance, vatRate).toLocaleString()})</span>
+                                            Prix TTC devis&nbsp;: Rs&nbsp;{devisTTC.toLocaleString()}
+                                            {' → '}
+                                            BOQ actuel&nbsp;: Rs&nbsp;{boqTTC.toLocaleString()}
+                                            {' '}
+                                            {deltaTTC > 0 ? (
+                                              <span className="text-red-600">(+Rs&nbsp;{deltaTTC.toLocaleString()})</span>
                                             ) : (
-                                              <span className="text-green-600 ml-1">(-Rs {calculateTTC(Math.abs(priceInfo.variance), vatRate).toLocaleString()})</span>
+                                              <span className="text-green-600">(-Rs&nbsp;{Math.abs(deltaTTC).toLocaleString()})</span>
                                             )}
                                           </span>
                                         </div>
