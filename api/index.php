@@ -1047,14 +1047,21 @@ try {
         case 'get_boq_category_lines': {
             $categoryId = (int)($body['category_id'] ?? 0);
             if ($categoryId <= 0) fail("category_id manquant");
-            
+
+            // Return direct lines of this category AND lines of its sub-categories,
+            // tagged with sub_category_name so the frontend can group them.
             $stmt = $db->prepare("
-                SELECT id, description
-                FROM boq_lines
-                WHERE category_id = ?
-                ORDER BY description ASC
+                SELECT bl.id, bl.description, NULL AS sub_category_name
+                FROM boq_lines bl
+                WHERE bl.category_id = ?
+                UNION ALL
+                SELECT bl.id, bl.description, bc.name AS sub_category_name
+                FROM boq_lines bl
+                INNER JOIN boq_categories bc ON bl.category_id = bc.id
+                WHERE bc.parent_id = ?
+                ORDER BY sub_category_name ASC, description ASC
             ");
-            $stmt->execute([$categoryId]);
+            $stmt->execute([$categoryId, $categoryId]);
             ok($stmt->fetchAll());
             break;
         }

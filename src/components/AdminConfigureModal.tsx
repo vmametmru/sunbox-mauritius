@@ -13,6 +13,7 @@ import { BOQ_OPTION_ID_OFFSET } from '@/lib/utils';
 interface BOQLine {
   id: number;
   description: string;
+  sub_category_name?: string | null;
 }
 
 interface BOQBaseCategory {
@@ -297,11 +298,13 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
             const standardOpt = mapped.find(o => o.id === pending.option_id);
             if (standardOpt) {
               matchedOptions.push(standardOpt);
-              // Always store imported price (even if same) so it displays as saved price
-              newImportedPrices.push({
-                option_id: standardOpt.id,
-                imported_price: pending.option_price,
-              });
+              // Only store imported price when positive; 0 means old broken data → fall back to BOQ price.
+              if (pending.option_price > 0) {
+                newImportedPrices.push({
+                  option_id: standardOpt.id,
+                  imported_price: pending.option_price,
+                });
+              }
             }
           }
         }
@@ -323,13 +326,35 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
     if (!model?.id) return;
     try {
       const data = await api.getBOQOptions(model.id);
+
+      // Only keep options that have a non-zero price (parent + sub-category sum).
+      // Zero-price options have no lines anywhere in their tree and are not useful to display.
+      const priced = (data as BOQOption[]).filter(o => parseFloat(o.price_ht) > 0);
+
       const mapped: ModelOption[] = await Promise.all(
-        data.map(async (o: BOQOption) => {
+        priced.map(async (o: BOQOption) => {
           let description = '';
           try {
-            const lines = await api.getBOQCategoryLines(o.id);
+            const lines: BOQLine[] = await api.getBOQCategoryLines(o.id);
             if (lines && lines.length > 0) {
-              description = lines.map((line: BOQLine) => `• ${line.description}`).join('\n');
+              // Group lines by sub_category_name so sub-categories are clearly labelled.
+              // Lines with no sub_category_name belong directly to the parent category.
+              const linesBySubCategory: Record<string, string[]> = {};
+              for (const line of lines) {
+                const key = line.sub_category_name || '';
+                if (!linesBySubCategory[key]) linesBySubCategory[key] = [];
+                linesBySubCategory[key].push(line.description);
+              }
+              const descriptionLines: string[] = [];
+              if (linesBySubCategory['']) {
+                descriptionLines.push(...linesBySubCategory[''].map(d => `• ${d}`));
+              }
+              for (const [subName, descs] of Object.entries(linesBySubCategory)) {
+                if (subName === '') continue;
+                descriptionLines.push(`${subName}:`);
+                descriptionLines.push(...descs.map(d => `  • ${d}`));
+              }
+              description = descriptionLines.join('\n');
             }
           } catch (e) {
             console.error('Error loading BOQ lines for option', o.id, e);
@@ -360,11 +385,15 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
             const boqOpt = mapped.find(o => o.name === pending.option_name);
             if (boqOpt) {
               matchedOptions.push(boqOpt);
-              // Always store imported price so it displays as saved price
-              newImportedPrices.push({
-                option_id: boqOpt.id,
-                imported_price: pending.option_price,
-              });
+              // Only store imported price when it is positive; a stored value of 0 came from an
+              // old broken correlated-subquery result and should be silently discarded so the
+              // option falls back to the current (correct) BOQ price.
+              if (pending.option_price > 0) {
+                newImportedPrices.push({
+                  option_id: boqOpt.id,
+                  imported_price: pending.option_price,
+                });
+              }
             }
           }
         }
@@ -413,10 +442,15 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
   const PRICE_VARIANCE_THRESHOLD = 0.5;
 
   // Get price info for an option - returns imported price as main if available, otherwise current BOQ price.
-  // IMPORTANT: historical quotes may have stored option_price as TTC (before the HT-storage fix was applied).
-  // We detect this by comparing the stored price against both the HT and TTC forms of the current BOQ price.
-  // Variance is only flagged when the stored price differs from BOTH interpretations, meaning the BOQ
-  // admin has genuinely changed the price since the quote was created.
+  //
+  // Handles three legacy storage scenarios:
+  //  1. Stored as BOQ HT     → diffAsHT ≈ 0 → no variance (correct)
+  //  2. Stored as BOQ TTC    → diffAsTTC ≈ 0 → no variance (normalize to HT for display)
+  //  3. Stored as discounted price (BOQ_HT * (1 - discountRatio)) → treat as no price change;
+  //     use current BOQ HT as displayPrice so the discount is applied at the total level only.
+  //  4. Stored as 0 (broken old query) → treat as missing; fall back to current BOQ price.
+  //
+  // Variance is only flagged when none of the above explain the difference.
   const getOptionPriceInfo = (optionId: number, currentBOQPrice: number): { 
     displayPrice: number; 
     boqPrice: number; 
@@ -425,14 +459,33 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
     isImported: boolean;
   } => {
     const importedPrice = getImportedPrice(optionId);
+
+    // Case 4: zero stored price means old broken data — fall back to current BOQ price silently.
+    if (importedPrice !== null && importedPrice <= 0) {
+      return { displayPrice: currentBOQPrice, boqPrice: currentBOQPrice, hasVariance: false, variance: 0, isImported: false };
+    }
+
     if (importedPrice !== null) {
       const currentBOQPriceTTC = calculateTTC(currentBOQPrice, vatRate);
       const diffAsHT  = Math.abs(importedPrice - currentBOQPrice);
       const diffAsTTC = Math.abs(importedPrice - currentBOQPriceTTC);
 
-      // No real price change: stored value matches current BOQ price (HT or TTC) within rounding tolerance
+      // Case 1 & 2: stored value matches current BOQ price (HT or TTC) within rounding tolerance
       if (diffAsHT <= PRICE_VARIANCE_THRESHOLD || diffAsTTC <= PRICE_VARIANCE_THRESHOLD) {
         return { displayPrice: currentBOQPrice, boqPrice: currentBOQPrice, hasVariance: false, variance: 0, isImported: false };
+      }
+
+      // Case 3: stored value matches the discounted BOQ price (option_price was saved after discount was applied).
+      // In that case there is no genuine BOQ price change; use current BOQ price and let the discount ratio
+      // handle the reduction at the total level.
+      if (storedDiscountRatio > 0) {
+        const discountedHT  = currentBOQPrice * (1 - storedDiscountRatio);
+        const discountedTTC = calculateTTC(currentBOQPrice, vatRate) * (1 - storedDiscountRatio);
+        const diffAsDiscountedHT  = Math.abs(importedPrice - discountedHT);
+        const diffAsDiscountedTTC = Math.abs(importedPrice - discountedTTC);
+        if (diffAsDiscountedHT <= PRICE_VARIANCE_THRESHOLD || diffAsDiscountedTTC <= PRICE_VARIANCE_THRESHOLD) {
+          return { displayPrice: currentBOQPrice, boqPrice: currentBOQPrice, hasVariance: false, variance: 0, isImported: false };
+        }
       }
 
       // Genuine variance — normalize stored price to HT for consistent display.
