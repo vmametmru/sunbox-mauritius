@@ -974,9 +974,9 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
                                         <div className="flex items-center gap-2 text-amber-600">
                                           <AlertTriangle className="h-4 w-4 shrink-0" />
                                           <span>
-                                            Prix TTC devis&nbsp;: Rs&nbsp;{devisTTC.toLocaleString()}
+                                            Prix actuel dans le devis TTC&nbsp;: Rs&nbsp;{devisTTC.toLocaleString()}
                                             {' → '}
-                                            BOQ actuel&nbsp;: Rs&nbsp;{boqTTC.toLocaleString()}
+                                            Nouveau Prix TTC&nbsp;: Rs&nbsp;{boqTTC.toLocaleString()}
                                             {' '}
                                             {deltaTTC > 0 ? (
                                               <span className="text-red-600">(+Rs&nbsp;{deltaTTC.toLocaleString()})</span>
