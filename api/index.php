@@ -951,32 +951,58 @@ try {
         case 'get_boq_options': {
             $modelId = (int)($body['model_id'] ?? 0);
             if ($modelId <= 0) fail("model_id manquant");
-            
-            // Only return root-level option categories (parent_id IS NULL).
-            // Price includes lines from the category itself AND its direct child sub-categories,
-            // so parent categories with no direct lines (but with sub-category lines) show the correct total.
+
+            // Step 1: Fetch ALL option categories (including sub-categories) with their own direct-line prices.
             $stmt = $db->prepare("
-                SELECT bc.id, bc.name, bc.display_order, bc.qty_editable, mi.file_path as image_path,
-                    (
-                        SELECT COALESCE(SUM(ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0)
-                        FROM boq_lines bl
-                        LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
-                        WHERE bl.category_id = bc.id
-                           OR bl.category_id IN (SELECT id FROM boq_categories WHERE parent_id = bc.id)
-                    ) AS price_ht
+                SELECT bc.id, bc.name, bc.parent_id, bc.display_order, bc.qty_editable,
+                       mi.file_path as image_path,
+                       COALESCE(SUM(ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS own_price_ht
                 FROM boq_categories bc
+                LEFT JOIN boq_lines bl ON bc.id = bl.category_id
+                LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
                 LEFT JOIN model_images mi ON bc.image_id = mi.id
-                WHERE bc.model_id = ? AND bc.is_option = TRUE AND bc.parent_id IS NULL
+                WHERE bc.model_id = ? AND bc.is_option = TRUE
+                GROUP BY bc.id
                 ORDER BY bc.name ASC
             ");
             $stmt->execute([$modelId]);
-            $options = $stmt->fetchAll();
-            foreach ($options as &$opt) {
-                $opt['id'] = (int)$opt['id'];
-                $opt['display_order'] = (int)$opt['display_order'];
-                $opt['qty_editable'] = (bool)($opt['qty_editable'] ?? false);
-                $opt['image_url'] = $opt['image_path'] ? '/' . ltrim($opt['image_path'], '/') : null;
-                unset($opt['image_path']);
+            $allOptCats = $stmt->fetchAll();
+
+            // Step 2: Build maps for PHP-side recursive aggregation.
+            $priceMap = []; // id -> own_price_ht (float)
+            $childMap = []; // parent_id -> [child_ids]
+            foreach ($allOptCats as $cat) {
+                $id            = (int)$cat['id'];
+                $priceMap[$id] = (float)$cat['own_price_ht'];
+                if ($cat['parent_id'] !== null) {
+                    $pid = (int)$cat['parent_id'];
+                    if (!isset($childMap[$pid])) $childMap[$pid] = [];
+                    $childMap[$pid][] = $id;
+                }
+            }
+
+            // Recursive function: returns total price for a category (own lines + all descendants).
+            $getTotalPrice = function(int $id) use (&$getTotalPrice, $priceMap, $childMap): float {
+                $total = $priceMap[$id] ?? 0.0;
+                foreach ($childMap[$id] ?? [] as $childId) {
+                    $total += $getTotalPrice($childId);
+                }
+                return $total;
+            };
+
+            // Step 3: Build result from root option categories only.
+            $options = [];
+            foreach ($allOptCats as $cat) {
+                if ($cat['parent_id'] !== null) continue; // skip child categories
+                $id = (int)$cat['id'];
+                $options[] = [
+                    'id'            => $id,
+                    'name'          => $cat['name'],
+                    'display_order' => (int)$cat['display_order'],
+                    'qty_editable'  => (bool)($cat['qty_editable'] ?? false),
+                    'image_url'     => $cat['image_path'] ? '/' . ltrim($cat['image_path'], '/') : null,
+                    'price_ht'      => round($getTotalPrice($id), 2),
+                ];
             }
             ok($options);
             break;

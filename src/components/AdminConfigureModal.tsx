@@ -408,7 +408,15 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
     return imported ? imported.imported_price : null;
   };
 
-  // Get price info for an option - returns imported price as main if available, otherwise current BOQ price
+  // Minimum absolute price difference (in Rs) to be considered a genuine BOQ price change.
+  // This absorbs rounding artefacts when comparing stored HT vs stored TTC values.
+  const PRICE_VARIANCE_THRESHOLD = 0.5;
+
+  // Get price info for an option - returns imported price as main if available, otherwise current BOQ price.
+  // IMPORTANT: historical quotes may have stored option_price as TTC (before the HT-storage fix was applied).
+  // We detect this by comparing the stored price against both the HT and TTC forms of the current BOQ price.
+  // Variance is only flagged when the stored price differs from BOTH interpretations, meaning the BOQ
+  // admin has genuinely changed the price since the quote was created.
   const getOptionPriceInfo = (optionId: number, currentBOQPrice: number): { 
     displayPrice: number; 
     boqPrice: number; 
@@ -418,11 +426,26 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
   } => {
     const importedPrice = getImportedPrice(optionId);
     if (importedPrice !== null) {
-      const variance = currentBOQPrice - importedPrice;
+      const currentBOQPriceTTC = calculateTTC(currentBOQPrice, vatRate);
+      const diffAsHT  = Math.abs(importedPrice - currentBOQPrice);
+      const diffAsTTC = Math.abs(importedPrice - currentBOQPriceTTC);
+
+      // No real price change: stored value matches current BOQ price (HT or TTC) within rounding tolerance
+      if (diffAsHT <= PRICE_VARIANCE_THRESHOLD || diffAsTTC <= PRICE_VARIANCE_THRESHOLD) {
+        return { displayPrice: currentBOQPrice, boqPrice: currentBOQPrice, hasVariance: false, variance: 0, isImported: false };
+      }
+
+      // Genuine variance — normalize stored price to HT for consistent display.
+      // Minimum-distance heuristic: if the stored value is closer to the current TTC price
+      // than to the HT price, it was likely stored as TTC (pre-fix admin code) — divide out VAT.
+      const normalizedHT = diffAsTTC < diffAsHT
+        ? importedPrice / (1 + vatRate / 100)   // stored as TTC → normalize to HT
+        : importedPrice;                          // stored as HT → keep as-is
+      const variance = currentBOQPrice - normalizedHT;
       return {
-        displayPrice: importedPrice,
+        displayPrice: normalizedHT,
         boqPrice: currentBOQPrice,
-        hasVariance: Math.abs(variance) > 0.01,
+        hasVariance: Math.abs(variance) > PRICE_VARIANCE_THRESHOLD,
         variance,
         isImported: true,
       };
@@ -448,13 +471,9 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
     toast({ title: 'Prix mis à jour', description: 'Tous les prix ont été mis à jour avec les prix BOQ actuels' });
   };
 
-  // Check if any selected options have price variance
+  // Check if any selected options have price variance (uses same normalization as getOptionPriceInfo)
   const hasAnyPriceVariance = (): boolean => {
-    return selectedOptions.some(opt => {
-      const imported = importedOptionPrices.find(p => p.option_id === opt.id);
-      if (!imported) return false;
-      return Math.abs(opt.price - imported.imported_price) > 0.01;
-    });
+    return selectedOptions.some(opt => getOptionPriceInfo(opt.id, opt.price).hasVariance);
   };
 
   // Combine regular options and BOQ options
@@ -487,14 +506,12 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
 
   const isSelected = (id: number) => selectedOptions.some(o => o.id === id);
 
-  // Calculations - use imported prices when available
-  // Note: opt.price is stored in HT, model.base_price is stored in TTC (calculated at load time)
-  
+  // Calculations - use imported prices when available, normalized to HT
   const calculateOptionsTotalHT = () => {
     return selectedOptions.reduce((sum, opt) => {
-      const importedPrice = getImportedPrice(opt.id);
-      const priceToUse = importedPrice !== null ? importedPrice : Number(opt.price || 0);
-      return sum + priceToUse;
+      // getOptionPriceInfo normalizes imported prices from TTC to HT where needed
+      const priceInfo = getOptionPriceInfo(opt.id, opt.price);
+      return sum + priceInfo.displayPrice;
     }, 0);
   };
   
@@ -579,14 +596,13 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
         customer_message: customerMessage || '',
         contact_id: contactId || undefined,
         selected_options: selectedOptions.map(opt => {
-          // Store option prices as HT (consistent with ConfigureModal / public configurator).
-          // This ensures correct variance display on next edit: both values will be HT.
-          const importedPrice = getImportedPrice(opt.id);
-          const priceToUse = importedPrice !== null ? importedPrice : opt.price;
+          // Use getOptionPriceInfo to get the normalized HT price (handles TTC-stored legacy quotes).
+          // This ensures the saved option_price is always HT for consistent future variance display.
+          const priceInfo = getOptionPriceInfo(opt.id, opt.price);
           return {
             option_id: opt.id,
             option_name: opt.name,
-            option_price: Math.round(priceToUse), // HT
+            option_price: Math.round(priceInfo.displayPrice), // always HT
           };
         }),
       };
