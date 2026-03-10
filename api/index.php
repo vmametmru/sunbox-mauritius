@@ -11,7 +11,7 @@ define('PRO_DB_SCHEMA_VERSION', '1.8.0');
 
 // Sunbox main database schema version.
 // Increment when new tables or columns are added.
-define('SUNBOX_DB_SCHEMA_VERSION', '2.7.0');
+define('SUNBOX_DB_SCHEMA_VERSION', '2.8.0');
 
 $action = $_GET['action'] ?? '';
 $body   = getRequestBody();
@@ -192,6 +192,38 @@ try {
                     NOT NULL DEFAULT 'open'");
                 $messages[] = "Colonne modifiée : quotes.status (ENUM étendu avec 'open','validated')";
             }
+
+            // ── v2.8.0 ── Professional themes + theme_id on professional_profiles ─
+            $createTable('professional_themes', "
+                CREATE TABLE `professional_themes` (
+                    `id` INT AUTO_INCREMENT PRIMARY KEY,
+                    `name` VARCHAR(255) NOT NULL DEFAULT 'Nouveau Thème',
+                    `logo_position` ENUM('left','center','right') NOT NULL DEFAULT 'left',
+                    `header_height` ENUM('small','medium','large','hero') NOT NULL DEFAULT 'medium',
+                    `header_bg_color` VARCHAR(20) NOT NULL DEFAULT '#FFFFFF',
+                    `header_text_color` VARCHAR(20) NOT NULL DEFAULT '#1A365D',
+                    `font_family` VARCHAR(100) NOT NULL DEFAULT 'Inter',
+                    `nav_position` ENUM('left','center','right') NOT NULL DEFAULT 'right',
+                    `nav_has_background` TINYINT(1) NOT NULL DEFAULT 1,
+                    `nav_bg_color` VARCHAR(20) NOT NULL DEFAULT '#FFFFFF',
+                    `nav_text_color` VARCHAR(20) NOT NULL DEFAULT '#1A365D',
+                    `nav_hover_color` VARCHAR(20) NOT NULL DEFAULT '#F97316',
+                    `button_color` VARCHAR(20) NOT NULL DEFAULT '#F97316',
+                    `button_text_color` VARCHAR(20) NOT NULL DEFAULT '#FFFFFF',
+                    `footer_bg_color` VARCHAR(20) NOT NULL DEFAULT '#1A365D',
+                    `footer_text_color` VARCHAR(20) NOT NULL DEFAULT '#FFFFFF',
+                    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            ");
+            // Insert default theme (mirrors current Sunbox public layout exactly)
+            $defaultExists = $db->query("SELECT COUNT(*) FROM `professional_themes` WHERE id = 1")->fetchColumn();
+            if (!$defaultExists) {
+                $db->exec("INSERT INTO `professional_themes` (id,name,logo_position,header_height,header_bg_color,header_text_color,font_family,nav_position,nav_has_background,nav_bg_color,nav_text_color,nav_hover_color,button_color,button_text_color,footer_bg_color,footer_text_color)
+                    VALUES (1,'Thème Sunbox (Défaut)','left','medium','#FFFFFF','#1A365D','Inter','right',1,'#FFFFFF','#1A365D','#F97316','#F97316','#FFFFFF','#1A365D','#FFFFFF')");
+                $messages[] = "Thème Sunbox par défaut inséré.";
+            }
+            $addCol('professional_profiles', 'theme_id', "INT NULL DEFAULT NULL");
 
             // ── Schema version table (always create / update) ─────────────────
             $db->exec("CREATE TABLE IF NOT EXISTS `db_schema_version` (
@@ -3126,9 +3158,12 @@ try {
                        pp.company_name, pp.address, pp.vat_number, pp.brn_number,
                        pp.phone, pp.logo_url, pp.sunbox_margin_percent, pp.credits,
                        COALESCE(pp.model_request_cost, 5000) AS model_request_cost,
-                       pp.is_active, pp.domain, pp.api_token, pp.db_name
+                       pp.is_active, pp.domain, pp.api_token, pp.db_name,
+                       pp.theme_id,
+                       pt.name AS theme_name
                 FROM users u
                 LEFT JOIN professional_profiles pp ON pp.user_id = u.id
+                LEFT JOIN professional_themes pt ON pt.id = pp.theme_id
                 WHERE u.role = 'professional'
                 ORDER BY u.name ASC
             ");
@@ -3202,6 +3237,7 @@ try {
             if (array_key_exists('sunbox_margin_percent', $body)) { $profSets[] = 'sunbox_margin_percent = ?'; $profParams[] = (float)$body['sunbox_margin_percent']; }
             if (array_key_exists('model_request_cost', $body)) { $profSets[] = 'model_request_cost = ?'; $profParams[] = (float)$body['model_request_cost']; }
             if (array_key_exists('is_active', $body)) { $profSets[] = 'is_active = ?'; $profParams[] = (int)(bool)$body['is_active']; }
+            if (array_key_exists('theme_id', $body)) { $profSets[] = 'theme_id = ?'; $profParams[] = $body['theme_id'] ? (int)$body['theme_id'] : null; }
             if (!empty($profSets)) {
                 $profSets[] = 'updated_at = NOW()';
                 $profParams[] = $id;
@@ -3429,9 +3465,16 @@ try {
 
             $stmt = $db->prepare("
                 SELECT pp.domain, pp.company_name, pp.db_name, pp.logo_url,
-                       u.password_hash
+                       u.password_hash,
+                       pp.theme_id,
+                       pt.logo_position, pt.header_height, pt.header_bg_color,
+                       pt.header_text_color, pt.font_family, pt.nav_position,
+                       pt.nav_has_background, pt.nav_bg_color, pt.nav_text_color,
+                       pt.nav_hover_color, pt.button_color, pt.button_text_color,
+                       pt.footer_bg_color, pt.footer_text_color
                 FROM professional_profiles pp
                 JOIN users u ON u.id = pp.user_id
+                LEFT JOIN professional_themes pt ON pt.id = pp.theme_id
                 WHERE pp.user_id = ?
             ");
             $stmt->execute([$userId]);
@@ -3542,11 +3585,33 @@ try {
                         $apiUrlJson  = json_encode($proBaseUrl . '/api', JSON_HEX_TAG | JSON_HEX_AMP);
                         $logoJson    = json_encode($logoUrlAbs,   JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE);
                         $companyJson = json_encode($companyName,  JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE);
+                        // Build theme object (null fields fall back to defaults in PublicLayout)
+                        $themeData = null;
+                        if (!empty($profile['theme_id'])) {
+                            $themeData = [
+                                'logo_position'      => $profile['logo_position'],
+                                'header_height'      => $profile['header_height'],
+                                'header_bg_color'    => $profile['header_bg_color'],
+                                'header_text_color'  => $profile['header_text_color'],
+                                'font_family'        => $profile['font_family'],
+                                'nav_position'       => $profile['nav_position'],
+                                'nav_has_background' => (bool)$profile['nav_has_background'],
+                                'nav_bg_color'       => $profile['nav_bg_color'],
+                                'nav_text_color'     => $profile['nav_text_color'],
+                                'nav_hover_color'    => $profile['nav_hover_color'],
+                                'button_color'       => $profile['button_color'],
+                                'button_text_color'  => $profile['button_text_color'],
+                                'footer_bg_color'    => $profile['footer_bg_color'],
+                                'footer_text_color'  => $profile['footer_text_color'],
+                            ];
+                        }
+                        $themeJson = json_encode($themeData, JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE);
                         $proConfig   = '<script>'
                             . 'window.__API_BASE_URL__='    . $apiUrlJson   . ';'
                             . 'window.__PRO_SITE__=true;'
                             . 'window.__PRO_LOGO_URL__='    . $logoJson    . ';'
                             . 'window.__PRO_COMPANY_NAME__=' . $companyJson  . ';'
+                            . 'window.__PRO_THEME__='        . $themeJson   . ';'
                             . '</script>';
                         $closeHeadPos = stripos($indexHtml, '</head>');
                         if ($closeHeadPos !== false) {
@@ -4137,6 +4202,98 @@ try {
                 $db->prepare("UPDATE professional_model_requests SET " . implode(', ', $sets) . " WHERE id = ?")->execute($params);
             }
             ok();
+            break;
+        }
+
+        // ── Pro Themes CRUD ───────────────────────────────────────────────────────
+
+        case 'get_pro_themes': {
+            $stmt = $db->query("SELECT * FROM professional_themes ORDER BY id ASC");
+            ok($stmt->fetchAll());
+            break;
+        }
+
+        case 'create_pro_theme': {
+            requireAdmin();
+            validateRequired($body, ['name']);
+            $stmt = $db->prepare("
+                INSERT INTO professional_themes
+                    (name, logo_position, header_height, header_bg_color, header_text_color,
+                     font_family, nav_position, nav_has_background, nav_bg_color,
+                     nav_text_color, nav_hover_color, button_color, button_text_color,
+                     footer_bg_color, footer_text_color)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ");
+            $stmt->execute([
+                $body['name'],
+                $body['logo_position']      ?? 'left',
+                $body['header_height']      ?? 'medium',
+                $body['header_bg_color']    ?? '#FFFFFF',
+                $body['header_text_color']  ?? '#1A365D',
+                $body['font_family']        ?? 'Inter',
+                $body['nav_position']       ?? 'right',
+                (int)($body['nav_has_background'] ?? 1),
+                $body['nav_bg_color']       ?? '#FFFFFF',
+                $body['nav_text_color']     ?? '#1A365D',
+                $body['nav_hover_color']    ?? '#F97316',
+                $body['button_color']       ?? '#F97316',
+                $body['button_text_color']  ?? '#FFFFFF',
+                $body['footer_bg_color']    ?? '#1A365D',
+                $body['footer_text_color']  ?? '#FFFFFF',
+            ]);
+            ok(['id' => (int)$db->lastInsertId()]);
+            break;
+        }
+
+        case 'update_pro_theme': {
+            requireAdmin();
+            validateRequired($body, ['id']);
+            $sets   = [];
+            $params = [];
+            $fields = ['name','logo_position','header_height','header_bg_color','header_text_color',
+                       'font_family','nav_position','nav_bg_color','nav_text_color','nav_hover_color',
+                       'button_color','button_text_color','footer_bg_color','footer_text_color'];
+            foreach ($fields as $f) {
+                if (array_key_exists($f, $body)) { $sets[] = "`{$f}` = ?"; $params[] = $body[$f]; }
+            }
+            if (array_key_exists('nav_has_background', $body)) {
+                $sets[] = '`nav_has_background` = ?';
+                $params[] = (int)(bool)$body['nav_has_background'];
+            }
+            if (!empty($sets)) {
+                $sets[] = '`updated_at` = NOW()';
+                $params[] = (int)$body['id'];
+                $db->prepare("UPDATE professional_themes SET " . implode(', ', $sets) . " WHERE id = ?")->execute($params);
+            }
+            ok();
+            break;
+        }
+
+        case 'delete_pro_theme': {
+            requireAdmin();
+            validateRequired($body, ['id']);
+            $id = (int)$body['id'];
+            if ($id === 1) { fail('Le thème par défaut Sunbox ne peut pas être supprimé.', 403); }
+            // Unassign from pro users before deleting
+            $db->prepare("UPDATE professional_profiles SET theme_id = NULL WHERE theme_id = ?")->execute([$id]);
+            $db->prepare("DELETE FROM professional_themes WHERE id = ?")->execute([$id]);
+            ok();
+            break;
+        }
+
+        case 'get_pro_theme': {
+            // Returns the full theme object for a pro user (used during deploy / live preview).
+            validateRequired($body, ['user_id']);
+            $stmt = $db->prepare("
+                SELECT pt.*
+                FROM professional_profiles pp
+                JOIN professional_themes pt ON pt.id = pp.theme_id
+                WHERE pp.user_id = ?
+                LIMIT 1
+            ");
+            $stmt->execute([(int)$body['user_id']]);
+            $theme = $stmt->fetch();
+            ok($theme ?: null);
             break;
         }
 

@@ -1733,6 +1733,35 @@ try {
             break;
         }
 
+        // ── Header Images (pro user manages their slideshow images) ──────────────
+
+        case 'get_header_images': {
+            $db = getDB();
+            $stmt = $db->prepare("SELECT setting_value FROM pro_settings WHERE setting_key = 'header_images' LIMIT 1");
+            $stmt->execute();
+            $row = $stmt->fetch();
+            $images = $row ? json_decode($row['setting_value'], true) : [];
+            ok($images ?: []);
+            break;
+        }
+
+        case 'update_header_images': {
+            requireAdmin();
+            $db = getDB();
+            $images = $body['images'] ?? [];
+            if (!is_array($images)) fail('Format images invalide.', 400);
+            // Sanitize: keep only string URLs
+            $clean = array_values(array_filter(array_map('strval', $images)));
+            $json  = json_encode($clean, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $db->prepare("
+                INSERT INTO pro_settings (setting_key, setting_value, setting_group)
+                VALUES ('header_images', ?, 'theme')
+                ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()
+            ")->execute([$json]);
+            ok(['images' => $clean]);
+            break;
+        }
+
         default:
             fail('Action inconnue.', 400);
     }

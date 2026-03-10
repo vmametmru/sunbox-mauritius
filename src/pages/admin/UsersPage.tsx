@@ -15,6 +15,7 @@ import {
   CheckCircle2,
   AlertTriangle,
   RefreshCw,
+  Palette,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -28,7 +29,7 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { api } from '@/lib/api';
+import { api, ProTheme } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 
 /* ======================================================
@@ -52,6 +53,8 @@ interface ProUser {
   api_token?: string;
   logo_url?: string;
   db_name?: string;
+  theme_id?: number | null;
+  theme_name?: string;
 }
 
 interface VersionStatus {
@@ -127,6 +130,7 @@ export default function UsersPage() {
   const [enabledModelIds, setEnabledModelIds] = useState<Set<number>>(new Set());
   const [loadingModels, setLoadingModels] = useState(false);
   const [versionStatuses, setVersionStatuses] = useState<Map<number, VersionStatus>>(new Map());
+  const [allThemes, setAllThemes] = useState<ProTheme[]>([]);
   const logoInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
@@ -165,6 +169,9 @@ export default function UsersPage() {
     }).catch((err: any) => {
       console.error('Erreur chargement modèles:', err);
     });
+    api.getProThemes().then((data: any) => {
+      setAllThemes(Array.isArray(data) ? data : []);
+    }).catch(() => {});
   }, []);
 
   /* ======================================================
@@ -474,6 +481,12 @@ function VersionChip({ ok, checking, label }: { ok: boolean; checking: boolean; 
                         <span className="text-blue-600">{user.domain}</span>
                       </div>
                     )}
+                    {user.theme_name && (
+                      <div className="flex items-center gap-2">
+                        <Palette className="h-4 w-4 text-gray-400" />
+                        <span className="text-purple-600">{user.theme_name}</span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Version status chips — shown in card when domain is configured */}
@@ -695,6 +708,30 @@ function VersionChip({ ok, checking, label }: { ok: boolean; checking: boolean; 
                   <Label>Compte actif</Label>
                 </div>
               )}
+
+              {/* Theme Selection */}
+              <div className="border rounded-lg p-4 space-y-3 bg-purple-50">
+                <p className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                  <Palette className="h-4 w-4 text-purple-500" />
+                  Thème du site professionnel
+                </p>
+                <p className="text-xs text-gray-500">
+                  Sélectionnez le thème à appliquer sur le site de ce professionnel. Redéployez après tout changement.
+                </p>
+                <div>
+                  <Label>Thème assigné</Label>
+                  <select
+                    value={editingUser.theme_id ?? ''}
+                    onChange={(e) => setEditingUser({ ...editingUser, theme_id: e.target.value ? Number(e.target.value) : null })}
+                    className="w-full border rounded-md px-3 py-2 text-sm mt-1 bg-white"
+                  >
+                    <option value="">— Thème par défaut Sunbox —</option>
+                    {allThemes.map((t) => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
 
               {/* Model Selection */}
               <div className="border rounded-lg p-4 space-y-3 bg-gray-50">

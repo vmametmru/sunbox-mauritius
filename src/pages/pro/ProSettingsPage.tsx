@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { CreditCard, TrendingUp, Upload } from 'lucide-react';
+import { CreditCard, TrendingUp, Upload, ImageIcon, Trash2, GripVertical } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 
@@ -42,7 +42,11 @@ export default function ProSettingsPage() {
   const [saving, setSaving] = useState(false);
   const [buyingPack, setBuyingPack] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [headerImages, setHeaderImages] = useState<string[]>([]);
+  const [uploadingHeader, setUploadingHeader] = useState(false);
+  const [savingImages, setSavingImages] = useState(false);
   const logoInputRef = useRef<HTMLInputElement>(null);
+  const headerInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -59,6 +63,13 @@ export default function ProSettingsPage() {
       setTransactions(creditsData.transactions ?? []);
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    }
+    // Load header images (best-effort — only available on deployed pro sites)
+    try {
+      const imgs = await api.getHeaderImages();
+      setHeaderImages(Array.isArray(imgs) ? imgs : []);
+    } catch {
+      // Not available on Sunbox admin — ignore silently
     }
   };
 
@@ -114,6 +125,47 @@ export default function ProSettingsPage() {
       toast({ title: 'Erreur upload logo', description: err.message, variant: 'destructive' });
     } finally {
       setUploadingLogo(false);
+    }
+  };
+
+  const handleHeaderImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    if (files.length === 0) return;
+    try {
+      setUploadingHeader(true);
+      const uploaded: string[] = [];
+      for (const file of files) {
+        const formData = new FormData();
+        formData.append('file', file);
+        const r = await fetch('/api/upload_sketch.php', { method: 'POST', body: formData, credentials: 'include' });
+        const j = await r.json();
+        if (!r.ok || j.error) throw new Error(j.error || 'Upload échoué');
+        uploaded.push(j.url as string);
+      }
+      const updated = [...headerImages, ...uploaded];
+      setHeaderImages(updated);
+      toast({ title: `${uploaded.length} image(s) uploadée(s)` });
+    } catch (err: any) {
+      toast({ title: 'Erreur upload image header', description: err.message, variant: 'destructive' });
+    } finally {
+      setUploadingHeader(false);
+      if (headerInputRef.current) headerInputRef.current.value = '';
+    }
+  };
+
+  const removeHeaderImage = (idx: number) => {
+    setHeaderImages((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const saveHeaderImages = async () => {
+    try {
+      setSavingImages(true);
+      await api.updateHeaderImages(headerImages);
+      toast({ title: 'Images du header sauvegardées' });
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setSavingImages(false);
     }
   };
 
@@ -246,6 +298,84 @@ export default function ProSettingsPage() {
               ))}
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Header images */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <ImageIcon className="h-5 w-5 text-orange-500" />
+            Photos du Header
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-gray-500">
+            Ajoutez plusieurs photos qui s'afficheront dans le bandeau supérieur de votre site (carrousel). L'ordre d'affichage suit la liste ci-dessous.
+          </p>
+
+          {/* Image grid */}
+          {headerImages.length > 0 ? (
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              {headerImages.map((url, idx) => (
+                <div key={idx} className="relative group rounded-lg overflow-hidden border bg-gray-50 aspect-video">
+                  <img src={url} alt={`Header ${idx + 1}`} className="w-full h-full object-cover" />
+                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => removeHeaderImage(idx)}
+                      className="bg-red-500 text-white rounded-full p-1.5 hover:bg-red-600 transition-colors"
+                      title="Supprimer"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                  <div className="absolute bottom-1 left-1 bg-black/50 text-white text-xs rounded px-1">
+                    {idx + 1}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="border-2 border-dashed rounded-lg p-8 text-center text-gray-400">
+              <ImageIcon className="h-10 w-10 mx-auto mb-2 opacity-30" />
+              <p className="text-sm">Aucune photo ajoutée</p>
+            </div>
+          )}
+
+          <div className="flex gap-3 items-center pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => headerInputRef.current?.click()}
+              disabled={uploadingHeader}
+              className="gap-2"
+            >
+              <Upload className="h-4 w-4" />
+              {uploadingHeader ? 'Upload...' : 'Ajouter des photos'}
+            </Button>
+            <input
+              ref={headerInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              multiple
+              className="hidden"
+              onChange={handleHeaderImageUpload}
+            />
+            {headerImages.length > 0 && (
+              <Button
+                className="bg-orange-500 hover:bg-orange-600 gap-2"
+                onClick={saveHeaderImages}
+                disabled={savingImages}
+              >
+                <GripVertical className="h-4 w-4" />
+                {savingImages ? 'Sauvegarde...' : "Sauvegarder l'ordre"}
+              </Button>
+            )}
+          </div>
+          <p className="text-xs text-gray-400">
+            Formats acceptés : JPG, PNG, WEBP. Résolution recommandée : 1920×600 px minimum.
+          </p>
         </CardContent>
       </Card>
     </div>

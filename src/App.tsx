@@ -42,6 +42,7 @@ import PoolBOQTemplatePage from "./pages/admin/PoolBOQTemplatePage";
 import DevIdeasPage from "./pages/admin/DevIdeasPage";
 import DiscountsPage from "./pages/admin/DiscountsPage";
 import UsersPage from "./pages/admin/UsersPage";
+import ThemesPage from "./pages/admin/ThemesPage";
 import DeployUpdatePage from "./pages/admin/DeployUpdatePage";
 import DebugPage from "./pages/admin/DebugPage";
 import AdminModelRequestsPage from "./pages/admin/AdminModelRequestsPage";
@@ -110,6 +111,7 @@ const App = () => (
                   <Route path="dev-ideas" element={<DevIdeasPage />} />
                   <Route path="discounts" element={<DiscountsPage />} />
                   <Route path="users"    element={<UsersPage />} />
+                  <Route path="themes"   element={<ThemesPage />} />
                   <Route path="deploy"   element={<DeployUpdatePage />} />
                   <Route path="debug"    element={<DebugPage />} />
                   <Route path="model-requests" element={<AdminModelRequestsPage />} />

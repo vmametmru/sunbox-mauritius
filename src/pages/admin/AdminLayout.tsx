@@ -29,6 +29,7 @@ import {
   RefreshCw,
   Bug,
   Cpu,
+  Palette,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -80,6 +81,7 @@ const navItems: NavItem[] = [
     key: 'parametres',
     children: [
       { icon: Users, label: 'Utilisateurs', path: '/admin/users' },
+      { icon: Palette, label: 'Thèmes', path: '/admin/themes' },
       { icon: Package, label: 'Modèles', path: '/admin/models' },
       { icon: Tag, label: 'Remises', path: '/admin/discounts' },
       { icon: ImageIcon, label: 'Photos', path: '/admin/media' },
@@ -102,7 +104,7 @@ const groupPaths: Record<string, string[]> = {
   commerce: ['/admin/quotes', '/admin/reports', '/admin/model-requests'],
   contacts: ['/admin/contacts', '/admin/suppliers'],
   parametres: [
-    '/admin/users', '/admin/models', '/admin/discounts', '/admin/media',
+    '/admin/users', '/admin/themes', '/admin/models', '/admin/discounts', '/admin/media',
     '/admin/boq', '/admin/pool-prices', '/admin/pool-variables', '/admin/pool-template',
     '/admin/email', '/admin/payments', '/admin/site', '/admin/deploy', '/admin/debug',
   ],
