@@ -50,8 +50,9 @@ const proSiteNavGroups = [
   { icon: LayoutDashboard, label: 'Dashboard', path: '/pro', isItem: true as const },
   { icon: ShoppingCart, label: 'Commerce', key: 'commerce', isItem: false as const,
     children: [
-      { icon: FileText,      label: 'Devis',            path: '/pro/quotes' },
-      { icon: ClipboardList, label: "Rapports d'Achat", path: '/pro/reports' },
+      { icon: FileText,      label: 'Devis',                 path: '/pro/quotes' },
+      { icon: ClipboardList, label: "Rapports d'Achat",      path: '/pro/reports' },
+      { icon: Cpu,           label: 'Demandes de Modèles',   path: '/pro/model-request' },
     ],
   },
   {

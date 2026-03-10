@@ -28,6 +28,7 @@ import {
   ClipboardList,
   RefreshCw,
   Bug,
+  Cpu,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -59,8 +60,9 @@ const navItems: NavItem[] = [
     label: 'Commerce',
     key: 'commerce',
     children: [
-      { icon: FileText,      label: 'Devis',              path: '/admin/quotes' },
-      { icon: ClipboardList, label: "Rapports d'Achat",   path: '/admin/reports' },
+      { icon: FileText,      label: 'Devis',                 path: '/admin/quotes' },
+      { icon: ClipboardList, label: "Rapports d'Achat",      path: '/admin/reports' },
+      { icon: Cpu,           label: 'Demandes de Modèles',   path: '/admin/model-requests' },
     ],
   },
   {
@@ -97,7 +99,7 @@ const navItems: NavItem[] = [
 ];
 
 const groupPaths: Record<string, string[]> = {
-  commerce: ['/admin/quotes', '/admin/reports'],
+  commerce: ['/admin/quotes', '/admin/reports', '/admin/model-requests'],
   contacts: ['/admin/contacts', '/admin/suppliers'],
   parametres: [
     '/admin/users', '/admin/models', '/admin/discounts', '/admin/media',

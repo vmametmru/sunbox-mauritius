@@ -1463,14 +1463,24 @@ try {
                 ");
                 $txStmt->execute([SUNBOX_USER_ID]);
                 $transactions = $txStmt->fetchAll();
+
+                $mrCountStmt = $sdb->prepare("SELECT COUNT(*) FROM professional_model_requests WHERE user_id = ?");
+                $mrCountStmt->execute([SUNBOX_USER_ID]);
+                $totalModelRequests = (int)$mrCountStmt->fetchColumn();
+
+                $db = getDB();
+                $totalQuotes = (int)$db->query("SELECT COUNT(*) FROM pro_quotes")->fetchColumn();
+
                 ok([
-                    'credits'      => $balance['credits'],
-                    'catalog_mode' => $balance['catalog_mode'],
-                    'transactions' => $transactions,
+                    'credits'               => $balance['credits'],
+                    'catalog_mode'          => $balance['catalog_mode'],
+                    'transactions'          => $transactions,
+                    'total_quotes'          => $totalQuotes,
+                    'total_model_requests'  => $totalModelRequests,
                 ]);
             } catch (\Throwable $e) {
                 error_log('get_pro_credits error: ' . $e->getMessage());
-                ok(['credits' => 0, 'catalog_mode' => true, 'transactions' => []]);
+                ok(['credits' => 0, 'catalog_mode' => true, 'transactions' => [], 'total_quotes' => 0, 'total_model_requests' => 0]);
             }
             break;
         }
