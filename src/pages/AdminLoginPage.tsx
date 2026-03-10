@@ -4,6 +4,9 @@ import { Navigate, useLocation, useNavigate } from "react-router-dom";
 // Allow skipping login form in development mode - must be explicitly enabled via env variable
 const DEV_BYPASS_AUTH = import.meta.env.DEV && import.meta.env.VITE_BYPASS_AUTH === 'true';
 
+// On deployed pro sites, the admin login page must not be accessible.
+const IS_PRO_SITE = typeof window !== 'undefined' && !!(window as any).__PRO_SITE__;
+
 export default function AdminLoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -11,6 +14,11 @@ export default function AdminLoginPage() {
   const location = useLocation() as any;
 
   const from = location.state?.from?.pathname || "/admin";
+
+  // On deployed pro sites redirect to pro login — admin login is Sunbox-only.
+  if (IS_PRO_SITE) {
+    return <Navigate to="/pro-login" replace />;
+  }
 
   // In development mode with bypass enabled, skip login form entirely
   if (DEV_BYPASS_AUTH) {

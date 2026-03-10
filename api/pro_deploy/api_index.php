@@ -1512,6 +1512,88 @@ try {
             break;
         }
 
+        // ── MODEL REQUESTS ─────────────────────────────────────────────────────
+        // Note: requireAdmin() on the pro site checks $_SESSION['is_pro_user']
+        // (see api_config.php) — it is the pro-user authentication gate.
+        case 'get_model_requests': {
+            requireAdmin();
+            if (!SUNBOX_USER_ID) { fail('User non configuré', 400); }
+            $sdb  = getSunboxDB();
+            $stmt = $sdb->prepare("SELECT * FROM professional_model_requests WHERE user_id = ? ORDER BY created_at DESC");
+            $stmt->execute([SUNBOX_USER_ID]);
+            ok($stmt->fetchAll());
+            break;
+        }
+
+        case 'create_model_request': {
+            requireAdmin();
+            if (!SUNBOX_USER_ID) { fail('User non configuré', 400); }
+            validateRequired($body, ['description']);
+            $sdb = getSunboxDB();
+            $sdb->beginTransaction();
+            try {
+                // Fetch credits and configurable cost atomically
+                $profStmt = $sdb->prepare(
+                    "SELECT credits, COALESCE(model_request_cost, 5000) AS cost
+                     FROM professional_profiles WHERE user_id = ? FOR UPDATE"
+                );
+                $profStmt->execute([SUNBOX_USER_ID]);
+                $row     = $profStmt->fetch();
+                $credits = (float)($row['credits'] ?? 0);
+                $cost    = (float)($row['cost']    ?? 5000);
+                if ($credits < $cost) {
+                    $sdb->rollBack();
+                    fail('Crédits insuffisants (' . number_format($cost, 0, '.', ' ') . ' Rs requis)', 402);
+                }
+                $newBalance = $credits - $cost;
+                $sdb->prepare("UPDATE professional_profiles SET credits = ?, updated_at = NOW() WHERE user_id = ?")
+                    ->execute([$newBalance, SUNBOX_USER_ID]);
+                $sdb->prepare("
+                    INSERT INTO professional_model_requests
+                        (user_id, description, container_20ft_count, container_40ft_count, bedrooms, bathrooms, sketch_url)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                ")->execute([
+                    SUNBOX_USER_ID,
+                    $body['description'],
+                    (int)($body['container_20ft_count'] ?? 0),
+                    (int)($body['container_40ft_count'] ?? 0),
+                    (int)($body['bedrooms']  ?? 0),
+                    (int)($body['bathrooms'] ?? 0),
+                    $body['sketch_url'] ?? null,
+                ]);
+                $reqId = (int)$sdb->lastInsertId();
+                $sdb->prepare("
+                    INSERT INTO professional_credit_transactions (user_id, amount, reason, balance_after)
+                    VALUES (?, ?, 'model_request', ?)
+                ")->execute([SUNBOX_USER_ID, -$cost, $newBalance]);
+                $sdb->commit();
+                ok(['id' => $reqId, 'credits' => $newBalance, 'cost' => $cost]);
+            } catch (\Throwable $e) {
+                try { $sdb->rollBack(); } catch (\Throwable $ignored) {}
+                throw $e;
+            }
+            break;
+        }
+
+        case 'update_model_request': {
+            requireAdmin();
+            validateRequired($body, ['id']);
+            $reqId  = (int)$body['id'];
+            $sdb    = getSunboxDB();
+            $sets   = [];
+            $setParams = [];
+            if (array_key_exists('status',      $body)) { $sets[] = 'status = ?';      $setParams[] = $body['status']; }
+            if (array_key_exists('admin_notes', $body)) { $sets[] = 'admin_notes = ?'; $setParams[] = $body['admin_notes']; }
+            if (!empty($sets)) {
+                $sets[] = 'updated_at = NOW()';
+                // WHERE id = ? AND user_id = ? — scoped to this pro user only
+                $sdb->prepare("UPDATE professional_model_requests SET " . implode(', ', $sets) . " WHERE id = ? AND user_id = ?")
+                    ->execute(array_merge($setParams, [$reqId, SUNBOX_USER_ID]));
+            }
+            ok();
+            break;
+        }
+
         default:
             fail('Action inconnue.', 400);
     }
