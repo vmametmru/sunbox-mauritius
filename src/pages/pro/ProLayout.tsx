@@ -20,6 +20,7 @@ import {
   ChevronDown,
   ChevronRight,
   ClipboardList,
+  Bug,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -41,6 +42,7 @@ const sunboxNavItems = [
   { icon: Package,         label: 'Mes Modèles',     path: '/pro/models' },
   { icon: Cpu,             label: 'Demande de Modèle', path: '/pro/model-request' },
   { icon: Settings,        label: 'Mon Profil',      path: '/pro/settings' },
+  { icon: Bug,             label: 'Débogage',        path: '/pro/debug' },
 ];
 
 // ── Deployed pro site admin nav (when window.__PRO_SITE__ === true) ───────────
@@ -65,6 +67,7 @@ const proSiteNavGroups = [
       { icon: Mail,        label: 'Email',     path: '/pro/email' },
       { icon: CreditCard,  label: 'Paiements', path: '/pro/payments' },
       { icon: Settings,    label: 'Site',      path: '/pro/site' },
+      { icon: Bug,         label: 'Débogage',  path: '/pro/debug' },
     ],
   },
 ];
@@ -202,10 +205,7 @@ export default function ProLayout() {
 
   // ── Sidebar header content ───────────────────────────────────────────────
   const creditRules = [
-    { label: 'Créer un devis',       cost: '500 Rs' },
-    { label: 'Valider + email',      cost: '1 000 Rs' },
-    { label: 'Demande BOQ',          cost: '1 500 Rs' },
-    { label: 'Demande de modèle',    cost: '3 000 Rs' },
+    { label: 'Demande de modèle', cost: '5 000 Rs' },
   ];
 
   return (

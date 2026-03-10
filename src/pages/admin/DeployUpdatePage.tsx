@@ -86,7 +86,7 @@ export default function DeployUpdatePage() {
         setTimeout(() => {
           // Navigate to admin dashboard first (updates the history entry)
           // then hard-reload so all cached JS/CSS bundles are replaced
-          window.location.href = '/admin';
+          window.location.href = '/#/admin';
         }, 3000);
       } else {
         toast({ title: 'Déploiement partiel', description: 'Un seul artefact déployé.' });

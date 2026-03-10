@@ -29,13 +29,11 @@ interface Transaction {
   created_at: string;
 }
 
+const VISIBLE_REASONS = new Set(['model_request', 'pack_purchase']);
+
 const reasonLabels: Record<string, string> = {
-  pack_purchase: 'Achat pack',
-  quote_created: 'Devis créé',
-  quote_validated: 'Devis validé',
-  boq_requested: 'BOQ demandé',
-  model_request: 'Demande modèle',
-  production_deduction: 'Déduction production',
+  pack_purchase:  'Crédit ajouté',
+  model_request:  'Demande modèle',
 };
 
 export default function ProSettingsPage() {
@@ -228,11 +226,11 @@ export default function ProSettingsPage() {
           <CardTitle>Historique des crédits</CardTitle>
         </CardHeader>
         <CardContent>
-          {!transactions.length ? (
+          {!transactions.filter((tx) => VISIBLE_REASONS.has(tx.reason)).length ? (
             <p className="text-gray-400 text-sm">Aucune transaction.</p>
           ) : (
             <div className="space-y-2">
-              {transactions.map((tx) => (
+              {transactions.filter((tx) => VISIBLE_REASONS.has(tx.reason)).map((tx) => (
                 <div key={tx.id} className="flex items-center justify-between py-2 border-b last:border-0">
                   <div>
                     <p className="text-sm font-medium">{reasonLabels[tx.reason] ?? tx.reason}</p>

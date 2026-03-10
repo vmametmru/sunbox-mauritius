@@ -3,7 +3,8 @@ declare(strict_types=1);
 
 /**
  * Pro Site – Authentication handler
- * Handles login/logout/me for the deployed pro site admin portal.
+ * Handles login/logout/me for the deployed pro site portal.
+ * Only pro-user login is allowed (no admin login).
  * Password is stored as a bcrypt hash in .env ADMIN_PASSWORD_HASH.
  */
 
@@ -32,8 +33,9 @@ try {
             }
             if (!password_verify($pass, $hash)) {
                 pro_auth_fail('Mot de passe incorrect.', 401);
-            }            session_regenerate_id(true);
-            $_SESSION['is_admin'] = true;
+            }
+            session_regenerate_id(true);
+            $_SESSION['is_pro_user'] = true;
             $companyName = (string)env('COMPANY_NAME', '');
             pro_auth_ok([
                 'is_pro'       => true,
@@ -62,7 +64,7 @@ try {
 
         case 'me':
         default: {
-            if (!empty($_SESSION['is_admin'])) {
+            if (!empty($_SESSION['is_pro_user'])) {
                 $companyName = (string)env('COMPANY_NAME', '');
                 pro_auth_ok([
                     'is_pro'       => true,

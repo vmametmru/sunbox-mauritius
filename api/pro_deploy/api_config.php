@@ -16,7 +16,7 @@ declare(strict_types=1);
  */
 
 /** Deployed file version — must match PRO_FILE_VERSION in sunbox api/index.php. */
-define('PRO_FILE_VERSION', '2.7.0');
+define('PRO_FILE_VERSION', '2.8.0');
 
 /**
  * Parse a single .env file from disk, bypassing getenv() entirely.
@@ -514,7 +514,7 @@ function startSession(): void
 function requireAdmin(): void
 {
     startSession();
-    if (empty($_SESSION['is_admin'])) { errorResponse('Unauthorized', 401); }
+    if (empty($_SESSION['is_pro_user'])) { errorResponse('Unauthorized', 401); }
 }
 
 function jsonResponse($data, $code = 200): void { http_response_code($code); echo json_encode($data, JSON_UNESCAPED_UNICODE); exit(); }

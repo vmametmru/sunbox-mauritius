@@ -27,6 +27,7 @@ import {
   Tag,
   ClipboardList,
   RefreshCw,
+  Bug,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -88,17 +89,21 @@ const navItems: NavItem[] = [
       { icon: CreditCard, label: 'Paiements', path: '/admin/payments' },
       { icon: Settings,    label: 'Site',       path: '/admin/site' },
       { icon: RefreshCw,   label: 'Mise à jour', path: '/admin/deploy' },
+      { icon: Bug,         label: 'Débogage',    path: '/admin/debug' },
     ],
   },
   { icon: Lightbulb, label: 'Idées Dev', path: '/admin/dev-ideas' },
   { icon: Activity, label: 'Activités', path: '/admin/activity', disabled: true },
 ];
 
-// All paths that belong to each group (for auto-expand)
 const groupPaths: Record<string, string[]> = {
   commerce: ['/admin/quotes', '/admin/reports'],
   contacts: ['/admin/contacts', '/admin/suppliers'],
-  parametres: ['/admin/users', '/admin/models', '/admin/discounts', '/admin/media', '/admin/boq', '/admin/pool-prices', '/admin/pool-variables', '/admin/pool-template', '/admin/email', '/admin/payments', '/admin/site', '/admin/deploy'],
+  parametres: [
+    '/admin/users', '/admin/models', '/admin/discounts', '/admin/media',
+    '/admin/boq', '/admin/pool-prices', '/admin/pool-variables', '/admin/pool-template',
+    '/admin/email', '/admin/payments', '/admin/site', '/admin/deploy', '/admin/debug',
+  ],
 };
 
 export default function AdminLayout() {

@@ -268,6 +268,47 @@ if (!$anyChange) {
     deployFail('Aucun fichier fourni. Envoyez dist_zip et/ou api_zip.');
 }
 
+// ── Auto-propagate API templates to existing pro sites ───────────────────────
+// When a new API is deployed, copy the non-site-specific template files to every
+// existing pro site so they pick up new endpoints (e.g. get_model_requests)
+// without requiring a manual "deploy_pro_site" per site.
+// Only files without site-specific content are refreshed here; config.php
+// (which holds .env-driven credentials) is left untouched.
+if (isset($results['api'])) {
+    $templateDir = $apiRoot . '/pro_deploy';
+    $proFiles = [
+        $templateDir . '/api_index.php'       => 'index.php',
+        $templateDir . '/api_pro_auth.php'    => 'pro_auth.php',
+        $templateDir . '/api_upload_logo.php' => 'upload_logo.php',
+    ];
+    $prosDir      = $webRoot . '/pros';
+    $proUpdated   = 0;
+    $proWarnings  = [];
+    if (is_dir($prosDir)) {
+        $proApiDirs = glob($prosDir . '/*/api');
+        if ($proApiDirs === false) {
+            $proWarnings[] = 'glob() échoué pour ' . $prosDir . ' — sites pro non mis à jour automatiquement.';
+        } else {
+            foreach ($proApiDirs as $proApiDir) {
+                if (!is_dir($proApiDir)) continue;
+                foreach ($proFiles as $src => $destFile) {
+                    if (!is_file($src)) continue;
+                    if (!copy($src, $proApiDir . '/' . $destFile)) {
+                        $proWarnings[] = 'Échec copie ' . $destFile . ' vers ' . $proApiDir;
+                    }
+                }
+                $proUpdated++;
+            }
+        }
+    }
+    if ($proUpdated > 0) {
+        $results['api']['pro_sites_updated'] = $proUpdated;
+    }
+    if (!empty($proWarnings)) {
+        $results['api']['pro_sites_warnings'] = $proWarnings;
+    }
+}
+
 /* ── version log ─────────────────────────────────────────────────────────── */
 $versionLine = date('Y-m-d H:i:s') . ' | ' .
     implode(' | ', array_map(

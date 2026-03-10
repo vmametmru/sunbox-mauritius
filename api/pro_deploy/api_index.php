@@ -16,28 +16,15 @@ try {
 
     switch ($action) {
 
-        // ── ADMIN AUTH ─────────────────────────────────────────────────────────
-        case 'login': {
-            validateRequired($body, ['password']);
-            $hash = (string)env('ADMIN_PASSWORD_HASH', '');
-            if (!$hash || !password_verify((string)$body['password'], $hash)) {
-                fail('Mot de passe incorrect.', 401);
-            }
-            session_regenerate_id(true);
-            $_SESSION['is_admin'] = true;
-            ok(['is_admin' => true]);
-            break;
-        }
-
-        case 'logout': {
-            $_SESSION = [];
-            session_destroy();
-            ok(['is_admin' => false]);
-            break;
-        }
-
+        // ── PRO-USER AUTH ──────────────────────────────────────────────────────
+        // Admin login is disabled on pro sites. Authentication is handled
+        // exclusively by pro_auth.php (is_pro_user session key).
+        case 'login':
+        case 'logout':
         case 'me': {
-            ok(['is_admin' => !empty($_SESSION['is_admin'])]);
+            // These endpoints are intentionally disabled in api/index.php on
+            // the deployed pro site. Use /api/pro_auth.php instead.
+            fail('Utilisez /api/pro_auth.php pour l\'authentification.', 403);
             break;
         }
 
@@ -719,11 +706,7 @@ try {
             validateRequired($body, ['model_id', 'model_name', 'model_type', 'base_price', 'total_price',
                                      'customer_name', 'customer_email', 'customer_phone']);
 
-            // Deduct 500 Rs credits from Sunbox for each quote created
-            $creditResult = deductCredits(500, 'quote_created');
-            if (!($creditResult['success'] ?? false)) {
-                fail($creditResult['error'] ?? 'Crédits insuffisants', 402);
-            }
+            // Creating a quote is free — no credit deduction.
 
             $db->beginTransaction();
             try {
@@ -857,13 +840,7 @@ try {
             $id     = (int)$body['id'];
             $status = $body['status'];
 
-            // Deduct validation credits only when SUNBOX_USER_ID is properly configured
-            if ($status === 'approved' && SUNBOX_USER_ID > 0) {
-                $creditResult = deductCredits(1000, 'quote_validated', $id);
-                if (!($creditResult['success'] ?? false)) {
-                    fail($creditResult['error'] ?? 'Crédits insuffisants', 402);
-                }
-            }
+            // Validating a quote is free — no credit deduction.
 
             $db->prepare("UPDATE pro_quotes SET status = ?, updated_at = NOW() WHERE id = ?")->execute([$status, $id]);
             ok();
@@ -931,11 +908,7 @@ try {
                 if ($existing) { ok(['report_id' => (int)$existing['id'], 'already_exists' => true]); break; }
             }
 
-            // Deduct 1 500 Rs ('boq_requested' is the allowed reason in deductCredits)
-            $creditResult = deductCredits(1500, 'boq_requested', $quoteId);
-            if (!($creditResult['success'] ?? false)) {
-                fail($creditResult['error'] ?? 'Crédits insuffisants', 402);
-            }
+            // Creating a BOQ report is free — no credit deduction.
 
             // Fetch base BOQ lines from Sunbox DB.
             // Try with replace_with_sunbox column first; fall back if Sunbox DB not yet upgraded.
@@ -1536,6 +1509,167 @@ try {
                 try { $sdb->rollBack(); } catch (\Throwable $ignored) {}
                 fail(API_DEBUG ? $e->getMessage() : 'Erreur serveur', 500);
             }
+            break;
+        }
+
+        // ── MODEL REQUESTS ─────────────────────────────────────────────────────
+        // Note: requireAdmin() on the pro site checks $_SESSION['is_pro_user']
+        // (see api_config.php) — it is the pro-user authentication gate.
+        case 'get_model_requests': {
+            requireAdmin();
+            if (!SUNBOX_USER_ID) { fail('User non configuré', 400); }
+            $sdb  = getSunboxDB();
+            $stmt = $sdb->prepare("SELECT * FROM professional_model_requests WHERE user_id = ? ORDER BY created_at DESC");
+            $stmt->execute([SUNBOX_USER_ID]);
+            ok($stmt->fetchAll());
+            break;
+        }
+
+        case 'create_model_request': {
+            requireAdmin();
+            if (!SUNBOX_USER_ID) { fail('User non configuré', 400); }
+            validateRequired($body, ['description']);
+            $sdb = getSunboxDB();
+            $sdb->beginTransaction();
+            try {
+                // Fetch credits and configurable cost atomically
+                $profStmt = $sdb->prepare(
+                    "SELECT credits, COALESCE(model_request_cost, 5000) AS cost
+                     FROM professional_profiles WHERE user_id = ? FOR UPDATE"
+                );
+                $profStmt->execute([SUNBOX_USER_ID]);
+                $row     = $profStmt->fetch();
+                $credits = (float)($row['credits'] ?? 0);
+                $cost    = (float)($row['cost']    ?? 5000);
+                if ($credits < $cost) {
+                    $sdb->rollBack();
+                    fail('Crédits insuffisants (' . number_format($cost, 0, '.', ' ') . ' Rs requis)', 402);
+                }
+                $newBalance = $credits - $cost;
+                $sdb->prepare("UPDATE professional_profiles SET credits = ?, updated_at = NOW() WHERE user_id = ?")
+                    ->execute([$newBalance, SUNBOX_USER_ID]);
+                $sdb->prepare("
+                    INSERT INTO professional_model_requests
+                        (user_id, description, container_20ft_count, container_40ft_count, bedrooms, bathrooms, sketch_url)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                ")->execute([
+                    SUNBOX_USER_ID,
+                    $body['description'],
+                    (int)($body['container_20ft_count'] ?? 0),
+                    (int)($body['container_40ft_count'] ?? 0),
+                    (int)($body['bedrooms']  ?? 0),
+                    (int)($body['bathrooms'] ?? 0),
+                    $body['sketch_url'] ?? null,
+                ]);
+                $reqId = (int)$sdb->lastInsertId();
+                $sdb->prepare("
+                    INSERT INTO professional_credit_transactions (user_id, amount, reason, balance_after)
+                    VALUES (?, ?, 'model_request', ?)
+                ")->execute([SUNBOX_USER_ID, -$cost, $newBalance]);
+                $sdb->commit();
+                ok(['id' => $reqId, 'credits' => $newBalance, 'cost' => $cost]);
+            } catch (\Throwable $e) {
+                try { $sdb->rollBack(); } catch (\Throwable $ignored) {}
+                throw $e;
+            }
+            break;
+        }
+
+        case 'update_model_request': {
+            requireAdmin();
+            validateRequired($body, ['id']);
+            $reqId  = (int)$body['id'];
+            $sdb    = getSunboxDB();
+            $sets   = [];
+            $setParams = [];
+            if (array_key_exists('status',      $body)) { $sets[] = 'status = ?';      $setParams[] = $body['status']; }
+            if (array_key_exists('admin_notes', $body)) { $sets[] = 'admin_notes = ?'; $setParams[] = $body['admin_notes']; }
+            if (!empty($sets)) {
+                $sets[] = 'updated_at = NOW()';
+                // WHERE id = ? AND user_id = ? — scoped to this pro user only
+                $sdb->prepare("UPDATE professional_model_requests SET " . implode(', ', $sets) . " WHERE id = ? AND user_id = ?")
+                    ->execute(array_merge($setParams, [$reqId, SUNBOX_USER_ID]));
+            }
+            ok();
+            break;
+        }
+
+        // ── Debug info (Pro admin) ────────────────────────────────────────────
+        case 'get_debug_info': {
+            requireAdmin();
+            $info = [];
+
+            // PHP environment
+            $info['php'] = [
+                'version'       => PHP_VERSION,
+                'os'            => PHP_OS,
+                'sapi'          => PHP_SAPI,
+                'memory_limit'  => ini_get('memory_limit'),
+                'max_exec_time' => ini_get('max_execution_time'),
+                'upload_max'    => ini_get('upload_max_filesize'),
+                'error_log'     => ini_get('error_log') ?: null,
+                'extensions'    => [
+                    'zip'       => extension_loaded('zip'),
+                    'pdo'       => extension_loaded('pdo'),
+                    'pdo_mysql' => extension_loaded('pdo_mysql'),
+                ],
+            ];
+
+            // Pro site database
+            try {
+                $proDB = getDB();
+                $row   = $proDB->query("SELECT VERSION() AS v")->fetch();
+                $info['db_pro'] = ['status' => 'ok', 'version' => $row['v']];
+            } catch (\Throwable $e) {
+                $info['db_pro'] = ['status' => 'error', 'error' => API_DEBUG ? $e->getMessage() : 'Connexion échouée'];
+            }
+
+            // Sunbox database
+            try {
+                $sdb = getSunboxDB();
+                $row = $sdb->query("SELECT VERSION() AS v")->fetch();
+                $info['db_sunbox'] = ['status' => 'ok', 'version' => $row['v']];
+            } catch (\Throwable $e) {
+                $info['db_sunbox'] = ['status' => 'error', 'error' => API_DEBUG ? $e->getMessage() : 'Connexion échouée'];
+            }
+
+            // .env values (sanitized — no credentials)
+            $info['env'] = [
+                'app_url'          => (string)env('APP_URL', ''),
+                'api_debug'        => API_DEBUG,
+                'sunbox_user_id'   => SUNBOX_USER_ID,
+                'vat_rate'         => VAT_RATE,
+                'pro_file_version' => PRO_FILE_VERSION,
+                'db_name'          => (string)env('DB_NAME', ''),
+            ];
+
+            // Session (partial — no sensitive data)
+            startSession();
+            $info['session'] = [
+                'is_pro_user' => !empty($_SESSION['is_pro_user']),
+                'session_id'  => session_id() ? substr(session_id(), 0, 8) . '...' : null,
+            ];
+
+            // Server
+            $info['server'] = [
+                'timestamp' => date('Y-m-d H:i:s'),
+                'timezone'  => date_default_timezone_get(),
+                'software'  => $_SERVER['SERVER_SOFTWARE'] ?? 'unknown',
+            ];
+
+            // PHP error log tail (last 60 lines)
+            $errorLogPath = ini_get('error_log');
+            $logLines     = [];
+            if ($errorLogPath && is_file($errorLogPath) && is_readable($errorLogPath)) {
+                $all = @file($errorLogPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+                if ($all !== false) {
+                    $logLines = array_values(array_slice($all, -60));
+                }
+            }
+            $info['error_log_tail'] = $logLines;
+            $info['error_log_path'] = $errorLogPath ?: null;
+
+            ok($info);
             break;
         }
 
