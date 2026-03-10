@@ -706,11 +706,7 @@ try {
             validateRequired($body, ['model_id', 'model_name', 'model_type', 'base_price', 'total_price',
                                      'customer_name', 'customer_email', 'customer_phone']);
 
-            // Deduct 500 Rs credits from Sunbox for each quote created
-            $creditResult = deductCredits(500, 'quote_created');
-            if (!($creditResult['success'] ?? false)) {
-                fail($creditResult['error'] ?? 'Crédits insuffisants', 402);
-            }
+            // Creating a quote is free — no credit deduction.
 
             $db->beginTransaction();
             try {
@@ -844,13 +840,7 @@ try {
             $id     = (int)$body['id'];
             $status = $body['status'];
 
-            // Deduct validation credits only when SUNBOX_USER_ID is properly configured
-            if ($status === 'approved' && SUNBOX_USER_ID > 0) {
-                $creditResult = deductCredits(1000, 'quote_validated', $id);
-                if (!($creditResult['success'] ?? false)) {
-                    fail($creditResult['error'] ?? 'Crédits insuffisants', 402);
-                }
-            }
+            // Validating a quote is free — no credit deduction.
 
             $db->prepare("UPDATE pro_quotes SET status = ?, updated_at = NOW() WHERE id = ?")->execute([$status, $id]);
             ok();
