@@ -6,7 +6,7 @@ handleCORS();
 
 // Pro site deployment versions — increment these when templates or DB schema change.
 // PRO_FILE_VERSION must match define('PRO_FILE_VERSION', ...) in api/pro_deploy/api_config.php
-define('PRO_FILE_VERSION',      '2.9.0');
+define('PRO_FILE_VERSION',      '2.9.1');
 define('PRO_DB_SCHEMA_VERSION', '1.8.0');
 
 // Sunbox main database schema version.
@@ -3360,10 +3360,11 @@ try {
             requireAdmin();
             $templateDir = __DIR__ . '/pro_deploy';
             $proFiles    = [
-                $templateDir . '/api_index.php'       => 'index.php',
-                $templateDir . '/api_config.php'      => 'config.php',
-                $templateDir . '/api_pro_auth.php'    => 'pro_auth.php',
-                $templateDir . '/api_upload_logo.php' => 'upload_logo.php',
+                $templateDir . '/api_index.php'         => 'index.php',
+                $templateDir . '/api_config.php'        => 'config.php',
+                $templateDir . '/api_pro_auth.php'      => 'pro_auth.php',
+                $templateDir . '/api_upload_logo.php'   => 'upload_logo.php',
+                $templateDir . '/api_upload_sketch.php' => 'upload_sketch.php',
             ];
             $prosDir    = rtrim(dirname(__DIR__), '/') . '/pros';
             $updated    = 0;
@@ -3536,13 +3537,14 @@ try {
                 }
 
                 $filesToDeploy = [
-                    'api_config.php'      => $siteDir . '/api/config.php',
-                    'api_index.php'       => $siteDir . '/api/index.php',
-                    'api_pro_auth.php'    => $siteDir . '/api/pro_auth.php',
-                    'api_upload_logo.php' => $siteDir . '/api/upload_logo.php',
-                    'api_htaccess'        => $siteDir . '/api/.htaccess',
-                    'htaccess'            => $siteDir . '/.htaccess',
-                    'index.php'           => $siteDir . '/index.php',
+                    'api_config.php'        => $siteDir . '/api/config.php',
+                    'api_index.php'         => $siteDir . '/api/index.php',
+                    'api_pro_auth.php'      => $siteDir . '/api/pro_auth.php',
+                    'api_upload_logo.php'   => $siteDir . '/api/upload_logo.php',
+                    'api_upload_sketch.php' => $siteDir . '/api/upload_sketch.php',
+                    'api_htaccess'          => $siteDir . '/api/.htaccess',
+                    'htaccess'              => $siteDir . '/.htaccess',
+                    'index.php'             => $siteDir . '/index.php',
                 ];
                 foreach ($filesToDeploy as $tpl => $dest) {
                     $tplPath = $templateDir . '/' . $tpl;

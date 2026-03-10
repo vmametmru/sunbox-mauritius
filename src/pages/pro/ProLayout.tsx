@@ -21,6 +21,7 @@ import {
   ChevronRight,
   ClipboardList,
   Bug,
+  UserCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -64,6 +65,7 @@ const proSiteNavGroups = [
   {
     icon: Settings, label: 'Paramètres', key: 'parametres', isItem: false as const,
     children: [
+      { icon: UserCircle,  label: 'Mon Profil & Bandeau', path: '/pro/settings' },
       { icon: Tag,         label: 'Remises',   path: '/pro/discounts' },
       { icon: Mail,        label: 'Email',     path: '/pro/email' },
       { icon: CreditCard,  label: 'Paiements', path: '/pro/payments' },

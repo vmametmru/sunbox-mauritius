@@ -64,12 +64,12 @@ export default function ProSettingsPage() {
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
     }
-    // Load header images (best-effort — only available on deployed pro sites)
+    // Load header images
     try {
       const imgs = await api.getHeaderImages();
       setHeaderImages(Array.isArray(imgs) ? imgs : []);
     } catch {
-      // Not available on Sunbox admin — ignore silently
+      // Not critical — section still shows the upload UI
     }
   };
 
@@ -306,12 +306,12 @@ export default function ProSettingsPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <ImageIcon className="h-5 w-5 text-orange-500" />
-            Photos du Header
+            Bandeau Supérieur — Slider Photos
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-gray-500">
-            Ajoutez plusieurs photos qui s'afficheront dans le bandeau supérieur de votre site (carrousel). L'ordre d'affichage suit la liste ci-dessous.
+            Ces photos s'affichent en carrousel dans le bandeau supérieur de votre site web. Elles défilent automatiquement toutes les 5 secondes.
           </p>
 
           {/* Image grid */}
