@@ -318,8 +318,6 @@ export default function BOQPage() {
     try {
       const data = await api.getBOQCategories(id);
       setCategories(data);
-      setExpandedCategories([]);
-      setCategoryLines({});
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
     }
@@ -769,7 +767,7 @@ export default function BOQPage() {
           line = lines.find(l => l.id === lineId);
           if (line) break;
         }
-        if (!line) return Promise.resolve({ lineId, ok: false });
+        if (!line) return Promise.resolve({ lineId, ok: false, error: 'Ligne introuvable dans les données chargées' });
         return api.updateBOQLine({
           id: line.id,
           description: line.description,
@@ -782,11 +780,12 @@ export default function BOQPage() {
           supplier_id: newSupplierId,
           margin_percent: line.margin_percent,
           display_order: line.display_order,
-        }).then(() => ({ lineId, ok: true })).catch(() => ({ lineId, ok: false }));
+        }).then(() => ({ lineId, ok: true, error: undefined })).catch((err: any) => ({ lineId, ok: false, error: (err?.message || String(err)) as string }));
       });
 
       const results = await Promise.all(tasks);
-      const failedIds = new Set(results.filter(r => !r.ok).map(r => r.lineId));
+      const failedResults = results.filter(r => !r.ok);
+      const failedIds = new Set(failedResults.map(r => r.lineId));
       const successCount = results.filter(r => r.ok).length;
 
       // Clear only successfully saved changes from pending state
@@ -798,7 +797,12 @@ export default function BOQPage() {
           }
           return next;
         });
-        toast({ title: 'Erreur partielle', description: `${successCount} sauvegardée(s), ${failedIds.size} échouée(s)`, variant: 'destructive' });
+        const firstError = failedResults.find(r => r.error)?.error;
+        toast({
+          title: 'Erreur partielle',
+          description: `${successCount} sauvegardée(s), ${failedIds.size} échouée(s)${firstError ? ` — ${firstError}` : ''}`,
+          variant: 'destructive',
+        });
       } else {
         setPendingSupplierChanges({});
         toast({ title: 'Succès', description: `${successCount} modification${successCount > 1 ? 's' : ''} de fournisseur sauvegardée${successCount > 1 ? 's' : ''}` });
