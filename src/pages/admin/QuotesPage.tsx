@@ -94,7 +94,12 @@ export default function QuotesPage() {
     }
     
     if (statusFilter !== 'all') {
-      filtered = filtered.filter(q => q.status === statusFilter);
+      // 'open' filter also includes legacy 'pending' records for backward compatibility
+      if (statusFilter === 'open') {
+        filtered = filtered.filter(q => q.status === 'open' || q.status === 'pending');
+      } else {
+        filtered = filtered.filter(q => q.status === statusFilter);
+      }
     }
     
     setFilteredQuotes(filtered);
@@ -122,60 +127,6 @@ export default function QuotesPage() {
       // Update selected quote if open
       if (selectedQuote?.id === id) {
         setSelectedQuote({ ...selectedQuote, status });
-      }
-      
-      // Send email notification for status changes (approved or rejected)
-      if (status === 'approved' || status === 'rejected') {
-        try {
-          // Fetch quote data to ensure we have all necessary fields
-          // Use selectedQuote if available, otherwise fetch from API
-          let quoteData = selectedQuote?.id === id ? selectedQuote : null;
-          if (!quoteData || !quoteData.customer_email) {
-            quoteData = await api.getQuote(id);
-          }
-          
-          if (!quoteData?.customer_email) {
-            console.error('Cannot send email: missing customer email');
-            toast({ 
-              title: 'Avertissement', 
-              description: 'Email client manquant - notification non envoyée',
-              variant: 'default'
-            });
-            return;
-          }
-
-          const templateKey = status === 'approved' ? 'quote_approved' : 'quote_rejected';
-          const emailData: Record<string, any> = {
-            customer_name: quoteData.customer_name,
-            reference: quoteData.reference_number,
-            model_name: quoteData.model_name,
-            total_price: formatPrice(quoteData.total_price),
-          };
-          
-          // Add rejection reason for rejected status
-          // Note: Default message used; custom rejection reasons can be implemented in a future enhancement
-          if (status === 'rejected') {
-            emailData.rejection_reason = 'Veuillez nous contacter pour plus de détails.';
-          }
-          
-          await api.sendTemplateEmail({
-            to: quoteData.customer_email,
-            template_key: templateKey,
-            data: emailData
-          });
-          
-          const message = status === 'approved'
-            ? 'Le client a été notifié de l\'approbation'
-            : 'Le client a été notifié du refus';
-          toast({ title: 'Email envoyé', description: message });
-        } catch (emailErr: any) {
-          console.error('Email error:', emailErr);
-          toast({ 
-            title: 'Avertissement', 
-            description: 'Statut mis à jour mais l\'email n\'a pas pu être envoyé',
-            variant: 'default'
-          });
-        }
       }
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
@@ -245,16 +196,22 @@ export default function QuotesPage() {
 
   const getStatusBadge = (status: string) => {
     const styles: Record<string, string> = {
-      pending: 'bg-yellow-100 text-yellow-800',
-      approved: 'bg-green-100 text-green-800',
-      rejected: 'bg-red-100 text-red-800',
-      completed: 'bg-purple-100 text-purple-800',
+      open:               'bg-yellow-100 text-yellow-800',
+      pending:            'bg-yellow-100 text-yellow-800',
+      validated:          'bg-blue-100 text-blue-800',
+      approved:           'bg-green-100 text-green-800',
+      rejected:           'bg-red-100 text-red-800',
+      completed:          'bg-purple-100 text-purple-800',
+      revision_requested: 'bg-orange-100 text-orange-800',
     };
     const labels: Record<string, string> = {
-      pending: 'En attente',
-      approved: 'Approuvé',
-      rejected: 'Rejeté',
-      completed: 'Terminé',
+      open:               'Ouvert',
+      pending:            'En attente',
+      validated:          'Validé',
+      approved:           'Approuvé',
+      rejected:           'Rejeté',
+      completed:          'Terminé',
+      revision_requested: 'Modification demandée',
     };
     return <Badge className={styles[status] || 'bg-gray-100'}>{labels[status] || status}</Badge>;
   };
@@ -263,10 +220,11 @@ export default function QuotesPage() {
     return quotes.filter(q => q.status === status).length;
   };
 
-  // Count for quote statuses (unified WCQ-style flow)
-  const pendingCount = getStatusCount('pending');
-  const approvedCount = getStatusCount('approved');
-  const rejectedCount = getStatusCount('rejected');
+  // Count for quote statuses (new flow: open → validated → approved/rejected)
+  const openCount      = getStatusCount('open') + getStatusCount('pending');
+  const validatedCount = getStatusCount('validated');
+  const approvedCount  = getStatusCount('approved');
+  const rejectedCount  = getStatusCount('rejected');
   const completedCount = getStatusCount('completed');
 
   if (loading) {
@@ -296,12 +254,18 @@ export default function QuotesPage() {
         </div>
       </div>
 
-      {/* Status Summary - Quote Statuses (unified WCQ-style flow) */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card className="cursor-pointer hover:border-yellow-300" onClick={() => setStatusFilter('pending')}>
+      {/* Status Summary - Quote Statuses (new flow: open → validated → approved/rejected) */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <Card className="cursor-pointer hover:border-yellow-300" onClick={() => setStatusFilter('open')}>
           <CardContent className="p-4 text-center">
-            <p className="text-2xl font-bold text-yellow-600">{pendingCount}</p>
-            <p className="text-sm text-gray-500">En attente</p>
+            <p className="text-2xl font-bold text-yellow-600">{openCount}</p>
+            <p className="text-sm text-gray-500">Ouverts</p>
+          </CardContent>
+        </Card>
+        <Card className="cursor-pointer hover:border-blue-300" onClick={() => setStatusFilter('validated')}>
+          <CardContent className="p-4 text-center">
+            <p className="text-2xl font-bold text-blue-600">{validatedCount}</p>
+            <p className="text-sm text-gray-500">Validés</p>
           </CardContent>
         </Card>
         <Card className="cursor-pointer hover:border-green-300" onClick={() => setStatusFilter('approved')}>
@@ -343,7 +307,8 @@ export default function QuotesPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Tous les statuts</SelectItem>
-                <SelectItem value="pending">En attente</SelectItem>
+                <SelectItem value="open">Ouvert</SelectItem>
+                <SelectItem value="validated">Validé</SelectItem>
                 <SelectItem value="approved">Approuvé</SelectItem>
                 <SelectItem value="rejected">Rejeté</SelectItem>
                 <SelectItem value="completed">Terminé</SelectItem>

@@ -106,7 +106,7 @@ CREATE TABLE quotes (
     plan_url VARCHAR(500) NULL COMMENT 'Optional plan/blueprint URL for the quote',
     margin_percent DECIMAL(5, 2) DEFAULT 30.00 COMMENT 'Margin percentage for free quotes',
     cloned_from_id INT NULL COMMENT 'Reference to original quote if cloned',
-    status ENUM('draft', 'open', 'validated', 'cancelled', 'pending', 'approved', 'rejected', 'completed') DEFAULT 'pending',
+    status ENUM('draft', 'open', 'validated', 'cancelled', 'pending', 'approved', 'rejected', 'completed') DEFAULT 'open',
     valid_until DATE,
     notes TEXT,
     assigned_to INT NULL,

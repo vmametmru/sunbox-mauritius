@@ -753,7 +753,7 @@ try {
                              pool_longueur_lb, pool_largeur_lb, pool_profondeur_lb,
                              pool_longueur_ta, pool_largeur_ta, pool_profondeur_ta,
                              pool_longueur_tb, pool_largeur_tb, pool_profondeur_tb)
-                        VALUES (?,?,?,?,?, ?,?,?,?,?, ?,?,?,'pending',?,
+                        VALUES (?,?,?,?,?, ?,?,?,?,?, ?,?,?,'open',?,
                                 ?, ?,?,?, ?,?,?, ?,?,?, ?,?,?, ?,?,?)
                     ")->execute([
                         $reference,
@@ -784,7 +784,7 @@ try {
                             (reference_number, contact_id, customer_name, customer_email, customer_phone,
                              customer_address, customer_message, model_id, model_name, model_type,
                              base_price, options_total, total_price, status, valid_until)
-                        VALUES (?,?,?,?,?, ?,?,?,?,?, ?,?,?,'pending',?)
+                        VALUES (?,?,?,?,?, ?,?,?,?,?, ?,?,?,'open',?)
                     ")->execute([
                         $reference,
                         $contactId,
@@ -823,6 +823,12 @@ try {
                     }
                 }
 
+                // Set approval token (graceful – column may not exist until migration is run)
+                try {
+                    $db->prepare("UPDATE pro_quotes SET approval_token = ? WHERE id = ?")
+                       ->execute([bin2hex(random_bytes(32)), $quoteId]);
+                } catch (Exception $tokenEx) { /* migration not yet applied */ }
+
                 $db->commit();
                 ok(['id' => $quoteId, 'reference_number' => $reference, 'contact_id' => $contactId,
                     'credits_after' => $creditResult['data']['credits'] ?? null]);
@@ -839,11 +845,55 @@ try {
             validateRequired($body, ['id', 'status']);
             $id     = (int)$body['id'];
             $status = $body['status'];
+            $validStatuses = ['draft', 'open', 'validated', 'cancelled', 'pending', 'approved', 'rejected', 'completed'];
+            if (!in_array($status, $validStatuses)) fail('Statut invalide');
 
             // Validating a quote is free — no credit deduction.
 
             $db->prepare("UPDATE pro_quotes SET status = ?, updated_at = NOW() WHERE id = ?")->execute([$status, $id]);
             ok();
+            break;
+        }
+
+        case 'get_quote_by_token': {
+            // Public — no admin auth required (client accessing via email link)
+            $db = getDB();
+            validateRequired($body, ['token']);
+            $token = sanitize($body['token']);
+            $stmt = $db->prepare("SELECT q.*, c.name AS contact_name, c.email AS contact_email FROM pro_quotes q LEFT JOIN pro_contacts c ON c.id = q.contact_id WHERE q.approval_token = ?");
+            $stmt->execute([$token]);
+            $quote = $stmt->fetch();
+            if (!$quote) fail('Devis non trouvé ou lien invalide', 404);
+            // Attach options
+            $optStmt = $db->prepare("SELECT * FROM pro_quote_options WHERE quote_id = ? ORDER BY id ASC");
+            $optStmt->execute([$quote['id']]);
+            $quote['options'] = $optStmt->fetchAll();
+            ok($quote);
+            break;
+        }
+
+        case 'update_quote_status_by_token': {
+            // Public — no admin auth required (client action via email link)
+            $db = getDB();
+            validateRequired($body, ['token', 'status']);
+            $token = sanitize($body['token']);
+            $validStatuses = ['approved', 'rejected', 'open'];
+            if (!in_array($body['status'], $validStatuses)) fail('Statut invalide');
+
+            $stmt = $db->prepare("SELECT id, status, customer_email, customer_name, reference_number, model_name, total_price FROM pro_quotes WHERE approval_token = ?");
+            $stmt->execute([$token]);
+            $quote = $stmt->fetch();
+            if (!$quote) fail('Devis non trouvé ou lien invalide', 404);
+
+            $newStatus = $body['status'];
+            $db->prepare("UPDATE pro_quotes SET status = ?, updated_at = NOW() WHERE approval_token = ?")
+               ->execute([$newStatus, $token]);
+            ok(['id' => $quote['id'], 'status' => $newStatus,
+                'customer_email'   => $quote['customer_email'],
+                'customer_name'    => $quote['customer_name'],
+                'reference_number' => $quote['reference_number'],
+                'model_name'       => $quote['model_name'],
+                'total_price'      => $quote['total_price']]);
             break;
         }
 
@@ -1370,7 +1420,7 @@ try {
             requireAdmin();
             $db = getDB();
             $totalQuotes   = (int)$db->query("SELECT COUNT(*) FROM pro_quotes")->fetchColumn();
-            $pendingQuotes = (int)$db->query("SELECT COUNT(*) FROM pro_quotes WHERE status = 'pending'")->fetchColumn();
+            $pendingQuotes = (int)$db->query("SELECT COUNT(*) FROM pro_quotes WHERE status = 'open'")->fetchColumn();
             $approvedQuotes = (int)$db->query("SELECT COUNT(*) FROM pro_quotes WHERE status = 'approved'")->fetchColumn();
             $totalRevenue  = (float)$db->query("SELECT COALESCE(SUM(total_price),0) FROM pro_quotes WHERE status IN ('approved','completed')")->fetchColumn();
             $totalContacts = (int)$db->query("SELECT COUNT(*) FROM pro_contacts")->fetchColumn();
