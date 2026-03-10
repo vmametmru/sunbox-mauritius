@@ -6,12 +6,12 @@ handleCORS();
 
 // Pro site deployment versions — increment these when templates or DB schema change.
 // PRO_FILE_VERSION must match define('PRO_FILE_VERSION', ...) in api/pro_deploy/api_config.php
-define('PRO_FILE_VERSION',      '2.8.0');
-define('PRO_DB_SCHEMA_VERSION', '1.7.0');
+define('PRO_FILE_VERSION',      '2.9.0');
+define('PRO_DB_SCHEMA_VERSION', '1.8.0');
 
 // Sunbox main database schema version.
 // Increment when new tables or columns are added.
-define('SUNBOX_DB_SCHEMA_VERSION', '2.6.0');
+define('SUNBOX_DB_SCHEMA_VERSION', '2.7.0');
 
 $action = $_GET['action'] ?? '';
 $body   = getRequestBody();
@@ -32,7 +32,7 @@ try {
         case 'get_dashboard_stats': {
             $stats = [];
             $stats['total_quotes'] = (int)$db->query("SELECT COUNT(*) FROM quotes")->fetchColumn();
-            $stats['pending_quotes'] = (int)$db->query("SELECT COUNT(*) FROM quotes WHERE status='pending'")->fetchColumn();
+            $stats['pending_quotes'] = (int)$db->query("SELECT COUNT(*) FROM quotes WHERE status='open'")->fetchColumn();
             $stats['approved_quotes'] = (int)$db->query("SELECT COUNT(*) FROM quotes WHERE status='approved'")->fetchColumn();
             $stats['today_quotes'] = (int)$db->query("SELECT COUNT(*) FROM quotes WHERE created_at >= CURDATE() AND created_at < CURDATE() + INTERVAL 1 DAY")->fetchColumn();
             $stats['total_revenue'] = (float)$db->query("SELECT COALESCE(SUM(total_price),0) FROM quotes WHERE status='approved'")->fetchColumn();
@@ -176,6 +176,22 @@ try {
 
             // ── v2.6.0 ── Add linked_model_id to professional_model_requests ─────
             $addCol('professional_model_requests', 'linked_model_id', "INT NULL DEFAULT NULL AFTER `bathrooms`");
+
+            // ── v2.7.0 ── Expand quotes.status ENUM to include 'open' and 'validated' ──
+            // Use ALTER TABLE MODIFY COLUMN to extend the ENUM without data loss.
+            // We check first if 'open' is already in the enum to avoid unnecessary migration.
+            $enumCheckStmt = $db->prepare(
+                "SELECT COLUMN_TYPE FROM information_schema.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'quotes' AND COLUMN_NAME = 'status'"
+            );
+            $enumCheckStmt->execute();
+            $enumType = (string)($enumCheckStmt->fetchColumn() ?? '');
+            if (strpos($enumType, "'open'") === false) {
+                $db->exec("ALTER TABLE `quotes` MODIFY COLUMN `status`
+                    ENUM('draft','open','validated','cancelled','pending','approved','rejected','completed')
+                    NOT NULL DEFAULT 'open'");
+                $messages[] = "Colonne modifiée : quotes.status (ENUM étendu avec 'open','validated')";
+            }
 
             // ── Schema version table (always create / update) ─────────────────
             $db->exec("CREATE TABLE IF NOT EXISTS `db_schema_version` (
@@ -1223,7 +1239,7 @@ try {
                             pool_longueur_lb, pool_largeur_lb, pool_profondeur_lb,
                             pool_longueur_ta, pool_largeur_ta, pool_profondeur_ta,
                             pool_longueur_tb, pool_largeur_tb, pool_profondeur_tb
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?,
+                                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?,
                                   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ");
                     $stmt->execute([
@@ -1259,7 +1275,7 @@ try {
                             customer_name, customer_email, customer_phone,
                             customer_address, customer_message, contact_id,
                             status, valid_until
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)
                     ");
                     $stmt->execute([
                         $reference,
@@ -1634,7 +1650,7 @@ try {
                             margin_percent, photo_url, plan_url, cloned_from_id,
                             pool_shape,
                             pool_longueur, pool_largeur, pool_profondeur
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?,
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?,
                                   ?, ?, ?, ?)
                     ");
                     $stmt->execute([
@@ -1674,7 +1690,7 @@ try {
                             customer_address, customer_message, contact_id,
                             status, valid_until, is_free_quote, quote_title,
                             margin_percent, photo_url, plan_url, cloned_from_id
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?)
                     ");
                     $stmt->execute([
                         $reference,
@@ -1970,7 +1986,7 @@ try {
                         customer_address, customer_message, contact_id,
                         status, valid_until, is_free_quote, quote_title,
                         margin_percent, photo_url, plan_url, cloned_from_id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?)
                 ");
                 $stmt->execute([
                     $reference,
@@ -2340,17 +2356,23 @@ try {
         case 'update_quote_status_by_token': {
             validateRequired($body, ['token', 'status']);
             $token = sanitize($body['token']);
-            $validStatuses = ['approved', 'rejected', 'revision_requested'];
+            $validStatuses = ['approved', 'rejected', 'open'];
             if (!in_array($body['status'], $validStatuses)) fail('Statut invalide');
 
-            $stmt = $db->prepare("SELECT id, status FROM quotes WHERE approval_token = ?");
+            $stmt = $db->prepare("SELECT id, status, customer_email, customer_name, reference_number, model_name, total_price FROM quotes WHERE approval_token = ?");
             $stmt->execute([$token]);
             $quote = $stmt->fetch();
             if (!$quote) fail('Devis non trouvé ou lien invalide', 404);
 
+            $newStatus = $body['status'];
             $db->prepare("UPDATE quotes SET status = ?, updated_at = NOW() WHERE approval_token = ?")
-               ->execute([$body['status'], $token]);
-            ok(['id' => $quote['id'], 'status' => $body['status']]);
+               ->execute([$newStatus, $token]);
+            ok(['id' => $quote['id'], 'status' => $newStatus,
+                'customer_email' => $quote['customer_email'],
+                'customer_name'  => $quote['customer_name'],
+                'reference_number' => $quote['reference_number'],
+                'model_name'     => $quote['model_name'],
+                'total_price'    => $quote['total_price']]);
             break;
         }
 
@@ -3287,6 +3309,7 @@ try {
             $templateDir = __DIR__ . '/pro_deploy';
             $proFiles    = [
                 $templateDir . '/api_index.php'       => 'index.php',
+                $templateDir . '/api_config.php'      => 'config.php',
                 $templateDir . '/api_pro_auth.php'    => 'pro_auth.php',
                 $templateDir . '/api_upload_logo.php' => 'upload_logo.php',
             ];
@@ -3746,6 +3769,21 @@ try {
 
                 // Add is_option to pro_purchase_report_items if missing (upgrade)
                 $addCol('pro_purchase_report_items', 'is_option', "TINYINT(1) DEFAULT 0 AFTER `is_ordered`");
+
+                // ── v1.8.0 ── Expand pro_quotes.status ENUM + add approval_token ──
+                $addCol('pro_quotes', 'approval_token', "VARCHAR(64) DEFAULT NULL AFTER `status`");
+                $proEnumStmt = $proPdo->prepare(
+                    "SELECT COLUMN_TYPE FROM information_schema.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pro_quotes' AND COLUMN_NAME = 'status'"
+                );
+                $proEnumStmt->execute();
+                $proEnumType = (string)($proEnumStmt->fetchColumn() ?? '');
+                if (strpos($proEnumType, "'open'") === false) {
+                    $proPdo->exec("ALTER TABLE `pro_quotes` MODIFY COLUMN `status`
+                        ENUM('draft','open','validated','cancelled','pending','approved','rejected','completed')
+                        NOT NULL DEFAULT 'open'");
+                    $messages[] = "Colonne modifiée : pro_quotes.status (ENUM étendu avec 'open','validated')";
+                }
 
                 // ── New tables (v1.2.0) ────────────────────────────────────────
                 $proPdo->exec("CREATE TABLE IF NOT EXISTS `pro_discounts` (

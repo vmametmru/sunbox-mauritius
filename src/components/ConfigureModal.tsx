@@ -6,7 +6,7 @@ import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useQuote, ModelOption } from '@/contexts/QuoteContext';
-import { api } from '@/lib/api';
+import { api, API_BASE_URL } from '@/lib/api';
 import { useSiteSettings, calculateTTC, calculateHT } from '@/hooks/use-site-settings';
 import { useToast } from '@/hooks/use-toast';
 import { evaluatePoolVariables, evaluateFormula, type PoolDimensions, type PoolVariable } from '@/lib/pool-formulas';
@@ -391,6 +391,59 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
       setSubmittedQuote(result);
       setStep('confirmation');
       toast({ title: 'Succès', description: 'Votre devis a été créé avec succès!' });
+
+      // Send creation notification emails (non-blocking)
+      try {
+        const companySettings = await api.getSettings('company').catch(() => ({})) as any;
+        const adminEmail   = companySettings?.company_email || '';
+        const companyName  = companySettings?.company_name  || 'Sunbox Mauritius';
+        const formatPrice  = (p: number) =>
+          new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 0 }).format(p) + ' Rs';
+        const subject = `Nouveau devis créé – ${result.reference_number} (OUVERT)`;
+        const htmlBody = `
+          <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
+            <div style="background:#1A365D;padding:24px;border-radius:8px 8px 0 0;text-align:center;">
+              <h1 style="color:#fff;margin:0;font-size:20px;">Nouveau Devis – Statut : OUVERT</h1>
+            </div>
+            <div style="background:#f9fafb;padding:24px;border-radius:0 0 8px 8px;">
+              <p>Un nouveau devis a été créé depuis le site public :</p>
+              <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+                <tr><td style="padding:6px;color:#6b7280;">Référence</td><td style="padding:6px;font-weight:bold;">${result.reference_number}</td></tr>
+                <tr><td style="padding:6px;color:#6b7280;">Client</td><td style="padding:6px;">${quoteData.customerName}</td></tr>
+                <tr><td style="padding:6px;color:#6b7280;">Email</td><td style="padding:6px;">${quoteData.customerEmail}</td></tr>
+                <tr><td style="padding:6px;color:#6b7280;">Téléphone</td><td style="padding:6px;">${quoteData.customerPhone}</td></tr>
+                <tr><td style="padding:6px;color:#6b7280;">Modèle</td><td style="padding:6px;">${model?.name || ''}</td></tr>
+                <tr><td style="padding:6px;color:#6b7280;">Total HT</td><td style="padding:6px;">${formatPrice(totalPriceHT)}</td></tr>
+                <tr><td style="padding:6px;color:#6b7280;">Statut</td><td style="padding:6px;font-weight:bold;color:#f97316;">OUVERT</td></tr>
+              </table>
+              <p style="color:#6b7280;font-size:13px;">Ce message a été envoyé automatiquement par ${companyName}.</p>
+            </div>
+          </div>`;
+        const textBody = `Nouveau devis ${result.reference_number} – Statut OUVERT\nClient : ${quoteData.customerName} (${quoteData.customerEmail})`;
+
+        // Send to admin and client
+        const recipients = [adminEmail, quoteData.customerEmail].filter(Boolean);
+        if (recipients.length > 0) {
+          const res = await fetch(`${API_BASE_URL}/email.php?action=send`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              to:      recipients[0],
+              cc:      recipients.slice(1),
+              subject,
+              html:    htmlBody,
+              text:    textBody,
+            }),
+          });
+          if (!res.ok) {
+            const errText = await res.text().catch(() => 'Erreur inconnue');
+            console.warn('Creation notification email HTTP error:', errText);
+          }
+        }
+      } catch (emailErr) {
+        // Non-blocking: email failure should not affect quote creation success
+        console.warn('Creation notification email failed:', emailErr);
+      }
     } catch (err: any) {
       console.error('Quote submission error:', err);
       const userMessage = getErrorMessage(err);

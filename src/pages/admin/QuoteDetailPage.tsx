@@ -81,52 +81,57 @@ export default function QuoteDetailPage() {
       await api.updateQuoteStatus(quote.id, status as any);
       toast({ title: 'Succès', description: 'Statut mis à jour' });
       setQuote({ ...quote, status });
-
-      // Send email notification for status changes
-      if (status === 'approved' || status === 'rejected') {
-        try {
-          if (!quote.customer_email) {
-            toast({ 
-              title: 'Avertissement', 
-              description: 'Email client manquant - notification non envoyée',
-              variant: 'default'
-            });
-            return;
-          }
-
-          const templateKey = status === 'approved' ? 'quote_approved' : 'quote_rejected';
-          const emailData: Record<string, any> = {
-            customer_name: quote.customer_name,
-            reference: quote.reference_number,
-            model_name: quote.model_name,
-            total_price: formatPrice(quote.total_price),
-          };
-          
-          if (status === 'rejected') {
-            emailData.rejection_reason = 'Veuillez nous contacter pour plus de détails.';
-          }
-          
-          await api.sendTemplateEmail({
-            to: quote.customer_email,
-            template_key: templateKey,
-            data: emailData
-          });
-          
-          const message = status === 'approved'
-            ? 'Le client a été notifié de l\'approbation'
-            : 'Le client a été notifié du refus';
-          toast({ title: 'Email envoyé', description: message });
-        } catch (emailErr: any) {
-          console.error('Email error:', emailErr);
-          toast({ 
-            title: 'Avertissement', 
-            description: 'Statut mis à jour mais l\'email n\'a pas pu être envoyé',
-            variant: 'default'
-          });
-        }
-      }
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    }
+  };
+
+  /** Validate quote: set status to 'validated' and send PDF by email to client. */
+  const handleValidateQuote = async () => {
+    if (!quote) return;
+    if (!quote.customer_email) {
+      toast({ title: 'Erreur', description: 'Adresse email client manquante', variant: 'destructive' });
+      return;
+    }
+    setSendingEmail(true);
+    try {
+      // First update status to validated
+      await api.updateQuoteStatus(quote.id, 'validated' as any);
+      setQuote({ ...quote, status: 'validated' });
+
+      // Generate PDF and send to client
+      const opts = await buildPdfOptions();
+      const pdfBase64 = await getQuotePdfBase64(opts);
+      const modelTitle = quote.is_free_quote ? (quote.quote_title || 'Devis') : (quote.model_name || 'Devis');
+      const actionUrl  = `${window.location.origin}/#/quote-action/${quote.id}?token=${quote.approval_token || ''}`;
+
+      await api.sendQuotePdf({
+        to:          quote.customer_email,
+        subject:     `Votre devis ${quote.reference_number} – ${modelTitle} (VALIDÉ)`,
+        html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
+          <div style="background:#1A365D;padding:24px;border-radius:8px 8px 0 0;text-align:center;">
+            <h1 style="color:#fff;margin:0;font-size:20px;">Votre devis est prêt</h1>
+          </div>
+          <div style="background:#f9fafb;padding:24px;border-radius:0 0 8px 8px;">
+            <p>Bonjour <strong>${quote.customer_name}</strong>,</p>
+            <p>Votre devis <strong>${quote.reference_number}</strong> pour <strong>${modelTitle}</strong> a été validé par notre équipe.</p>
+            <p>Vous trouverez le devis complet en pièce jointe (PDF). Ce devis est valable 30 jours.</p>
+            <p>Veuillez cliquer sur le lien ci-dessous pour <strong>approuver</strong>, <strong>demander des modifications</strong> ou <strong>rejeter</strong> ce devis :</p>
+            <div style="text-align:center;margin:24px 0;">
+              <a href="${actionUrl}" style="background:#f97316;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:bold;font-size:15px;">Répondre au devis</a>
+            </div>
+            <p style="color:#6b7280;font-size:13px;">Ou copiez ce lien dans votre navigateur :<br/>${actionUrl}</p>
+            <p style="margin-top:16px;">Cordialement,<br/>L'équipe Sunbox Mauritius</p>
+          </div>
+        </div>`,
+        pdf_base64:  pdfBase64,
+        filename:    `Devis-${quote.reference_number}.pdf`,
+      });
+      toast({ title: 'Devis validé', description: `PDF envoyé à ${quote.customer_email}` });
+    } catch (err: any) {
+      toast({ title: 'Erreur validation', description: err.message, variant: 'destructive' });
+    } finally {
+      setSendingEmail(false);
     }
   };
 
@@ -302,15 +307,20 @@ export default function QuoteDetailPage() {
     }
   };
 
-  const getStatusBadge = (status: string) => {    const styles: Record<string, string> = {
+  const getStatusBadge = (status: string) => {
+    const styles: Record<string, string> = {
+      open:               'bg-yellow-100 text-yellow-800',
       pending:            'bg-yellow-100 text-yellow-800',
+      validated:          'bg-blue-100 text-blue-800',
       approved:           'bg-green-100 text-green-800',
       rejected:           'bg-red-100 text-red-800',
       completed:          'bg-purple-100 text-purple-800',
-      revision_requested: 'bg-blue-100 text-blue-800',
+      revision_requested: 'bg-orange-100 text-orange-800',
     };
     const labels: Record<string, string> = {
+      open:               'Ouvert',
       pending:            'En attente',
+      validated:          'Validé',
       approved:           'Approuvé',
       rejected:           'Rejeté',
       completed:          'Terminé',
@@ -583,25 +593,24 @@ export default function QuoteDetailPage() {
       <Card>
         <CardContent className="p-6">
           <div className="flex flex-wrap gap-2">
-            {/* Quote status flow: pending → approved/rejected → completed */}
-            {quote.status === 'pending' && (
-              <>
-                <Button 
-                  className="bg-green-600 hover:bg-green-700"
-                  onClick={() => updateStatus('approved')}
-                >
-                  <CheckCircle className="h-4 w-4 mr-2" />
-                  Approuver
-                </Button>
-                <Button 
-                  variant="outline" 
-                  className="text-red-600 border-red-300 hover:bg-red-50"
-                  onClick={() => updateStatus('rejected')}
-                >
-                  <XCircle className="h-4 w-4 mr-2" />
-                  Rejeter
-                </Button>
-              </>
+            {/* Quote status flow: open → validated → client approves/rejects/modifies → approved/rejected/open */}
+            {(quote.status === 'open' || quote.status === 'pending') && (
+              <Button
+                className="bg-blue-600 hover:bg-blue-700"
+                onClick={handleValidateQuote}
+                disabled={sendingEmail || generatingPdf}
+              >
+                {sendingEmail
+                  ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  : <Send className="h-4 w-4 mr-2" />}
+                {sendingEmail ? 'Validation en cours…' : 'Valider et envoyer au client'}
+              </Button>
+            )}
+            {quote.status === 'validated' && (
+              <div className="flex items-center gap-2 text-sm text-blue-600 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2">
+                <Mail className="h-4 w-4" />
+                Devis envoyé au client – En attente de sa réponse
+              </div>
             )}
             {quote.status === 'approved' && (
               <Button 
@@ -612,12 +621,12 @@ export default function QuoteDetailPage() {
                 Marquer Terminé
               </Button>
             )}
-            {(quote.status === 'approved' || quote.status === 'rejected' || quote.status === 'completed' || quote.status === 'revision_requested') && (
+            {(quote.status === 'approved' || quote.status === 'rejected' || quote.status === 'completed' || quote.status === 'revision_requested' || quote.status === 'validated') && (
               <Button 
                 variant="outline"
-                onClick={() => updateStatus('pending')}
+                onClick={() => updateStatus('open')}
               >
-                Remettre en attente
+                Remettre à ouvert
               </Button>
             )}
 

@@ -1,12 +1,29 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { CheckCircle, XCircle, MessageSquare, Loader2, AlertCircle, Home } from 'lucide-react';
-import { api } from '@/lib/api';
+import { api, API_BASE_URL } from '@/lib/api';
 import { useQuote } from '@/contexts/QuoteContext';
 import type { Model } from '@/contexts/QuoteContext';
 
 type ActionType = 'approve' | 'reject' | 'changes' | null;
 type PageState = 'loading' | 'confirm' | 'submitting' | 'done' | 'error';
+
+interface QuoteInfo {
+  reference_number: string;
+  customer_name: string;
+  customer_email: string;
+  quote_title?: string;
+  model_name?: string;
+  total_price: number;
+  model_id?: number;
+  model_type?: string;
+  base_price?: number;
+  photo_url?: string;
+  plan_url?: string;
+  customer_phone?: string;
+  customer_address?: string;
+  approval_token?: string;
+}
 
 export default function QuoteActionPage() {
   const { quoteId } = useParams<{ quoteId: string }>();
@@ -45,11 +62,73 @@ export default function QuoteActionPage() {
     }
   };
 
+  /** Send a status-change notification email to the admin/company (no PDF for open/rejected). */
+  const sendStatusNotification = async (action: ActionType, q: QuoteInfo) => {
+    try {
+      // Fetch company email from settings
+      const companySettings = await api.getSettings('company').catch(() => ({})) as any;
+      const adminEmail = companySettings?.company_email || '';
+      if (!adminEmail && !q.customer_email) return;
+
+      const actionLabels: Record<string, string> = {
+        approve: 'APPROUVÉ',
+        reject:  'REJETÉ',
+        changes: 'OUVERT (modification demandée)',
+      };
+      const actionLabel = actionLabels[action || ''] || 'modifié';
+      const modelTitle  = q.quote_title || q.model_name || 'Devis';
+      const formatPriceLocal = (p: number) =>
+        new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 0 }).format(p) + ' Rs';
+
+      const subject = `Devis ${q.reference_number} – Statut : ${actionLabel}`;
+      const htmlBody = `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
+          <div style="background:#1A365D;padding:24px;border-radius:8px 8px 0 0;text-align:center;">
+            <h1 style="color:#fff;margin:0;font-size:20px;">Mise à jour de devis</h1>
+          </div>
+          <div style="background:#f9fafb;padding:24px;border-radius:0 0 8px 8px;">
+            <p>Le client <strong>${q.customer_name}</strong> a répondu au devis :</p>
+            <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+              <tr><td style="padding:6px;color:#6b7280;">Référence</td><td style="padding:6px;font-weight:bold;">${q.reference_number}</td></tr>
+              <tr><td style="padding:6px;color:#6b7280;">Modèle</td><td style="padding:6px;">${modelTitle}</td></tr>
+              <tr><td style="padding:6px;color:#6b7280;">Montant</td><td style="padding:6px;">${formatPriceLocal(Number(q.total_price))}</td></tr>
+              <tr><td style="padding:6px;color:#6b7280;">Nouveau statut</td><td style="padding:6px;font-weight:bold;color:#f97316;">${actionLabel}</td></tr>
+            </table>
+            <p style="color:#6b7280;font-size:13px;">Ce message a été envoyé automatiquement.</p>
+          </div>
+        </div>`;
+
+      const recipients = [adminEmail, q.customer_email].filter(Boolean);
+      if (recipients.length === 0) return;
+
+      const res = await fetch(`${API_BASE_URL}/email.php?action=send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to:      recipients[0],
+          cc:      recipients.slice(1),
+          subject,
+          html:    htmlBody,
+          text:    `Devis ${q.reference_number} – Nouveau statut : ${actionLabel}`,
+        }),
+      });
+      if (!res.ok) {
+        const errText = await res.text().catch(() => 'Erreur inconnue');
+        console.warn('Status notification email failed:', errText);
+      }
+    } catch (e) {
+      // Non-blocking: email failure should not break the action flow
+      console.warn('Status notification email failed:', e);
+    }
+  };
+
   const handleAction = async (action: ActionType) => {
     if (!action) return;
 
     if (action === 'changes') {
-      await submitStatus('revision_requested');
+      // Status goes back to 'open' (OUVERT) when customer requests changes
+      await submitStatus('open');
+      await sendStatusNotification('changes', quote);
       // Pre-load model in QuoteContext and redirect to configurator
       if (quote?.model_id) {
         const model: Model = {
@@ -77,7 +156,9 @@ export default function QuoteActionPage() {
       return;
     }
 
-    await submitStatus(action === 'approve' ? 'approved' : 'rejected');
+    const newStatus = action === 'approve' ? 'approved' : 'rejected';
+    await submitStatus(newStatus);
+    await sendStatusNotification(action, quote);
     setDoneAction(action);
     setPageState('done');
   };

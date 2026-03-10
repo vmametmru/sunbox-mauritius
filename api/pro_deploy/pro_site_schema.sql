@@ -47,7 +47,8 @@ CREATE TABLE IF NOT EXISTS `pro_quotes` (
     `options_total` DECIMAL(12,2) DEFAULT 0,
     `total_price` DECIMAL(12,2) NOT NULL,
     `notes` TEXT,
-    `status` ENUM('pending','approved','rejected','completed') DEFAULT 'pending',
+    `status` ENUM('draft','open','validated','cancelled','pending','approved','rejected','completed') DEFAULT 'open',
+    `approval_token` VARCHAR(64) DEFAULT NULL,
     `valid_until` DATE DEFAULT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -329,4 +330,17 @@ SET @sql = IF(@col_exists > 0, 'SELECT 1', 'ALTER TABLE `pro_quotes` ADD COLUMN 
 PREPARE _stmt FROM @sql; EXECUTE _stmt; DEALLOCATE PREPARE _stmt;
 
 INSERT INTO `pro_schema_version` (`id`, `version`) VALUES (1, '1.7.0')
+ON DUPLICATE KEY UPDATE `version` = VALUES(`version`), `applied_at` = NOW();
+
+-- ── v1.8.0 ── Add approval_token column and expand status ENUM ───────────────
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pro_quotes' AND COLUMN_NAME = 'approval_token');
+SET @sql = IF(@col_exists > 0, 'SELECT 1', 'ALTER TABLE `pro_quotes` ADD COLUMN `approval_token` VARCHAR(64) DEFAULT NULL AFTER `status`');
+PREPARE _stmt FROM @sql; EXECUTE _stmt; DEALLOCATE PREPARE _stmt;
+
+-- Extend status ENUM if 'open' is not yet present
+SET @enum_type = (SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pro_quotes' AND COLUMN_NAME = 'status');
+SET @sql = IF(LOCATE("'open'", @enum_type) > 0, 'SELECT 1', "ALTER TABLE `pro_quotes` MODIFY COLUMN `status` ENUM('draft','open','validated','cancelled','pending','approved','rejected','completed') NOT NULL DEFAULT 'open'");
+PREPARE _stmt FROM @sql; EXECUTE _stmt; DEALLOCATE PREPARE _stmt;
+
+INSERT INTO `pro_schema_version` (`id`, `version`) VALUES (1, '1.8.0')
 ON DUPLICATE KEY UPDATE `version` = VALUES(`version`), `applied_at` = NOW();

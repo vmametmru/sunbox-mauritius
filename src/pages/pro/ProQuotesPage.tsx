@@ -3,11 +3,11 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
-import { FileText, X, ClipboardList, Download, Eye, Loader2, Pencil, Trash2, Filter } from 'lucide-react';
+import { FileText, X, ClipboardList, Download, Eye, Loader2, Pencil, Trash2, Filter, Send, CheckCircle } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { useNavigate } from 'react-router-dom';
-import { downloadQuotePdf } from '@/components/QuotePdfGenerator';
+import { downloadQuotePdf, getQuotePdfBase64, imageUrlToBase64 } from '@/components/QuotePdfGenerator';
 import type { QuotePdfData, PdfDisplaySettings, CompanyInfo } from '@/components/QuotePdfTemplates';
 import AdminConfigureModal from '@/components/AdminConfigureModal';
 
@@ -27,6 +27,7 @@ interface Quote {
   status: string;
   valid_until?: string;
   created_at: string;
+  approval_token?: string;
   boq_requested?: number | boolean;
   purchase_report_id?: number | null;
   pool_shape?: string | null;
@@ -50,10 +51,12 @@ interface Quote {
 }
 
 const statusLabels: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
+  open:      { label: 'Ouvert',    variant: 'secondary' },
   pending:   { label: 'En attente', variant: 'secondary' },
-  approved:  { label: 'Approuvé',   variant: 'default' },
-  rejected:  { label: 'Rejeté',     variant: 'destructive' },
-  completed: { label: 'Complété',   variant: 'default' },
+  validated: { label: 'Validé',    variant: 'outline' },
+  approved:  { label: 'Approuvé',  variant: 'default' },
+  rejected:  { label: 'Rejeté',    variant: 'destructive' },
+  completed: { label: 'Complété',  variant: 'default' },
 };
 
 type TypeFilter = 'all' | 'pool' | 'container';
@@ -85,6 +88,8 @@ export default function ProQuotesPage() {
       .then((s: any) => { if (s?.vat_rate) setVatRate(Number(s.vat_rate) || 15); })
       .catch(() => {});
   }, []);
+
+  const [validatingId, setValidatingId] = useState<number | null>(null);
 
   const toTtc = (ht: number) => Math.round(ht * (1 + vatRate / 100));
 
@@ -122,13 +127,123 @@ export default function ProQuotesPage() {
   };
 
   const handleValidate = async (quote: Quote) => {
-    if (!confirm(`Valider le devis ${quote.reference_number} ?`)) return;
+    if (!quote.customer_email) {
+      toast({ title: 'Erreur', description: 'Adresse email client manquante', variant: 'destructive' });
+      return;
+    }
+    if (!confirm(`Valider le devis ${quote.reference_number} et envoyer le PDF au client ?`)) return;
+    setValidatingId(quote.id);
     try {
-      await api.updateQuoteStatus(quote.id, 'approved');
-      toast({ title: 'Devis validé' });
+      // Update status to 'validated'
+      await api.updateQuoteStatus(quote.id, 'validated' as any);
       loadQuotes();
+      if (selectedQuote?.id === quote.id) setSelectedQuote({ ...selectedQuote, status: 'validated' });
+
+      // Fetch fresh quote data with full details
+      const [pdfContext, fullQuote] = await Promise.all([
+        api.query('get_pdf_context').catch(() => ({} as any)),
+        api.getQuoteWithDetails(quote.id),
+      ]);
+      const pdfSettingsRaw     = pdfContext?.pdf_settings     || {};
+      const companySettingsRaw = pdfContext?.company_settings || {};
+      const logoBase64: string = pdfContext?.logo_base64      || '';
+      const pdfSettings: PdfDisplaySettings = {
+        pdf_primary_color:      pdfSettingsRaw?.pdf_primary_color      || '#1A365D',
+        pdf_accent_color:       pdfSettingsRaw?.pdf_accent_color       || '#f97316',
+        pdf_footer_text:        pdfSettingsRaw?.pdf_footer_text        || '',
+        pdf_terms:              pdfSettingsRaw?.pdf_terms              || '',
+        pdf_bank_details:       pdfSettingsRaw?.pdf_bank_details       || '',
+        pdf_validity_days:      pdfSettingsRaw?.pdf_validity_days      || '30',
+        pdf_show_logo:          pdfSettingsRaw?.pdf_show_logo          || 'true',
+        pdf_show_vat:           pdfSettingsRaw?.pdf_show_vat           || 'true',
+        pdf_show_bank_details:  pdfSettingsRaw?.pdf_show_bank_details  || 'false',
+        pdf_show_terms:         pdfSettingsRaw?.pdf_show_terms         || 'true',
+        pdf_template:           pdfSettingsRaw?.pdf_template           || '1',
+        pdf_font:               pdfSettingsRaw?.pdf_font               || 'inter',
+        pdf_logo_position:      pdfSettingsRaw?.pdf_logo_position      || 'left',
+        pdf_logo_offset_left:   pdfSettingsRaw?.pdf_logo_offset_left   || '0',
+        pdf_logo_offset_right:  pdfSettingsRaw?.pdf_logo_offset_right  || '0',
+        pdf_logo_offset_top:    pdfSettingsRaw?.pdf_logo_offset_top    || '0',
+        pdf_logo_offset_bottom: pdfSettingsRaw?.pdf_logo_offset_bottom || '0',
+      };
+      const company: CompanyInfo = {
+        company_name:    companySettingsRaw?.company_name    || '',
+        company_email:   companySettingsRaw?.company_email   || '',
+        company_phone:   companySettingsRaw?.company_phone   || '',
+        company_address: companySettingsRaw?.company_address || '',
+      };
+      const pdfVatRate = Number(pdfSettingsRaw?.vat_rate) || 15;
+      const pdfData: QuotePdfData = {
+        id:               fullQuote.id,
+        reference_number: fullQuote.reference_number,
+        created_at:       fullQuote.created_at,
+        valid_until:      fullQuote.valid_until,
+        status:           'validated',
+        customer_name:    fullQuote.customer_name  || fullQuote.contact_name  || '',
+        customer_email:   fullQuote.customer_email || fullQuote.contact_email || '',
+        customer_phone:   fullQuote.customer_phone || fullQuote.contact_phone || '',
+        customer_address: fullQuote.customer_address || '',
+        model_name:       fullQuote.model_name,
+        model_type:       fullQuote.model_type,
+        photo_url:        fullQuote.photo_base64 || fullQuote.photo_url,
+        plan_url:         fullQuote.plan_base64  || fullQuote.plan_url,
+        pool_shape:           fullQuote.pool_shape,
+        pool_longueur:        fullQuote.pool_longueur    != null ? Number(fullQuote.pool_longueur)    : null,
+        pool_largeur:         fullQuote.pool_largeur     != null ? Number(fullQuote.pool_largeur)     : null,
+        pool_profondeur:      fullQuote.pool_profondeur  != null ? Number(fullQuote.pool_profondeur)  : null,
+        pool_longueur_la:     fullQuote.pool_longueur_la != null ? Number(fullQuote.pool_longueur_la) : null,
+        pool_largeur_la:      fullQuote.pool_largeur_la  != null ? Number(fullQuote.pool_largeur_la)  : null,
+        pool_profondeur_la:   fullQuote.pool_profondeur_la != null ? Number(fullQuote.pool_profondeur_la) : null,
+        pool_longueur_lb:     fullQuote.pool_longueur_lb != null ? Number(fullQuote.pool_longueur_lb) : null,
+        pool_largeur_lb:      fullQuote.pool_largeur_lb  != null ? Number(fullQuote.pool_largeur_lb)  : null,
+        pool_profondeur_lb:   fullQuote.pool_profondeur_lb != null ? Number(fullQuote.pool_profondeur_lb) : null,
+        pool_longueur_ta:     fullQuote.pool_longueur_ta != null ? Number(fullQuote.pool_longueur_ta) : null,
+        pool_largeur_ta:      fullQuote.pool_largeur_ta  != null ? Number(fullQuote.pool_largeur_ta)  : null,
+        pool_profondeur_ta:   fullQuote.pool_profondeur_ta != null ? Number(fullQuote.pool_profondeur_ta) : null,
+        pool_longueur_tb:     fullQuote.pool_longueur_tb != null ? Number(fullQuote.pool_longueur_tb) : null,
+        pool_largeur_tb:      fullQuote.pool_largeur_tb  != null ? Number(fullQuote.pool_largeur_tb)  : null,
+        pool_profondeur_tb:   fullQuote.pool_profondeur_tb != null ? Number(fullQuote.pool_profondeur_tb) : null,
+        base_price:      Number(fullQuote.base_price),
+        options_total:   Number(fullQuote.options_total),
+        total_price:     Number(fullQuote.total_price),
+        vat_rate:        pdfVatRate,
+        notes:           fullQuote.notes,
+        options:         fullQuote.options,
+        base_categories: fullQuote.base_categories,
+        is_free_quote:   false,
+      };
+
+      const pdfBase64 = await getQuotePdfBase64({ data: pdfData, settings: pdfSettings, company, logoBase64 });
+      const modelTitle = fullQuote.model_name || 'Devis';
+      const customerEmail = fullQuote.customer_email || fullQuote.contact_email || '';
+      const actionUrl = `${window.location.origin}/#/quote-action/${fullQuote.id}?token=${fullQuote.approval_token || ''}`;
+
+      await api.sendQuotePdf({
+        to:         customerEmail,
+        subject:    `Votre devis ${fullQuote.reference_number} – ${modelTitle} (VALIDÉ)`,
+        html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
+          <div style="background:#1A365D;padding:24px;border-radius:8px 8px 0 0;text-align:center;">
+            <h1 style="color:#fff;margin:0;font-size:20px;">Votre devis est prêt</h1>
+          </div>
+          <div style="background:#f9fafb;padding:24px;border-radius:0 0 8px 8px;">
+            <p>Bonjour <strong>${fullQuote.customer_name || fullQuote.contact_name || ''}</strong>,</p>
+            <p>Votre devis <strong>${fullQuote.reference_number}</strong> pour <strong>${modelTitle}</strong> a été validé.</p>
+            <p>Vous trouverez le devis complet en pièce jointe (PDF). Veuillez cliquer sur le bouton ci-dessous pour y répondre :</p>
+            <div style="text-align:center;margin:24px 0;">
+              <a href="${actionUrl}" style="background:#f97316;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:bold;font-size:15px;">Répondre au devis</a>
+            </div>
+            <p style="color:#6b7280;font-size:13px;">Ou copiez ce lien : ${actionUrl}</p>
+            <p style="margin-top:16px;">Cordialement,<br/>${company.company_name || 'Notre équipe'}</p>
+          </div>
+        </div>`,
+        pdf_base64: pdfBase64,
+        filename:   `Devis-${fullQuote.reference_number}.pdf`,
+      });
+      toast({ title: 'Devis validé', description: `PDF envoyé à ${customerEmail}` });
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setValidatingId(null);
     }
   };
 
@@ -295,7 +410,7 @@ export default function ProQuotesPage() {
               {filteredQuotes.map((q) => {
                 const status     = statusLabels[q.status] ?? { label: q.status, variant: 'outline' as const };
                 const isApproved = q.status === 'approved';
-                const isPending  = q.status === 'pending';
+                const isOpen     = q.status === 'open' || q.status === 'pending';
                 return (
                   <tr key={q.id} className="border-b last:border-0 hover:bg-gray-50">
                     <td className="px-4 py-3 font-mono font-medium text-orange-600">
@@ -330,8 +445,10 @@ export default function ProQuotesPage() {
                           title="Supprimer" disabled={deletingId === q.id} onClick={() => handleDelete(q)}>
                           {deletingId === q.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                         </Button>
-                        {isPending && (
-                          <Button size="sm" variant="outline" className="h-7 text-xs px-2" onClick={() => handleValidate(q)}>
+                        {isOpen && (
+                          <Button size="sm" variant="outline" className="h-7 text-xs px-2 bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100"
+                            disabled={validatingId === q.id} onClick={() => handleValidate(q)}>
+                            {validatingId === q.id ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Send className="h-3 w-3 mr-1" />}
                             Valider
                           </Button>
                         )}
@@ -474,10 +591,18 @@ export default function ProQuotesPage() {
                   onClick={() => { const id = selectedQuote!.id; setSelectedQuote(null); setConfiguringQuoteId(id); }}>
                   <Pencil className="h-4 w-4 mr-1" />Modifier
                 </Button>
-                {selectedQuote.status === 'pending' && (
-                  <Button size="sm" onClick={() => { handleValidate(selectedQuote!); setSelectedQuote(null); }}>
-                    Valider
+                {(selectedQuote.status === 'open' || selectedQuote.status === 'pending') && (
+                  <Button size="sm" className="bg-blue-600 hover:bg-blue-700"
+                    disabled={validatingId === selectedQuote.id}
+                    onClick={() => { const q = selectedQuote!; setSelectedQuote(null); handleValidate(q); }}>
+                    {validatingId === selectedQuote.id ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Send className="h-4 w-4 mr-1" />}
+                    Valider et envoyer
                   </Button>
+                )}
+                {selectedQuote.status === 'validated' && (
+                  <div className="flex items-center text-xs text-blue-600 gap-1 px-2">
+                    <CheckCircle className="h-3 w-3" /> En attente de réponse client
+                  </div>
                 )}
                 {selectedQuote.status === 'approved' && (
                   Number(selectedQuote.boq_requested)

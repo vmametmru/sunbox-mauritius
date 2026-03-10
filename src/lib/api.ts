@@ -466,7 +466,7 @@ export const api = {
     return this.query('get_quote_lines', { category_id: categoryId });
   },
 
-  updateQuoteStatus(id: number, status: 'pending' | 'approved' | 'rejected' | 'completed') {
+  updateQuoteStatus(id: number, status: 'open' | 'validated' | 'approved' | 'rejected' | 'completed' | 'pending') {
     return this.query('update_quote_status', { id, status });
   },
 
@@ -633,7 +633,7 @@ export const api = {
     return this.query('get_quote_by_token', { token });
   },
 
-  updateQuoteStatusByToken(token: string, status: 'approved' | 'rejected' | 'revision_requested') {
+  updateQuoteStatusByToken(token: string, status: 'approved' | 'rejected' | 'open') {
     return this.query('update_quote_status_by_token', { token, status });
   },
 
