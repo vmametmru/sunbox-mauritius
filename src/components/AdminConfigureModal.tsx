@@ -13,6 +13,7 @@ import { BOQ_OPTION_ID_OFFSET } from '@/lib/utils';
 interface BOQLine {
   id: number;
   description: string;
+  sub_category_name?: string | null;
 }
 
 interface BOQBaseCategory {
@@ -127,12 +128,16 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
   const [baseCategories, setBaseCategories] = useState<BOQBaseCategory[]>([]);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   
   // Pending options to be selected after options load (stores name and price for BOQ option matching)
   const pendingOptionsRef = React.useRef<PendingOption[]>([]);
   
   // Imported option prices to show variance when current model price differs
   const [importedOptionPrices, setImportedOptionPrices] = useState<ImportedOptionPrice[]>([]);
+
+  // Stored discount ratio from the original quote (0 = no discount, 0.1 = 10%)
+  const [storedDiscountRatio, setStoredDiscountRatio] = useState(0);
   
   // Contact selection
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -159,6 +164,8 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
       setStep('options');
       setErrors({});
       setSavedQuote(null);
+      setLoadError(null);
+      setStoredDiscountRatio(0);
     }
   }, [open, quoteId]);
 
@@ -182,6 +189,7 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
 
   const loadQuoteData = async (id: number) => {
     setLoading(true);
+    setLoadError(null);
     // Reset selected options and imported prices when loading a new quote
     setSelectedOptions([]);
     setImportedOptionPrices([]);
@@ -190,8 +198,14 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
     try {
       const quote = await api.getQuoteWithDetails(id);
       
-      // Load model info
-      const models = await api.getModels(quote.model_type, true);
+      // Load model info — include inactive models so we can edit quotes referencing deactivated models.
+      // Pro API returns { models: [...], ... }; admin API returns a plain array — normalize both.
+      const modelsRaw = await api.getModels(quote.model_type, false);
+      const models: Model[] = Array.isArray(modelsRaw)
+        ? modelsRaw
+        : Array.isArray((modelsRaw as any)?.models)
+          ? (modelsRaw as any).models
+          : [];
       const modelData = models.find((m: Model) => m.id === quote.model_id);
       
       if (modelData) {
@@ -202,6 +216,24 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
           ...modelData,
           base_price: calculateTTC(priceHT, vatRate),
         });
+      } else if (quote.model_id && quote.model_name) {
+        // Fallback: model was not returned by getModels (e.g. disabled via pro_model_overrides).
+        // Construct a minimal model from the quote data so the configurator can still open.
+        // The quote's base_price is the historical price; options are loaded by model id below.
+        const priceHT = parseFloat(quote.base_price) || 0;
+        setModel({
+          id: parseInt(quote.model_id, 10),
+          name: quote.model_name,
+          type: (quote.model_type ?? 'container') as 'container' | 'pool',
+          description: '',
+          base_price: calculateTTC(priceHT, vatRate),
+          calculated_base_price: priceHT,
+          surface_m2: 0,
+          image_url: quote.photo_url || '',
+          plan_url: quote.plan_url || undefined,
+        });
+      } else {
+        setLoadError(`Modèle introuvable pour ce devis (model_id=${quote.model_id}).`);
       }
       
       // Set customer info
@@ -211,6 +243,15 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
       setCustomerAddress(quote.customer_address || '');
       setCustomerMessage(quote.customer_message || '');
       setContactId(quote.contact_id || null);
+
+      // Compute stored discount ratio (applies when quote total < base + options, e.g. a promo was active).
+      // Both base_price and options_total are stored as HT in quotes created via the public configurator.
+      const storedBase    = parseFloat(quote.base_price)    || 0;
+      const storedOptions = parseFloat(quote.options_total) || 0;
+      const storedTotal   = parseFloat(quote.total_price)   || 0;
+      const storedGross   = storedBase + storedOptions;
+      const discountAmt   = storedGross > 0.01 ? storedGross - storedTotal : 0;
+      setStoredDiscountRatio(storedGross > 0.01 && discountAmt > 1 ? discountAmt / storedGross : 0);
       
       // Store options with name and price to be selected after options are loaded
       // This stores the saved quote prices for variance display against current BOQ prices
@@ -222,7 +263,7 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
         }));
       }
     } catch (err: any) {
-      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+      setLoadError(err.message || 'Erreur lors du chargement du devis.');
     } finally {
       setLoading(false);
     }
@@ -257,11 +298,13 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
             const standardOpt = mapped.find(o => o.id === pending.option_id);
             if (standardOpt) {
               matchedOptions.push(standardOpt);
-              // Always store imported price (even if same) so it displays as saved price
-              newImportedPrices.push({
-                option_id: standardOpt.id,
-                imported_price: pending.option_price,
-              });
+              // Only store imported price when positive; 0 means old broken data → fall back to BOQ price.
+              if (pending.option_price > 0) {
+                newImportedPrices.push({
+                  option_id: standardOpt.id,
+                  imported_price: pending.option_price,
+                });
+              }
             }
           }
         }
@@ -283,13 +326,35 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
     if (!model?.id) return;
     try {
       const data = await api.getBOQOptions(model.id);
+
+      // Only keep options that have a non-zero price (parent + sub-category sum).
+      // Zero-price options have no lines anywhere in their tree and are not useful to display.
+      const priced = (data as BOQOption[]).filter(o => parseFloat(o.price_ht) > 0);
+
       const mapped: ModelOption[] = await Promise.all(
-        data.map(async (o: BOQOption) => {
+        priced.map(async (o: BOQOption) => {
           let description = '';
           try {
-            const lines = await api.getBOQCategoryLines(o.id);
+            const lines: BOQLine[] = await api.getBOQCategoryLines(o.id);
             if (lines && lines.length > 0) {
-              description = lines.map((line: BOQLine) => `• ${line.description}`).join('\n');
+              // Group lines by sub_category_name so sub-categories are clearly labelled.
+              // Lines with no sub_category_name belong directly to the parent category.
+              const linesBySubCategory: Record<string, string[]> = {};
+              for (const line of lines) {
+                const key = line.sub_category_name || '';
+                if (!linesBySubCategory[key]) linesBySubCategory[key] = [];
+                linesBySubCategory[key].push(line.description);
+              }
+              const descriptionLines: string[] = [];
+              if (linesBySubCategory['']) {
+                descriptionLines.push(...linesBySubCategory[''].map(d => `• ${d}`));
+              }
+              for (const [subName, descs] of Object.entries(linesBySubCategory)) {
+                if (subName === '') continue;
+                descriptionLines.push(`${subName}:`);
+                descriptionLines.push(...descs.map(d => `  • ${d}`));
+              }
+              description = descriptionLines.join('\n');
             }
           } catch (e) {
             console.error('Error loading BOQ lines for option', o.id, e);
@@ -320,11 +385,15 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
             const boqOpt = mapped.find(o => o.name === pending.option_name);
             if (boqOpt) {
               matchedOptions.push(boqOpt);
-              // Always store imported price so it displays as saved price
-              newImportedPrices.push({
-                option_id: boqOpt.id,
-                imported_price: pending.option_price,
-              });
+              // Only store imported price when it is positive; a stored value of 0 came from an
+              // old broken correlated-subquery result and should be silently discarded so the
+              // option falls back to the current (correct) BOQ price.
+              if (pending.option_price > 0) {
+                newImportedPrices.push({
+                  option_id: boqOpt.id,
+                  imported_price: pending.option_price,
+                });
+              }
             }
           }
         }
@@ -368,7 +437,20 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
     return imported ? imported.imported_price : null;
   };
 
-  // Get price info for an option - returns imported price as main if available, otherwise current BOQ price
+  // Minimum absolute price difference (in Rs) to be considered a genuine BOQ price change.
+  // This absorbs rounding artefacts when comparing stored HT vs stored TTC values.
+  const PRICE_VARIANCE_THRESHOLD = 0.5;
+
+  // Get price info for an option - returns imported price as main if available, otherwise current BOQ price.
+  //
+  // Handles three legacy storage scenarios:
+  //  1. Stored as BOQ HT     → diffAsHT ≈ 0 → no variance (correct)
+  //  2. Stored as BOQ TTC    → diffAsTTC ≈ 0 → no variance (normalize to HT for display)
+  //  3. Stored as discounted price (BOQ_HT * (1 - discountRatio)) → treat as no price change;
+  //     use current BOQ HT as displayPrice so the discount is applied at the total level only.
+  //  4. Stored as 0 (broken old query) → treat as missing; fall back to current BOQ price.
+  //
+  // Variance is only flagged when none of the above explain the difference.
   const getOptionPriceInfo = (optionId: number, currentBOQPrice: number): { 
     displayPrice: number; 
     boqPrice: number; 
@@ -377,12 +459,46 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
     isImported: boolean;
   } => {
     const importedPrice = getImportedPrice(optionId);
+
+    // Case 4: zero stored price means old broken data — fall back to current BOQ price silently.
+    if (importedPrice !== null && importedPrice <= 0) {
+      return { displayPrice: currentBOQPrice, boqPrice: currentBOQPrice, hasVariance: false, variance: 0, isImported: false };
+    }
+
     if (importedPrice !== null) {
-      const variance = currentBOQPrice - importedPrice;
+      const currentBOQPriceTTC = calculateTTC(currentBOQPrice, vatRate);
+      const diffAsHT  = Math.abs(importedPrice - currentBOQPrice);
+      const diffAsTTC = Math.abs(importedPrice - currentBOQPriceTTC);
+
+      // Case 1 & 2: stored value matches current BOQ price (HT or TTC) within rounding tolerance
+      if (diffAsHT <= PRICE_VARIANCE_THRESHOLD || diffAsTTC <= PRICE_VARIANCE_THRESHOLD) {
+        return { displayPrice: currentBOQPrice, boqPrice: currentBOQPrice, hasVariance: false, variance: 0, isImported: false };
+      }
+
+      // Case 3: stored value matches the discounted BOQ price (option_price was saved after discount was applied).
+      // In that case there is no genuine BOQ price change; use current BOQ price and let the discount ratio
+      // handle the reduction at the total level.
+      if (storedDiscountRatio > 0) {
+        const discountedHT  = currentBOQPrice * (1 - storedDiscountRatio);
+        const discountedTTC = calculateTTC(currentBOQPrice, vatRate) * (1 - storedDiscountRatio);
+        const diffAsDiscountedHT  = Math.abs(importedPrice - discountedHT);
+        const diffAsDiscountedTTC = Math.abs(importedPrice - discountedTTC);
+        if (diffAsDiscountedHT <= PRICE_VARIANCE_THRESHOLD || diffAsDiscountedTTC <= PRICE_VARIANCE_THRESHOLD) {
+          return { displayPrice: currentBOQPrice, boqPrice: currentBOQPrice, hasVariance: false, variance: 0, isImported: false };
+        }
+      }
+
+      // Genuine variance — normalize stored price to HT for consistent display.
+      // Minimum-distance heuristic: if the stored value is closer to the current TTC price
+      // than to the HT price, it was likely stored as TTC (pre-fix admin code) — divide out VAT.
+      const normalizedHT = diffAsTTC < diffAsHT
+        ? importedPrice / (1 + vatRate / 100)   // stored as TTC → normalize to HT
+        : importedPrice;                          // stored as HT → keep as-is
+      const variance = currentBOQPrice - normalizedHT;
       return {
-        displayPrice: importedPrice,
+        displayPrice: normalizedHT,
         boqPrice: currentBOQPrice,
-        hasVariance: Math.abs(variance) > 0.01,
+        hasVariance: Math.abs(variance) > PRICE_VARIANCE_THRESHOLD,
         variance,
         isImported: true,
       };
@@ -408,13 +524,9 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
     toast({ title: 'Prix mis à jour', description: 'Tous les prix ont été mis à jour avec les prix BOQ actuels' });
   };
 
-  // Check if any selected options have price variance
+  // Check if any selected options have price variance (uses same normalization as getOptionPriceInfo)
   const hasAnyPriceVariance = (): boolean => {
-    return selectedOptions.some(opt => {
-      const imported = importedOptionPrices.find(p => p.option_id === opt.id);
-      if (!imported) return false;
-      return Math.abs(opt.price - imported.imported_price) > 0.01;
-    });
+    return selectedOptions.some(opt => getOptionPriceInfo(opt.id, opt.price).hasVariance);
   };
 
   // Combine regular options and BOQ options
@@ -447,35 +559,30 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
 
   const isSelected = (id: number) => selectedOptions.some(o => o.id === id);
 
-  // Calculations - use imported prices when available
-  // Note: opt.price is stored in HT, model.base_price is stored in TTC (calculated at load time)
-  
+  // Calculations - use imported prices when available, normalized to HT
   const calculateOptionsTotalHT = () => {
     return selectedOptions.reduce((sum, opt) => {
-      const importedPrice = getImportedPrice(opt.id);
-      const priceToUse = importedPrice !== null ? importedPrice : Number(opt.price || 0);
-      return sum + priceToUse;
-    }, 0);
-  };
-  
-  const calculateOptionsTotalTTC = () => {
-    return selectedOptions.reduce((sum, opt) => {
-      const importedPrice = getImportedPrice(opt.id);
-      const priceToUse = importedPrice !== null ? importedPrice : Number(opt.price || 0);
-      return sum + calculateTTC(priceToUse, vatRate);
+      // getOptionPriceInfo normalizes imported prices from TTC to HT where needed
+      const priceInfo = getOptionPriceInfo(opt.id, opt.price);
+      return sum + priceInfo.displayPrice;
     }, 0);
   };
   
   // Get base price HT (reverse TTC to HT)
   const basePriceHT = Number(model?.base_price ?? 0) / (1 + vatRate / 100);
-  const basePriceTTC = Number(model?.base_price ?? 0);
-  
+
+  // Discount amount in HT (updated as options change, based on the stored ratio)
+  const discountAmountHT = () => {
+    if (storedDiscountRatio <= 0) return 0;
+    return (basePriceHT + calculateOptionsTotalHT()) * storedDiscountRatio;
+  };
+
   const calculateTotalHT = () => {
-    return basePriceHT + calculateOptionsTotalHT();
+    return basePriceHT + calculateOptionsTotalHT() - discountAmountHT();
   };
 
   const calculateTotalTTC = () => {
-    return basePriceTTC + calculateOptionsTotalTTC();
+    return calculateTTC(calculateTotalHT(), vatRate);
   };
 
   // Contact selection
@@ -523,16 +630,18 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
     setIsSubmitting(true);
     
     try {
-      const optionsTotal = calculateOptionsTotalTTC();
-      const totalPrice = calculateTotalTTC();
-      
+      // Store all prices as HT, consistent with the public ConfigureModal.
+      // The PDF generator and quote views treat stored prices as HT and apply VAT on display.
+      const optionsTotalHT = calculateOptionsTotalHT();
+      const totalHT        = calculateTotalHT(); // already applies storedDiscountRatio
+
       const quoteData = {
         model_id: model.id,
         model_name: model.name,
         model_type: model.type,
-        base_price: Number(model.base_price ?? 0),
-        options_total: optionsTotal,
-        total_price: totalPrice,
+        base_price:    Math.round(basePriceHT),
+        options_total: Math.round(optionsTotalHT),
+        total_price:   Math.round(totalHT),
         customer_name: customerName,
         customer_email: customerEmail,
         customer_phone: customerPhone,
@@ -540,13 +649,13 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
         customer_message: customerMessage || '',
         contact_id: contactId || undefined,
         selected_options: selectedOptions.map(opt => {
-          // Use imported price if available, otherwise current BOQ price
-          const importedPrice = getImportedPrice(opt.id);
-          const priceToUse = importedPrice !== null ? importedPrice : opt.price;
+          // Use getOptionPriceInfo to get the normalized HT price (handles TTC-stored legacy quotes).
+          // This ensures the saved option_price is always HT for consistent future variance display.
+          const priceInfo = getOptionPriceInfo(opt.id, opt.price);
           return {
             option_id: opt.id,
             option_name: opt.name,
-            option_price: calculateTTC(priceToUse, vatRate),
+            option_price: Math.round(priceInfo.displayPrice), // always HT
           };
         }),
       };
@@ -590,18 +699,25 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
     setCustomerMessage('');
     setContactId(null);
     setModel(null);
+    setLoadError(null);
     setOptions([]);
     setBOQOptions([]);
     setBaseCategories([]);
     setStep('options');
-    pendingOptionIdsRef.current = [];
+    pendingOptionsRef.current = [];
+    setImportedOptionPrices([]);
+    setStoredDiscountRatio(0);
     setErrors({});
     setSavedQuote(null);
     onClose();
   };
 
-  // Don't render anything if dialog should be closed or model is not loaded yet
-  if (!open || (!model && !loading)) {
+  // Don't render if closed.
+  // In create mode (no quoteId) we also bail out if model isn't set yet and no error.
+  // In edit mode (quoteId set) we always render so loadQuoteData can fire and show the spinner/error.
+  // Note: when model=null and loading=false the content section renders null (empty dialog body),
+  // which covers the brief close-animation window without showing an infinite spinner.
+  if (!open || (!quoteId && !model && !loading && !loadError)) {
     return null;
   }
 
@@ -620,11 +736,17 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
           </div>
         )}
 
-        {loading ? (
+        {loadError ? (
+          <div className="flex flex-col items-center justify-center py-12 gap-4">
+            <AlertTriangle className="w-10 h-10 text-red-500" />
+            <p className="text-sm text-red-700 text-center max-w-sm">{loadError}</p>
+            <Button variant="outline" onClick={handleClose}>Fermer</Button>
+          </div>
+        ) : loading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="w-8 h-8 animate-spin text-orange-500" />
           </div>
-        ) : model && (
+        ) : !model ? null : (
           <div className="space-y-6">
             {/* Header */}
             <div className="flex justify-between items-start border-b pb-4">
@@ -739,7 +861,7 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
                   <div className="flex justify-between items-center">
                     <p className="text-sm text-gray-500">Prix de base TTC</p>
                     <p className="text-sm font-medium text-gray-700">
-                      Rs {basePriceTTC.toLocaleString()}
+                      Rs {Math.round(calculateTTC(basePriceHT, vatRate)).toLocaleString()}
                     </p>
                   </div>
                   <div className="flex justify-between items-center">
@@ -751,9 +873,21 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
                   <div className="flex justify-between items-center">
                     <p className="text-sm text-gray-500">Total options TTC</p>
                     <p className="text-sm font-medium text-gray-700">
-                      Rs {calculateOptionsTotalTTC().toLocaleString()}
+                      Rs {Math.round(calculateTTC(calculateOptionsTotalHT(), vatRate)).toLocaleString()}
                     </p>
                   </div>
+                  {storedDiscountRatio > 0 && (
+                    <div className="flex justify-between items-center pt-1 border-t border-green-200">
+                      <p className="text-sm text-green-700 font-medium">
+                        Remise ({(storedDiscountRatio * 100).toFixed(1)}%)
+                      </p>
+                      <p className="text-sm font-medium text-green-700">
+                        -Rs {Math.round(discountAmountHT()).toLocaleString()} HT
+                        {' / '}
+                        -Rs {Math.round(calculateTTC(discountAmountHT(), vatRate)).toLocaleString()} TTC
+                      </p>
+                    </div>
+                  )}
                   <div className="flex justify-between items-center pt-2 border-t border-gray-200">
                     <p className="text-sm text-gray-500">Total général HT</p>
                     <p className="text-lg font-bold text-gray-700">
@@ -763,7 +897,7 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
                   <div className="flex justify-between items-center">
                     <p className="text-sm text-gray-500">Total général TTC</p>
                     <p className="text-xl font-bold text-orange-600">
-                      Rs {calculateTotalTTC().toLocaleString()}
+                      Rs {Math.round(calculateTotalTTC()).toLocaleString()}
                     </p>
                   </div>
                 </div>
@@ -806,6 +940,9 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
                             <div className="flex-1 divide-y">
                               {opts.map(opt => {
                                 const priceInfo = getOptionPriceInfo(opt.id, opt.price);
+                                const devisTTC  = Math.round(calculateTTC(priceInfo.displayPrice, vatRate));
+                                const boqTTC    = Math.round(calculateTTC(priceInfo.boqPrice, vatRate));
+                                const deltaTTC  = boqTTC - devisTTC;
                                 return (
                                   <div
                                     key={opt.id}
@@ -823,7 +960,7 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
                                           HT: Rs {Math.round(priceInfo.displayPrice).toLocaleString()}
                                         </p>
                                         <p className="text-sm text-orange-600 font-medium">
-                                          TTC: Rs {calculateTTC(priceInfo.displayPrice, vatRate).toLocaleString()}
+                                          TTC: Rs {devisTTC.toLocaleString()}
                                         </p>
                                       </div>
                                       <Switch
@@ -835,13 +972,16 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
                                     {priceInfo.hasVariance && isSelected(opt.id) && (
                                       <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded flex items-center justify-between text-sm">
                                         <div className="flex items-center gap-2 text-amber-600">
-                                          <AlertTriangle className="h-4 w-4" />
+                                          <AlertTriangle className="h-4 w-4 shrink-0" />
                                           <span>
-                                            Prix BOQ actuel: Rs {calculateTTC(priceInfo.boqPrice, vatRate).toLocaleString()}
-                                            {priceInfo.variance > 0 ? (
-                                              <span className="text-red-600 ml-1">(+Rs {calculateTTC(priceInfo.variance, vatRate).toLocaleString()})</span>
+                                            Prix actuel dans le devis TTC&nbsp;: Rs&nbsp;{devisTTC.toLocaleString()}
+                                            {' → '}
+                                            Nouveau Prix TTC&nbsp;: Rs&nbsp;{boqTTC.toLocaleString()}
+                                            {' '}
+                                            {deltaTTC > 0 ? (
+                                              <span className="text-red-600">(+Rs&nbsp;{deltaTTC.toLocaleString()})</span>
                                             ) : (
-                                              <span className="text-green-600 ml-1">(-Rs {calculateTTC(Math.abs(priceInfo.variance), vatRate).toLocaleString()})</span>
+                                              <span className="text-green-600">(-Rs&nbsp;{Math.abs(deltaTTC).toLocaleString()})</span>
                                             )}
                                           </span>
                                         </div>
@@ -1036,7 +1176,7 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
                   </div>
                   <div className="flex justify-between items-center text-sm">
                     <span className="text-gray-600">Prix de base TTC</span>
-                    <span className="font-medium">Rs {basePriceTTC.toLocaleString()}</span>
+                    <span className="font-medium">Rs {Math.round(calculateTTC(basePriceHT, vatRate)).toLocaleString()}</span>
                   </div>
                   {selectedOptions.length > 0 && (
                     <>
@@ -1046,9 +1186,15 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
                       </div>
                       <div className="flex justify-between items-center text-sm">
                         <span className="text-gray-600">Options TTC ({selectedOptions.length})</span>
-                        <span className="font-medium">Rs {calculateOptionsTotalTTC().toLocaleString()}</span>
+                        <span className="font-medium">Rs {Math.round(calculateTTC(calculateOptionsTotalHT(), vatRate)).toLocaleString()}</span>
                       </div>
                     </>
+                  )}
+                  {storedDiscountRatio > 0 && (
+                    <div className="flex justify-between items-center text-sm border-t border-green-200 pt-1">
+                      <span className="text-green-700 font-medium">Remise ({(storedDiscountRatio * 100).toFixed(1)}%)</span>
+                      <span className="text-green-700 font-medium">-Rs {Math.round(discountAmountHT()).toLocaleString()} HT</span>
+                    </div>
                   )}
                   <div className="flex justify-between items-center pt-2 border-t border-gray-200">
                     <span className="font-semibold">Total HT</span>
@@ -1056,7 +1202,7 @@ const AdminConfigureModal: React.FC<AdminConfigureModalProps> = ({ open, onClose
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="font-semibold">Total TTC</span>
-                    <span className="text-xl font-bold text-orange-600">Rs {calculateTotalTTC().toLocaleString()}</span>
+                    <span className="text-xl font-bold text-orange-600">Rs {Math.round(calculateTotalTTC()).toLocaleString()}</span>
                   </div>
                 </div>
 

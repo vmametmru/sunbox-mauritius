@@ -19,7 +19,16 @@ export const api = {
       body: JSON.stringify(data),
     });
 
-    const result = await response.json();
+    const text = await response.text();
+    if (!text.trim()) {
+      throw new Error(`Réponse vide du serveur (action: ${action})`);
+    }
+    let result: any;
+    try {
+      result = JSON.parse(text);
+    } catch (parseErr: any) {
+      throw new Error(`Réponse invalide du serveur (action: ${action}): ${parseErr.message}`);
+    }
     if (!response.ok || result.error) {
       throw new Error(result.error || 'API request failed');
     }
@@ -338,6 +347,11 @@ export const api = {
     model_id?: number;
     model_name?: string;
     model_type?: 'container' | 'pool';
+    // Pool dimensions (for pool model-based quotes)
+    pool_shape?: string;
+    pool_longueur?: number | null;
+    pool_largeur?: number | null;
+    pool_profondeur?: number | null;
     // Pricing
     base_price?: number;
     options_total?: number;
@@ -377,6 +391,11 @@ export const api = {
     model_id?: number;
     model_name?: string;
     model_type?: 'container' | 'pool';
+    // Pool dimensions (for pool model-based quotes)
+    pool_shape?: string;
+    pool_longueur?: number | null;
+    pool_largeur?: number | null;
+    pool_profondeur?: number | null;
     base_price?: number;
     options_total?: number;
     total_price?: number;

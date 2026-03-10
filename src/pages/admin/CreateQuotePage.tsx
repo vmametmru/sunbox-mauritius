@@ -247,6 +247,11 @@ export default function CreateQuotePage() {
   const [modelBOQPrice, setModelBOQPrice] = useState<number | null>(null);
   const [expandedOptionCategories, setExpandedOptionCategories] = useState<string[]>([]);
   const [lightbox, setLightbox] = useState<string | null>(null);
+
+  // Pool dimensions for pool-type model-based quotes
+  const [poolLongueur, setPoolLongueur] = useState<string>('');
+  const [poolLargeur, setPoolLargeur] = useState<string>('');
+  const [poolProfondeur, setPoolProfondeur] = useState<string>('');
   
   // Counter to force model options reload (incremented when importing same model)
   const [modelOptionsRefreshKey, setModelOptionsRefreshKey] = useState(0);
@@ -435,6 +440,11 @@ export default function CreateQuotePage() {
         // Model IDs are positive integers, so 0 or negative values are invalid
         const modelId = Number(quote.model_id);
         
+        // Restore pool dimensions if this is a pool quote
+        setPoolLongueur(quote.pool_longueur != null ? String(quote.pool_longueur) : '');
+        setPoolLargeur(quote.pool_largeur != null ? String(quote.pool_largeur) : '');
+        setPoolProfondeur(quote.pool_profondeur != null ? String(quote.pool_profondeur) : '');
+
         // Clear current selected options and imported prices before loading
         setSelectedOptions([]);
         setImportedOptionPrices([]);
@@ -923,10 +933,17 @@ export default function CreateQuotePage() {
         } else {
           updateData.model_id = selectedModelId;
           updateData.model_name = selectedModel?.name;
-          updateData.model_type = 'container';
+          updateData.model_type = selectedModel?.type ?? 'container';
           updateData.base_price = modelBasePrice;
           updateData.options_total = modelOptionsTotal;
           updateData.total_price = modelTotalPrice;
+          // Include pool dimensions when the selected model is a pool
+          if (selectedModel?.type === 'pool') {
+            updateData.pool_shape     = selectedModel.pool_shape ?? 'Rectangulaire';
+            updateData.pool_longueur  = poolLongueur  !== '' ? Number(poolLongueur)  : null;
+            updateData.pool_largeur   = poolLargeur   !== '' ? Number(poolLargeur)   : null;
+            updateData.pool_profondeur = poolProfondeur !== '' ? Number(poolProfondeur) : null;
+          }
           updateData.selected_options = selectedOptions.map(id => {
             // Use imported price if available, otherwise current BOQ price
             const importedPrice = getImportedPrice(id);
@@ -984,10 +1001,17 @@ export default function CreateQuotePage() {
         } else {
           quoteData.model_id = selectedModelId;
           quoteData.model_name = selectedModel?.name;
-          quoteData.model_type = 'container';
+          quoteData.model_type = selectedModel?.type ?? 'container';
           quoteData.base_price = modelBasePrice;
           quoteData.options_total = modelOptionsTotal;
           quoteData.total_price = modelTotalPrice;
+          // Include pool dimensions when the selected model is a pool
+          if (selectedModel?.type === 'pool') {
+            quoteData.pool_shape      = selectedModel.pool_shape ?? 'Rectangulaire';
+            quoteData.pool_longueur   = poolLongueur   !== '' ? Number(poolLongueur)   : null;
+            quoteData.pool_largeur    = poolLargeur    !== '' ? Number(poolLargeur)    : null;
+            quoteData.pool_profondeur = poolProfondeur !== '' ? Number(poolProfondeur) : null;
+          }
           quoteData.selected_options = selectedOptions.map(id => {
             // Use imported price if available, otherwise current BOQ price
             const importedPrice = getImportedPrice(id);
@@ -2242,6 +2266,56 @@ export default function CreateQuotePage() {
                     </div>
                   </CardContent>
                 </Card>
+
+                {/* Pool Dimensions Card – only shown for pool models */}
+                {selectedModel.type === 'pool' && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Dimensions de la Piscine</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="grid grid-cols-3 gap-4">
+                        <div>
+                          <Label htmlFor="poolLongueur">Longueur (m)</Label>
+                          <Input
+                            id="poolLongueur"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={poolLongueur}
+                            onChange={(e) => setPoolLongueur(e.target.value)}
+                            placeholder="ex : 8.00"
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="poolLargeur">Largeur (m)</Label>
+                          <Input
+                            id="poolLargeur"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={poolLargeur}
+                            onChange={(e) => setPoolLargeur(e.target.value)}
+                            placeholder="ex : 4.00"
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="poolProfondeur">Profondeur (m)</Label>
+                          <Input
+                            id="poolProfondeur"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={poolProfondeur}
+                            onChange={(e) => setPoolProfondeur(e.target.value)}
+                            placeholder="ex : 1.50"
+                          />
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
               </div>
 
               {/* Sidebar for Step 3 */}
