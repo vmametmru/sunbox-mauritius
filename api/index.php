@@ -3309,6 +3309,7 @@ try {
             $templateDir = __DIR__ . '/pro_deploy';
             $proFiles    = [
                 $templateDir . '/api_index.php'       => 'index.php',
+                $templateDir . '/api_config.php'      => 'config.php',
                 $templateDir . '/api_pro_auth.php'    => 'pro_auth.php',
                 $templateDir . '/api_upload_logo.php' => 'upload_logo.php',
             ];

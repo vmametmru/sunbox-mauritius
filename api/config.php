@@ -278,6 +278,6 @@ function sanitize($value) {
 
 function generateQuoteReference(): string {
     $date = date('Ymd');
-    $random = strtoupper(substr(md5(uniqid(mt_rand(), true)), 0, 4));
+    $random = strtoupper(substr(md5(uniqid('', true)), 0, 4));
     return "SBX-{$date}-{$random}";
 }
