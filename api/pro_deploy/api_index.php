@@ -1594,6 +1594,85 @@ try {
             break;
         }
 
+        // ── Debug info (Pro admin) ────────────────────────────────────────────
+        case 'get_debug_info': {
+            requireAdmin();
+            $info = [];
+
+            // PHP environment
+            $info['php'] = [
+                'version'       => PHP_VERSION,
+                'os'            => PHP_OS,
+                'sapi'          => PHP_SAPI,
+                'memory_limit'  => ini_get('memory_limit'),
+                'max_exec_time' => ini_get('max_execution_time'),
+                'upload_max'    => ini_get('upload_max_filesize'),
+                'error_log'     => ini_get('error_log') ?: null,
+                'extensions'    => [
+                    'zip'       => extension_loaded('zip'),
+                    'pdo'       => extension_loaded('pdo'),
+                    'pdo_mysql' => extension_loaded('pdo_mysql'),
+                ],
+            ];
+
+            // Pro site database
+            try {
+                $proDB = getDB();
+                $row   = $proDB->query("SELECT VERSION() AS v")->fetch();
+                $info['db_pro'] = ['status' => 'ok', 'version' => $row['v']];
+            } catch (\Throwable $e) {
+                $info['db_pro'] = ['status' => 'error', 'error' => API_DEBUG ? $e->getMessage() : 'Connexion échouée'];
+            }
+
+            // Sunbox database
+            try {
+                $sdb = getSunboxDB();
+                $row = $sdb->query("SELECT VERSION() AS v")->fetch();
+                $info['db_sunbox'] = ['status' => 'ok', 'version' => $row['v']];
+            } catch (\Throwable $e) {
+                $info['db_sunbox'] = ['status' => 'error', 'error' => API_DEBUG ? $e->getMessage() : 'Connexion échouée'];
+            }
+
+            // .env values (sanitized — no credentials)
+            $info['env'] = [
+                'app_url'          => (string)env('APP_URL', ''),
+                'api_debug'        => API_DEBUG,
+                'sunbox_user_id'   => SUNBOX_USER_ID,
+                'vat_rate'         => VAT_RATE,
+                'pro_file_version' => PRO_FILE_VERSION,
+                'db_name'          => (string)env('DB_NAME', ''),
+            ];
+
+            // Session (partial — no sensitive data)
+            startSession();
+            $info['session'] = [
+                'is_pro_user' => !empty($_SESSION['is_pro_user']),
+                'session_id'  => session_id() ? substr(session_id(), 0, 8) . '...' : null,
+            ];
+
+            // Server
+            $info['server'] = [
+                'timestamp' => date('Y-m-d H:i:s'),
+                'timezone'  => date_default_timezone_get(),
+                'software'  => $_SERVER['SERVER_SOFTWARE'] ?? 'unknown',
+            ];
+
+            // PHP error log tail (last 60 lines)
+            $errorLogPath = ini_get('error_log');
+            $logLines     = [];
+            if ($errorLogPath && is_file($errorLogPath) && is_readable($errorLogPath)) {
+                $all = @file($errorLogPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+                if ($all !== false) {
+                    $logLines = array_values(array_slice($all, -60));
+                }
+            }
+            $info['error_log_tail'] = $logLines;
+            $info['error_log_path'] = $errorLogPath ?: null;
+
+            ok($info);
+            break;
+        }
+
         default:
             fail('Action inconnue.', 400);
     }

@@ -8,31 +8,66 @@ export const API_BASE_URL: string =
     : 'https://sunbox-mauritius.com/api';
 // const API_BASE_URL = 'http://localhost/sunbox/api';
 
+// ── API call logger ───────────────────────────────────────────────────────────
+export interface ApiLogEntry {
+  id: number;
+  action: string;
+  timestamp: string;   // ISO 8601
+  durationMs: number;
+  status: 'ok' | 'error';
+  error?: string;
+}
+
+let _logCounter = 0;
+const _logs: ApiLogEntry[] = [];
+const LOG_MAX = 100;
+
+export function getApiLogs(): ApiLogEntry[] {
+  return [..._logs];
+}
+
+export function clearApiLogs(): void {
+  _logs.length = 0;
+  _logCounter  = 0;
+}
+
+function _pushLog(entry: ApiLogEntry): void {
+  _logs.unshift(entry); // newest first
+  if (_logs.length > LOG_MAX) _logs.length = LOG_MAX;
+}
+
 export const api = {
   /* =====================================================
      GENERIC
   ===================================================== */
   async query(action: string, data: Record<string, any> = {}) {
-    const response = await fetch(`${API_BASE_URL}/index.php?action=${action}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-
-    const text = await response.text();
-    if (!text.trim()) {
-      throw new Error(`Réponse vide du serveur (action: ${action})`);
-    }
-    let result: any;
+    const startMs = Date.now();
     try {
-      result = JSON.parse(text);
-    } catch (parseErr: any) {
-      throw new Error(`Réponse invalide du serveur (action: ${action}): ${parseErr.message}`);
+      const response = await fetch(`${API_BASE_URL}/index.php?action=${action}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+
+      const text = await response.text();
+      if (!text.trim()) {
+        throw new Error(`Réponse vide du serveur (action: ${action})`);
+      }
+      let result: any;
+      try {
+        result = JSON.parse(text);
+      } catch (parseErr: any) {
+        throw new Error(`Réponse invalide du serveur (action: ${action}): ${parseErr.message}`);
+      }
+      if (!response.ok || result.error) {
+        throw new Error(result.error || 'API request failed');
+      }
+      _pushLog({ id: ++_logCounter, action, timestamp: new Date().toISOString(), durationMs: Date.now() - startMs, status: 'ok' });
+      return result.data !== undefined ? result.data : result;
+    } catch (err: any) {
+      _pushLog({ id: ++_logCounter, action, timestamp: new Date().toISOString(), durationMs: Date.now() - startMs, status: 'error', error: err.message });
+      throw err;
     }
-    if (!response.ok || result.error) {
-      throw new Error(result.error || 'API request failed');
-    }
-    return result.data !== undefined ? result.data : result;
   },
 
   /* =====================================================
@@ -992,6 +1027,17 @@ export const api = {
 
   deleteReport(id: number) {
     return this.query('delete_purchase_report', { id });
+  },
+
+  /* =====================================================
+     DEBUG
+  ===================================================== */
+  getDebugInfo() {
+    return this.query('get_debug_info');
+  },
+
+  propagateProApiFiles() {
+    return this.query('propagate_pro_api_files');
   },
 };
 

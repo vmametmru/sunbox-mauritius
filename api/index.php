@@ -3189,6 +3189,135 @@ try {
             break;
         }
 
+        // ── Debug info (Sunbox admin) ─────────────────────────────────────────
+        case 'get_debug_info': {
+            requireAdmin();
+            $info = [];
+
+            // PHP environment
+            $info['php'] = [
+                'version'       => PHP_VERSION,
+                'os'            => PHP_OS,
+                'sapi'          => PHP_SAPI,
+                'memory_limit'  => ini_get('memory_limit'),
+                'max_exec_time' => ini_get('max_execution_time'),
+                'upload_max'    => ini_get('upload_max_filesize'),
+                'post_max'      => ini_get('post_max_size'),
+                'error_log'     => ini_get('error_log') ?: null,
+                'extensions'    => [
+                    'zip'       => extension_loaded('zip'),
+                    'pdo'       => extension_loaded('pdo'),
+                    'pdo_mysql' => extension_loaded('pdo_mysql'),
+                    'json'      => extension_loaded('json'),
+                    'mbstring'  => extension_loaded('mbstring'),
+                    'openssl'   => extension_loaded('openssl'),
+                ],
+            ];
+
+            // Database
+            try {
+                $row = $db->query("SELECT VERSION() AS v, @@character_set_database AS cs, @@collation_database AS co")->fetch();
+                $info['db'] = ['status' => 'ok', 'version' => $row['v'], 'charset' => $row['cs'], 'collation' => $row['co']];
+            } catch (\Throwable $e) {
+                $info['db'] = ['status' => 'error', 'error' => API_DEBUG ? $e->getMessage() : 'Connexion échouée'];
+            }
+
+            // Version constants
+            $info['versions'] = [
+                'pro_file'  => PRO_FILE_VERSION,
+                'pro_db'    => PRO_DB_SCHEMA_VERSION,
+                'sunbox_db' => SUNBOX_DB_SCHEMA_VERSION,
+            ];
+
+            // Server
+            $info['server'] = [
+                'software'  => $_SERVER['SERVER_SOFTWARE'] ?? 'unknown',
+                'timestamp' => date('Y-m-d H:i:s'),
+                'timezone'  => date_default_timezone_get(),
+            ];
+
+            // Pro sites status
+            $proSites = [];
+            try {
+                $stmt = $db->query("SELECT user_id, domain, db_name, company_name FROM professional_profiles WHERE domain IS NOT NULL AND domain != '' ORDER BY domain");
+                while ($r = $stmt->fetch()) {
+                    $siteDir = proSiteDir((string)$r['domain']);
+                    $vFile   = $siteDir . '/.deploy_version';
+                    $ver     = is_file($vFile) ? trim((string)file_get_contents($vFile)) : null;
+                    $proSites[] = [
+                        'user_id'          => $r['user_id'],
+                        'domain'           => $r['domain'],
+                        'company_name'     => $r['company_name'],
+                        'db_name'          => $r['db_name'],
+                        'deployed_version' => $ver,
+                        'up_to_date'       => $ver ? version_compare($ver, PRO_FILE_VERSION) >= 0 : false,
+                        'site_dir_exists'  => is_dir($siteDir),
+                        'api_dir_exists'   => is_dir($siteDir . '/api'),
+                    ];
+                }
+            } catch (\Throwable $e) {
+                $proSites = ['error' => API_DEBUG ? $e->getMessage() : 'Requête échouée'];
+            }
+            $info['pro_sites'] = $proSites;
+
+            // PHP error log tail (last 60 lines)
+            $errorLogPath = ini_get('error_log');
+            $logLines     = [];
+            if ($errorLogPath && is_file($errorLogPath) && is_readable($errorLogPath)) {
+                $all = @file($errorLogPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+                if ($all !== false) {
+                    $logLines = array_values(array_slice($all, -60));
+                }
+            }
+            $info['error_log_tail']  = $logLines;
+            $info['error_log_path']  = $errorLogPath ?: null;
+
+            ok($info);
+            break;
+        }
+
+        // ── Manually propagate API template files to all pro sites ─────────────
+        case 'propagate_pro_api_files': {
+            requireAdmin();
+            $templateDir = __DIR__ . '/pro_deploy';
+            $proFiles    = [
+                $templateDir . '/api_index.php'       => 'index.php',
+                $templateDir . '/api_pro_auth.php'    => 'pro_auth.php',
+                $templateDir . '/api_upload_logo.php' => 'upload_logo.php',
+            ];
+            $prosDir    = rtrim(dirname(__DIR__), '/') . '/pros';
+            $updated    = 0;
+            $warnings   = [];
+
+            if (!is_dir($prosDir)) {
+                fail("Dossier pros introuvable: {$prosDir}", 404);
+            }
+
+            $proApiDirs = glob($prosDir . '/*/api');
+            if ($proApiDirs === false) {
+                fail("glob() échoué pour {$prosDir}");
+            }
+
+            foreach ($proApiDirs as $proApiDir) {
+                if (!is_dir($proApiDir)) continue;
+                foreach ($proFiles as $src => $destFile) {
+                    if (!is_file($src)) {
+                        $warnings[] = "Template introuvable: {$src}";
+                        continue;
+                    }
+                    if (!copy($src, $proApiDir . '/' . $destFile)) {
+                        $warnings[] = "Échec copie {$destFile} → {$proApiDir}";
+                    }
+                }
+                // Update .deploy_version
+                @file_put_contents(dirname($proApiDir) . '/.deploy_version', PRO_FILE_VERSION);
+                $updated++;
+            }
+
+            ok(['updated' => $updated, 'warnings' => $warnings, 'version' => PRO_FILE_VERSION]);
+            break;
+        }
+
         // ── Check deployed versions (files + DB schema) ───────────────────────
         case 'check_pro_versions': {
             validateRequired($body, ['user_id']);

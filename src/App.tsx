@@ -43,6 +43,7 @@ import DevIdeasPage from "./pages/admin/DevIdeasPage";
 import DiscountsPage from "./pages/admin/DiscountsPage";
 import UsersPage from "./pages/admin/UsersPage";
 import DeployUpdatePage from "./pages/admin/DeployUpdatePage";
+import DebugPage from "./pages/admin/DebugPage";
 
 // Pro Pages
 import ProLoginPage from "./pages/pro/ProLoginPage";
@@ -53,6 +54,7 @@ import ProSettingsPage from "./pages/pro/ProSettingsPage";
 import ProModelRequestPage from "./pages/pro/ProModelRequestPage";
 import ProModelsOverridePage from "./pages/pro/ProModelsOverridePage";
 import RequirePro from "./components/RequirePro";
+import ProDebugPage from "./pages/pro/ProDebugPage";
 import PurchaseReportsPage from "./pages/admin/PurchaseReportsPage";
 import PurchaseReportDetailPage from "./pages/admin/PurchaseReportDetailPage";
 import ProAdminContactsPage from "./pages/admin/ContactsPage";
@@ -108,6 +110,7 @@ const App = () => (
                   <Route path="discounts" element={<DiscountsPage />} />
                   <Route path="users"    element={<UsersPage />} />
                   <Route path="deploy"   element={<DeployUpdatePage />} />
+                  <Route path="debug"    element={<DebugPage />} />
                 </Route>
               </Route>
 
@@ -128,6 +131,7 @@ const App = () => (
                   <Route path="email" element={<ProAdminEmailPage />} />
                   <Route path="payments" element={<ProAdminPaymentsPage />} />
                   <Route path="site" element={<ProAdminSitePage />} />
+                  <Route path="debug" element={<ProDebugPage />} />
                 </Route>
               </Route>
 
