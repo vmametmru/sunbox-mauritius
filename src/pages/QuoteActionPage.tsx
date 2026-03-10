@@ -8,6 +8,23 @@ import type { Model } from '@/contexts/QuoteContext';
 type ActionType = 'approve' | 'reject' | 'changes' | null;
 type PageState = 'loading' | 'confirm' | 'submitting' | 'done' | 'error';
 
+interface QuoteInfo {
+  reference_number: string;
+  customer_name: string;
+  customer_email: string;
+  quote_title?: string;
+  model_name?: string;
+  total_price: number;
+  model_id?: number;
+  model_type?: string;
+  base_price?: number;
+  photo_url?: string;
+  plan_url?: string;
+  customer_phone?: string;
+  customer_address?: string;
+  approval_token?: string;
+}
+
 export default function QuoteActionPage() {
   const { quoteId } = useParams<{ quoteId: string }>();
   const [searchParams] = useSearchParams();
@@ -46,7 +63,7 @@ export default function QuoteActionPage() {
   };
 
   /** Send a status-change notification email to the admin/company (no PDF for open/rejected). */
-  const sendStatusNotification = async (action: ActionType, q: any) => {
+  const sendStatusNotification = async (action: ActionType, q: QuoteInfo) => {
     try {
       // Fetch company email from settings
       const companySettings = await api.getSettings('company').catch(() => ({})) as any;
@@ -60,7 +77,7 @@ export default function QuoteActionPage() {
       };
       const actionLabel = actionLabels[action || ''] || 'modifié';
       const modelTitle  = q.quote_title || q.model_name || 'Devis';
-      const formatPrice = (p: number) =>
+      const formatPriceLocal = (p: number) =>
         new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 0 }).format(p) + ' Rs';
 
       const subject = `Devis ${q.reference_number} – Statut : ${actionLabel}`;
@@ -74,7 +91,7 @@ export default function QuoteActionPage() {
             <table style="width:100%;border-collapse:collapse;margin:16px 0;">
               <tr><td style="padding:6px;color:#6b7280;">Référence</td><td style="padding:6px;font-weight:bold;">${q.reference_number}</td></tr>
               <tr><td style="padding:6px;color:#6b7280;">Modèle</td><td style="padding:6px;">${modelTitle}</td></tr>
-              <tr><td style="padding:6px;color:#6b7280;">Montant</td><td style="padding:6px;">${formatPrice(Number(q.total_price))}</td></tr>
+              <tr><td style="padding:6px;color:#6b7280;">Montant</td><td style="padding:6px;">${formatPriceLocal(Number(q.total_price))}</td></tr>
               <tr><td style="padding:6px;color:#6b7280;">Nouveau statut</td><td style="padding:6px;font-weight:bold;color:#f97316;">${actionLabel}</td></tr>
             </table>
             <p style="color:#6b7280;font-size:13px;">Ce message a été envoyé automatiquement.</p>
@@ -84,7 +101,7 @@ export default function QuoteActionPage() {
       const recipients = [adminEmail, q.customer_email].filter(Boolean);
       if (recipients.length === 0) return;
 
-      await fetch(`${API_BASE_URL}/email.php?action=send`, {
+      const res = await fetch(`${API_BASE_URL}/email.php?action=send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -95,6 +112,10 @@ export default function QuoteActionPage() {
           text:    `Devis ${q.reference_number} – Nouveau statut : ${actionLabel}`,
         }),
       });
+      if (!res.ok) {
+        const errText = await res.text().catch(() => 'Erreur inconnue');
+        console.warn('Status notification email failed:', errText);
+      }
     } catch (e) {
       // Non-blocking: email failure should not break the action flow
       console.warn('Status notification email failed:', e);

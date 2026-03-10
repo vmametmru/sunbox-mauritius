@@ -424,7 +424,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
         // Send to admin and client
         const recipients = [adminEmail, quoteData.customerEmail].filter(Boolean);
         if (recipients.length > 0) {
-          await fetch(`${API_BASE_URL}/email.php?action=send`, {
+          const res = await fetch(`${API_BASE_URL}/email.php?action=send`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -435,6 +435,10 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
               text:    textBody,
             }),
           });
+          if (!res.ok) {
+            const errText = await res.text().catch(() => 'Erreur inconnue');
+            console.warn('Creation notification email HTTP error:', errText);
+          }
         }
       } catch (emailErr) {
         // Non-blocking: email failure should not affect quote creation success
