@@ -44,6 +44,7 @@ import DiscountsPage from "./pages/admin/DiscountsPage";
 import UsersPage from "./pages/admin/UsersPage";
 import DeployUpdatePage from "./pages/admin/DeployUpdatePage";
 import DebugPage from "./pages/admin/DebugPage";
+import ProModelRequestsPage from "./pages/admin/ProModelRequestsPage";
 
 // Pro Pages
 import ProLoginPage from "./pages/pro/ProLoginPage";
@@ -95,6 +96,7 @@ const App = () => (
                   <Route path="quotes/:id" element={<QuoteDetailPage />} />
                   <Route path="reports" element={<PurchaseReportsPage />} />
                   <Route path="reports/:id" element={<PurchaseReportDetailPage />} />
+                  <Route path="model-requests" element={<ProModelRequestsPage />} />
                   <Route path="contacts" element={<ContactsPage />} />
                   <Route path="models" element={<AdminModelsPage />} />
                   <Route path="media" element={<MediaPage />} />

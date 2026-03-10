@@ -971,7 +971,7 @@ export const api = {
     return this.query('create_model_request', req);
   },
 
-  updateModelRequest(req: { id: number; status: string; admin_notes?: string }) {
+  updateModelRequest(req: { id: number; status?: string; admin_notes?: string; linked_model_id?: number | null }) {
     return this.query('update_model_request', req);
   },
 

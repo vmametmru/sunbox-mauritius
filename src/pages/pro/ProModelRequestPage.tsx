@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { Cpu, Plus, Upload } from 'lucide-react';
+import { Cpu, Plus, Upload, Link2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 
@@ -19,6 +19,8 @@ interface ModelRequest {
   sketch_url: string | null;
   status: 'pending' | 'in_review' | 'completed' | 'rejected';
   admin_notes: string | null;
+  linked_model_id: number | null;
+  linked_model_name: string | null;
   created_at: string;
 }
 
@@ -252,6 +254,12 @@ export default function ProModelRequestPage() {
                         {req.admin_notes && (
                           <p className="mt-2 text-xs text-blue-700 bg-blue-50 rounded px-2 py-1">
                             Note admin : {req.admin_notes}
+                          </p>
+                        )}
+                        {req.linked_model_name && (
+                          <p className="mt-2 text-xs text-green-700 bg-green-50 rounded px-2 py-1 flex items-center gap-1">
+                            <Link2 className="h-3 w-3 flex-shrink-0" />
+                            Modèle créé : <span className="font-semibold">{req.linked_model_name}</span>
                           </p>
                         )}
                       </div>
