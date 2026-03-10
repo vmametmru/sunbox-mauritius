@@ -17,7 +17,8 @@ import {
   TrendingUp,
   Receipt,
   RotateCcw,
-  AlertTriangle
+  AlertTriangle,
+  Save
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -177,6 +178,10 @@ export default function BOQPage() {
   const [isLineDialogOpen, setIsLineDialogOpen] = useState(false);
   const [isImageSelectorOpen, setIsImageSelectorOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // Inline supplier editing (pending changes, saved with explicit button)
+  const [pendingSupplierChanges, setPendingSupplierChanges] = useState<Record<number, number | null>>({});
+  const [savingPending, setSavingPending] = useState(false);
   
   // Clone modal
   const [cloneSourceModelId, setCloneSourceModelId] = useState<number | null>(null);
@@ -225,6 +230,7 @@ export default function BOQPage() {
       setCategories([]);
       setExpandedCategories([]);
       setCategoryLines({});
+      setPendingSupplierChanges({});
       // Sync unforeseen cost percent from model
       const m = models.find(model => model.id === selectedModelId);
       setUnforeseenPercent(m?.unforeseen_cost_percent ?? 10);
@@ -294,15 +300,13 @@ export default function BOQPage() {
         // Tables may not exist yet, ignore
       }
       
-      // Check for model param in URL, otherwise use first model
+      // Restore model from URL param only (no automatic pre-selection)
       const modelParam = searchParams.get('model');
       const modelIdFromUrl = modelParam ? parseInt(modelParam, 10) : null;
       const validModelFromUrl = modelIdFromUrl && modelsData.some((m: Model) => Number(m.id) === modelIdFromUrl);
       
       if (validModelFromUrl) {
         setSelectedModelId(modelIdFromUrl);
-      } else if (modelsData.length > 0) {
-        setSelectedModelId(Number(modelsData[0].id));
       }
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
@@ -315,8 +319,6 @@ export default function BOQPage() {
     try {
       const data = await api.getBOQCategories(id);
       setCategories(data);
-      setExpandedCategories([]);
-      setCategoryLines({});
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
     }
@@ -726,9 +728,95 @@ export default function BOQPage() {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
     }
   };
+
   /* ======================================================
-     RENDER LINES TABLE
+     INLINE SUPPLIER EDITING
   ====================================================== */
+  const handleInlineSupplierChange = (lineId: number, supplierId: number | null) => {
+    // Track the pending change
+    setPendingSupplierChanges(prev => ({ ...prev, [lineId]: supplierId }));
+    // Update local display immediately for visual feedback (no API call yet)
+    setCategoryLines(prev => {
+      const updated: Record<number, BOQLine[]> = {};
+      let found = false;
+      for (const [catId, lines] of Object.entries(prev)) {
+        const idx = lines.findIndex(l => l.id === lineId);
+        if (!found && idx !== -1) {
+          const supplier = suppliers.find(s => s.id === supplierId) || null;
+          updated[Number(catId)] = lines.map((l, i) =>
+            i === idx ? { ...l, supplier_id: supplierId, supplier_name: supplier?.name ?? null } : l
+          );
+          found = true;
+        } else {
+          updated[Number(catId)] = lines;
+        }
+      }
+      return updated;
+    });
+  };
+
+  const savePendingSupplierChanges = async () => {
+    const entries = Object.entries(pendingSupplierChanges);
+    if (entries.length === 0) return;
+    try {
+      setSavingPending(true);
+      // Use the lean supplier-only endpoint: no need for full line data from categoryLines
+      const tasks = entries.map(([lineIdStr, newSupplierId]) => {
+        const lineId = Number(lineIdStr);
+        return api.updateBOQLineSupplier(lineId, newSupplierId)
+          .then(() => ({ lineId, ok: true, error: undefined }))
+          .catch((err: any) => ({ lineId, ok: false, error: (err?.message || String(err)) as string }));
+      });
+
+      const results = await Promise.all(tasks);
+      const failedResults = results.filter(r => !r.ok);
+      const failedIds = new Set(failedResults.map(r => r.lineId));
+      const successCount = results.filter(r => r.ok).length;
+
+      // Clear only successfully saved changes from pending state
+      if (failedIds.size > 0) {
+        setPendingSupplierChanges(prev => {
+          const next: Record<number, number | null> = {};
+          for (const [id, val] of Object.entries(prev)) {
+            if (failedIds.has(Number(id))) next[Number(id)] = val;
+          }
+          return next;
+        });
+        const firstError = failedResults.find(r => r.error)?.error;
+        toast({
+          title: 'Erreur partielle',
+          description: `${successCount} sauvegardée(s), ${failedIds.size} échouée(s)${firstError ? ` — ${firstError}` : ''}`,
+          variant: 'destructive',
+        });
+      } else {
+        setPendingSupplierChanges({});
+        toast({ title: 'Succès', description: `${successCount} modification${successCount > 1 ? 's' : ''} de fournisseur sauvegardée${successCount > 1 ? 's' : ''}` });
+      }
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setSavingPending(false);
+    }
+  };
+
+  const discardPendingSupplierChanges = () => {
+    if (Object.keys(pendingSupplierChanges).length === 0) return;
+    // Revert local state by reloading lines for affected categories
+    const affectedLineIds = new Set(Object.keys(pendingSupplierChanges).map(Number));
+    const affectedCatIds = new Set<number>();
+    for (const [catId, lines] of Object.entries(categoryLines)) {
+      if (lines.some(l => affectedLineIds.has(l.id))) {
+        affectedCatIds.add(Number(catId));
+      }
+    }
+    setPendingSupplierChanges({});
+    // Reload only the affected categories (preserves expanded state)
+    for (const catId of affectedCatIds) {
+      loadCategoryLines(catId);
+    }
+  };
+
+
   const renderLinesTable = (categoryId: number) => {
     const lines = categoryLines[categoryId];
     if (!lines || lines.length === 0) {
@@ -802,7 +890,27 @@ export default function BOQPage() {
                     formatPrice(effectiveUnitCost)
                   )}
                 </TableCell>
-                <TableCell>{line.supplier_name || '-'}</TableCell>
+                <TableCell>
+                  <div className="flex flex-col gap-0.5">
+                    <Select
+                      value={line.supplier_id ? String(line.supplier_id) : "_none"}
+                      onValueChange={(v) => handleInlineSupplierChange(line.id, v === "_none" ? null : Number(v))}
+                    >
+                      <SelectTrigger className="w-36 h-7 text-xs">
+                        <SelectValue placeholder="Fournisseur" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="_none">Aucun</SelectItem>
+                        {suppliers.map(s => (
+                          <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {pendingSupplierChanges[line.id] !== undefined && (
+                      <span className="text-xs text-amber-600 font-medium">● Non sauvegardé</span>
+                    )}
+                  </div>
+                </TableCell>
                 <TableCell className="text-right">{line.margin_percent}%</TableCell>
                 <TableCell className="text-right">
                   {hasDynamicCalc
@@ -1007,6 +1115,38 @@ export default function BOQPage() {
   ====================================================== */
   return (
     <div className="space-y-6">
+      {/* PENDING CHANGES BANNER */}
+      {Object.keys(pendingSupplierChanges).length > 0 && (
+        <div className="sticky top-0 z-50 flex items-center justify-between gap-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 shadow-md">
+          <div className="flex items-center gap-2 text-amber-800">
+            <AlertTriangle className="h-5 w-5 flex-shrink-0 text-amber-600" />
+            <span className="font-medium">
+              {Object.keys(pendingSupplierChanges).length} modification{Object.keys(pendingSupplierChanges).length > 1 ? 's' : ''} de fournisseur en attente
+            </span>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-amber-400 text-amber-700 hover:bg-amber-100"
+              onClick={discardPendingSupplierChanges}
+              disabled={savingPending}
+            >
+              Annuler
+            </Button>
+            <Button
+              size="sm"
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+              onClick={savePendingSupplierChanges}
+              disabled={savingPending}
+            >
+              <Save className="h-4 w-4 mr-1" />
+              {savingPending ? 'Enregistrement...' : 'Sauvegarder les modifications'}
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* HEADER */}
       <div className="flex flex-col md:flex-row justify-between gap-4">
         <div>
@@ -1553,6 +1693,18 @@ export default function BOQPage() {
                 </Button>
               )}
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {!selectedModelId && (
+        <Card>
+          <CardContent className="p-12 text-center">
+            <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Package className="h-8 w-8 text-gray-400" />
+            </div>
+            <p className="text-lg font-semibold text-gray-700 mb-1">Sélectionnez un modèle</p>
+            <p className="text-gray-500 text-sm">Choisissez un modèle dans la liste déroulante ci-dessus pour afficher son BOQ.</p>
           </CardContent>
         </Card>
       )}
