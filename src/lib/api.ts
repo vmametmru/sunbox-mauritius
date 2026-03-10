@@ -1053,14 +1053,14 @@ export const api = {
   },
 
   /* =====================================================
-     HEADER IMAGES (pro user self-serve)
+     HEADER IMAGES (pro user self-serve OR admin by userId)
   ===================================================== */
-  getHeaderImages() {
-    return this.query('get_header_images');
+  getHeaderImages(userId?: number) {
+    return this.query('get_header_images', userId ? { user_id: userId } : {});
   },
 
-  updateHeaderImages(images: string[]) {
-    return this.query('update_header_images', { images });
+  updateHeaderImages(images: string[], userId?: number) {
+    return this.query('update_header_images', { images, ...(userId ? { user_id: userId } : {}) });
   },
 
   /* =====================================================

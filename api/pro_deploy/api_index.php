@@ -1734,30 +1734,35 @@ try {
         }
 
         // ── Header Images (pro user manages their slideshow images) ──────────────
+        // NOTE: images are stored in the Sunbox main DB (professional_profiles.header_images_json)
+        // so they are accessible from both the deployed pro site and the Sunbox admin portal.
 
         case 'get_header_images': {
-            $db = getDB();
-            $stmt = $db->prepare("SELECT setting_value FROM pro_settings WHERE setting_key = 'header_images' LIMIT 1");
-            $stmt->execute();
-            $row = $stmt->fetch();
-            $images = $row ? json_decode($row['setting_value'], true) : [];
-            ok($images ?: []);
+            if (!SUNBOX_USER_ID) fail('SUNBOX_USER_ID non configuré.', 500);
+            $sdb  = getSunboxDB();
+            $stmt = $sdb->prepare(
+                "SELECT header_images_json FROM professional_profiles WHERE user_id = ? LIMIT 1"
+            );
+            $stmt->execute([SUNBOX_USER_ID]);
+            $row    = $stmt->fetch();
+            $images = ($row && $row['header_images_json'])
+                ? json_decode($row['header_images_json'], true)
+                : [];
+            ok(is_array($images) ? $images : []);
             break;
         }
 
         case 'update_header_images': {
             requireAdmin();
-            $db = getDB();
+            if (!SUNBOX_USER_ID) fail('SUNBOX_USER_ID non configuré.', 500);
+            $sdb    = getSunboxDB();
             $images = $body['images'] ?? [];
             if (!is_array($images)) fail('Format images invalide.', 400);
-            // Sanitize: keep only string URLs
-            $clean = array_values(array_filter(array_map('strval', $images)));
-            $json  = json_encode($clean, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-            $db->prepare("
-                INSERT INTO pro_settings (setting_key, setting_value, setting_group)
-                VALUES ('header_images', ?, 'theme')
-                ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()
-            ")->execute([$json]);
+            $clean  = array_values(array_filter(array_map('strval', $images)));
+            $json   = json_encode($clean, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $sdb->prepare(
+                "UPDATE professional_profiles SET header_images_json = ?, updated_at = NOW() WHERE user_id = ?"
+            )->execute([$json, SUNBOX_USER_ID]);
             ok(['images' => $clean]);
             break;
         }

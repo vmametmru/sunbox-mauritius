@@ -11,7 +11,7 @@ define('PRO_DB_SCHEMA_VERSION', '1.8.0');
 
 // Sunbox main database schema version.
 // Increment when new tables or columns are added.
-define('SUNBOX_DB_SCHEMA_VERSION', '2.8.0');
+define('SUNBOX_DB_SCHEMA_VERSION', '2.9.0');
 
 $action = $_GET['action'] ?? '';
 $body   = getRequestBody();
@@ -224,6 +224,9 @@ try {
                 $messages[] = "Thème Sunbox par défaut inséré.";
             }
             $addCol('professional_profiles', 'theme_id', "INT NULL DEFAULT NULL");
+
+            // ── v2.9.0 ── Header images per pro user (stored in main Sunbox DB) ─
+            $addCol('professional_profiles', 'header_images_json', "TEXT NULL DEFAULT NULL");
 
             // ── Schema version table (always create / update) ─────────────────
             $db->exec("CREATE TABLE IF NOT EXISTS `db_schema_version` (
@@ -4294,6 +4297,48 @@ try {
             $stmt->execute([(int)$body['user_id']]);
             $theme = $stmt->fetch();
             ok($theme ?: null);
+            break;
+        }
+
+        // ── Header Images (main API — works for both pro-user session and admin) ──
+
+        case 'get_header_images': {
+            startSession();
+            // Pro user (session) or admin passing user_id
+            $userId = (int)($_SESSION['pro_user_id'] ?? 0);
+            if (!$userId) {
+                requireAdmin();
+                validateRequired($body, ['user_id']);
+                $userId = (int)$body['user_id'];
+            }
+            $stmt = $db->prepare(
+                "SELECT header_images_json FROM professional_profiles WHERE user_id = ? LIMIT 1"
+            );
+            $stmt->execute([$userId]);
+            $row    = $stmt->fetch();
+            $images = ($row && $row['header_images_json'])
+                ? json_decode($row['header_images_json'], true)
+                : [];
+            ok(is_array($images) ? $images : []);
+            break;
+        }
+
+        case 'update_header_images': {
+            startSession();
+            $userId = (int)($_SESSION['pro_user_id'] ?? 0);
+            if (!$userId) {
+                requireAdmin();
+                validateRequired($body, ['user_id']);
+                $userId = (int)$body['user_id'];
+            }
+            $images = $body['images'] ?? [];
+            if (!is_array($images)) fail('Format images invalide.', 400);
+            $clean = array_values(array_filter(array_map('strval', $images)));
+            $json  = json_encode($clean, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $db->prepare(
+                "UPDATE professional_profiles SET header_images_json = ?, updated_at = NOW() WHERE user_id = ?"
+            )->execute([$json, $userId]);
+            ok(['images' => $clean]);
             break;
         }
 

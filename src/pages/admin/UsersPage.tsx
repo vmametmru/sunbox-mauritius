@@ -16,6 +16,7 @@ import {
   AlertTriangle,
   RefreshCw,
   Palette,
+  ImageIcon,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -131,7 +132,12 @@ export default function UsersPage() {
   const [loadingModels, setLoadingModels] = useState(false);
   const [versionStatuses, setVersionStatuses] = useState<Map<number, VersionStatus>>(new Map());
   const [allThemes, setAllThemes] = useState<ProTheme[]>([]);
+  // Header images for the currently-edited user
+  const [headerImages, setHeaderImages] = useState<string[]>([]);
+  const [uploadingHeaderImg, setUploadingHeaderImg] = useState(false);
+  const [savingHeaderImgs, setSavingHeaderImgs] = useState(false);
   const logoInputRef = useRef<HTMLInputElement>(null);
+  const headerImgInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   const API_BASE = 'https://sunbox-mauritius.com/api';
@@ -202,12 +208,14 @@ export default function UsersPage() {
     setEditingUser({ ...emptyUser });
     setProvisionStatus(null);
     setEnabledModelIds(new Set(allModels.map(m => m.id)));
+    setHeaderImages([]);
     setIsDialogOpen(true);
   };
 
   const openEditUser = (user: ProUser) => {
     setEditingUser({ ...user, password: '' });
     setProvisionStatus(null);
+    setHeaderImages([]);
     const allIds = new Set(allModels.map(m => m.id));
     setEnabledModelIds(allIds);
     if (user.id) {
@@ -230,6 +238,10 @@ export default function UsersPage() {
       }).catch((err: any) => {
         console.error('Erreur chargement des overrides modèles:', err);
       }).finally(() => setLoadingModels(false));
+      // Load header images for this user
+      api.getHeaderImages(user.id).then((imgs: any) => {
+        setHeaderImages(Array.isArray(imgs) ? imgs : []);
+      }).catch(() => {});
     }
     setIsDialogOpen(true);
   };
@@ -311,6 +323,43 @@ export default function UsersPage() {
     } finally {
       setUploadingLogo(false);
       if (logoInputRef.current) logoInputRef.current.value = '';
+    }
+  };
+
+  const handleHeaderImgUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    if (files.length === 0 || !editingUser?.id) return;
+    try {
+      setUploadingHeaderImg(true);
+      const uploaded: string[] = [];
+      for (const file of files) {
+        const formData = new FormData();
+        formData.append('file', file);
+        const r = await fetch('/api/upload_sketch.php', { method: 'POST', body: formData, credentials: 'include' });
+        const j = await r.json();
+        if (!r.ok || j.error) throw new Error(j.error || 'Upload échoué');
+        uploaded.push(j.url as string);
+      }
+      setHeaderImages((prev) => [...prev, ...uploaded]);
+      toast({ title: `${uploaded.length} image(s) uploadée(s)` });
+    } catch (err: any) {
+      toast({ title: 'Erreur upload', description: err.message, variant: 'destructive' });
+    } finally {
+      setUploadingHeaderImg(false);
+      if (headerImgInputRef.current) headerImgInputRef.current.value = '';
+    }
+  };
+
+  const saveHeaderImages = async () => {
+    if (!editingUser?.id) return;
+    try {
+      setSavingHeaderImgs(true);
+      await api.updateHeaderImages(headerImages, editingUser.id);
+      toast({ title: 'Images du header sauvegardées' });
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setSavingHeaderImgs(false);
     }
   };
 
@@ -716,7 +765,7 @@ function VersionChip({ ok, checking, label }: { ok: boolean; checking: boolean; 
                   Thème du site professionnel
                 </p>
                 <p className="text-xs text-gray-500">
-                  Sélectionnez le thème à appliquer sur le site de ce professionnel. Redéployez après tout changement.
+                  Sélectionnez le thème à appliquer sur le site de ce professionnel. Le thème est appliqué dynamiquement — aucun redéploiement nécessaire après changement.
                 </p>
                 <div>
                   <Label>Thème assigné</Label>
@@ -732,6 +781,74 @@ function VersionChip({ ok, checking, label }: { ok: boolean; checking: boolean; 
                   </select>
                 </div>
               </div>
+
+              {/* Header Images (Bandeau/Slider) */}
+              {editingUser.id && (
+                <div className="border rounded-lg p-4 space-y-3 bg-blue-50">
+                  <p className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                    <ImageIcon className="h-4 w-4 text-blue-500" />
+                    Photos du Bandeau (Slider)
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    Ces photos s'affichent en carrousel dans le bandeau supérieur du site du professionnel.
+                  </p>
+
+                  {headerImages.length > 0 ? (
+                    <div className="grid grid-cols-3 gap-2">
+                      {headerImages.map((url, idx) => (
+                        <div key={idx} className="relative group rounded overflow-hidden border bg-gray-100 aspect-video">
+                          <img src={url} alt={`Bandeau ${idx + 1}`} className="w-full h-full object-cover" />
+                          <button
+                            type="button"
+                            onClick={() => setHeaderImages((prev) => prev.filter((_, i) => i !== idx))}
+                            className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                            title="Supprimer"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                          <span className="absolute bottom-0 left-0 right-0 bg-black/40 text-white text-[9px] text-center py-0.5">{idx + 1}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-gray-400 italic">Aucune photo de bandeau configurée.</p>
+                  )}
+
+                  <div className="flex gap-2 flex-wrap">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => headerImgInputRef.current?.click()}
+                      disabled={uploadingHeaderImg}
+                      className="gap-1.5 text-blue-700 border-blue-300 hover:bg-blue-50"
+                    >
+                      <Upload className="h-3.5 w-3.5" />
+                      {uploadingHeaderImg ? 'Upload...' : 'Ajouter des photos'}
+                    </Button>
+                    <input
+                      ref={headerImgInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      multiple
+                      className="hidden"
+                      onChange={handleHeaderImgUpload}
+                    />
+                    {headerImages.length > 0 && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={saveHeaderImages}
+                        disabled={savingHeaderImgs}
+                        className="bg-blue-600 hover:bg-blue-700 text-white gap-1.5"
+                      >
+                        {savingHeaderImgs ? 'Sauvegarde...' : 'Sauvegarder'}
+                      </Button>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-400">JPG, PNG ou WEBP. Résolution recommandée : 1920×600 px.</p>
+                </div>
+              )}
 
               {/* Model Selection */}
               <div className="border rounded-lg p-4 space-y-3 bg-gray-50">
