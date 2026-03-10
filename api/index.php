@@ -11,7 +11,7 @@ define('PRO_DB_SCHEMA_VERSION', '1.7.0');
 
 // Sunbox main database schema version.
 // Increment when new tables or columns are added.
-define('SUNBOX_DB_SCHEMA_VERSION', '2.5.0');
+define('SUNBOX_DB_SCHEMA_VERSION', '2.6.0');
 
 $action = $_GET['action'] ?? '';
 $body   = getRequestBody();
@@ -171,6 +171,9 @@ try {
 
             // ── v2.5.0 ── Add model_request_cost to professional_profiles ────────
             $addCol('professional_profiles', 'model_request_cost', "DECIMAL(10,2) NOT NULL DEFAULT 5000 AFTER `credits`");
+
+            // ── v2.6.0 ── Add linked_model_id to professional_model_requests ─────
+            $addCol('professional_model_requests', 'linked_model_id', "INT NULL DEFAULT NULL AFTER `bathrooms`");
 
             // ── Schema version table (always create / update) ─────────────────
             $db->exec("CREATE TABLE IF NOT EXISTS `db_schema_version` (
@@ -3965,7 +3968,12 @@ try {
             ");
             $txStmt->execute([$userId]);
             $transactions = $txStmt->fetchAll();
-            ok(['credits' => $credits, 'model_request_cost' => $modelRequestCost, 'transactions' => $transactions]);
+
+            $mrCountStmt = $db->prepare("SELECT COUNT(*) FROM professional_model_requests WHERE user_id = ?");
+            $mrCountStmt->execute([$userId]);
+            $totalModelRequests = (int)$mrCountStmt->fetchColumn();
+
+            ok(['credits' => $credits, 'model_request_cost' => $modelRequestCost, 'transactions' => $transactions, 'total_model_requests' => $totalModelRequests]);
             break;
         }
 
@@ -4010,7 +4018,7 @@ try {
                 $stmt = $db->prepare("SELECT * FROM professional_model_requests WHERE user_id = ? ORDER BY created_at DESC");
                 $stmt->execute([$userId]);
             } else {
-                $stmt = $db->query("SELECT r.*, u.name AS user_name, pp.company_name FROM professional_model_requests r LEFT JOIN users u ON u.id = r.user_id LEFT JOIN professional_profiles pp ON pp.user_id = r.user_id ORDER BY r.created_at DESC");
+                $stmt = $db->query("SELECT r.*, u.name AS user_name, pp.company_name, m.name AS linked_model_name FROM professional_model_requests r LEFT JOIN users u ON u.id = r.user_id LEFT JOIN professional_profiles pp ON pp.user_id = r.user_id LEFT JOIN models m ON m.id = r.linked_model_id ORDER BY r.created_at DESC");
             }
             ok($stmt->fetchAll());
             break;
@@ -4069,6 +4077,7 @@ try {
             $params = [];
             if (array_key_exists('status', $body)) { $sets[] = 'status = ?'; $params[] = $body['status']; }
             if (array_key_exists('admin_notes', $body)) { $sets[] = 'admin_notes = ?'; $params[] = $body['admin_notes']; }
+            if (array_key_exists('linked_model_id', $body)) { $sets[] = 'linked_model_id = ?'; $params[] = $body['linked_model_id'] ? (int)$body['linked_model_id'] : null; }
             if (!empty($sets)) {
                 $sets[] = 'updated_at = NOW()';
                 $params[] = (int)$body['id'];

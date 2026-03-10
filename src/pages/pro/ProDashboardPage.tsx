@@ -9,6 +9,8 @@ import { useToast } from '@/hooks/use-toast';
 interface Credits {
   credits: number;
   model_request_cost?: number;
+  total_quotes?: number;
+  total_model_requests?: number;
   transactions: Array<{
     id: number;
     amount: number;
@@ -78,7 +80,9 @@ export default function ProDashboardPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-500 font-medium">Mes devis</p>
-                <p className="text-3xl font-bold text-gray-800 mt-1">—</p>
+                <p className="text-3xl font-bold text-gray-800 mt-1">
+                  {loading ? '...' : (credits?.total_quotes ?? '—')}
+                </p>
               </div>
               <FileText className="h-10 w-10 text-blue-400" />
             </div>
@@ -90,7 +94,9 @@ export default function ProDashboardPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-500 font-medium">Demandes modèles</p>
-                <p className="text-3xl font-bold text-gray-800 mt-1">—</p>
+                <p className="text-3xl font-bold text-gray-800 mt-1">
+                  {loading ? '...' : (credits?.total_model_requests ?? '—')}
+                </p>
               </div>
               <Cpu className="h-10 w-10 text-purple-400" />
             </div>

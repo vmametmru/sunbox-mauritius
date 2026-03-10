@@ -44,6 +44,7 @@ import DiscountsPage from "./pages/admin/DiscountsPage";
 import UsersPage from "./pages/admin/UsersPage";
 import DeployUpdatePage from "./pages/admin/DeployUpdatePage";
 import DebugPage from "./pages/admin/DebugPage";
+import AdminModelRequestsPage from "./pages/admin/AdminModelRequestsPage";
 
 // Pro Pages
 import ProLoginPage from "./pages/pro/ProLoginPage";
@@ -111,6 +112,7 @@ const App = () => (
                   <Route path="users"    element={<UsersPage />} />
                   <Route path="deploy"   element={<DeployUpdatePage />} />
                   <Route path="debug"    element={<DebugPage />} />
+                  <Route path="model-requests" element={<AdminModelRequestsPage />} />
                 </Route>
               </Route>
 

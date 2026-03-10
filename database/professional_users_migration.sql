@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS professional_model_requests (
     container_40ft_count INT NOT NULL DEFAULT 0,
     bedrooms INT NOT NULL DEFAULT 0,
     bathrooms INT NOT NULL DEFAULT 0,
+    linked_model_id INT NULL DEFAULT NULL,
     sketch_url VARCHAR(500),
     status ENUM('pending','in_review','completed','rejected') NOT NULL DEFAULT 'pending',
     admin_notes TEXT,
