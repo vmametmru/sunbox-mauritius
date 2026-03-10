@@ -299,15 +299,13 @@ export default function BOQPage() {
         // Tables may not exist yet, ignore
       }
       
-      // Check for model param in URL, otherwise use first model
+      // Restore model from URL param only (no automatic pre-selection)
       const modelParam = searchParams.get('model');
       const modelIdFromUrl = modelParam ? parseInt(modelParam, 10) : null;
       const validModelFromUrl = modelIdFromUrl && modelsData.some((m: Model) => Number(m.id) === modelIdFromUrl);
       
       if (validModelFromUrl) {
         setSelectedModelId(modelIdFromUrl);
-      } else if (modelsData.length > 0) {
-        setSelectedModelId(Number(modelsData[0].id));
       }
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
@@ -1706,6 +1704,18 @@ export default function BOQPage() {
                 </Button>
               )}
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {!selectedModelId && (
+        <Card>
+          <CardContent className="p-12 text-center">
+            <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Package className="h-8 w-8 text-gray-400" />
+            </div>
+            <p className="text-lg font-semibold text-gray-700 mb-1">Sélectionnez un modèle</p>
+            <p className="text-gray-500 text-sm">Choisissez un modèle dans la liste déroulante ci-dessus pour afficher son BOQ.</p>
           </CardContent>
         </Card>
       )}
