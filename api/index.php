@@ -37,6 +37,8 @@ try {
             $stats['today_quotes'] = (int)$db->query("SELECT COUNT(*) FROM quotes WHERE created_at >= CURDATE() AND created_at < CURDATE() + INTERVAL 1 DAY")->fetchColumn();
             $stats['total_revenue'] = (float)$db->query("SELECT COALESCE(SUM(total_price),0) FROM quotes WHERE status='approved'")->fetchColumn();
             $stats['new_contacts'] = (int)$db->query("SELECT COUNT(*) FROM contacts WHERE status = 'new'")->fetchColumn();
+            $stats['total_model_requests'] = (int)$db->query("SELECT COUNT(*) FROM professional_model_requests")->fetchColumn();
+            $stats['pending_model_requests'] = (int)$db->query("SELECT COUNT(*) FROM professional_model_requests WHERE status='pending'")->fetchColumn();
             
             // Recent quotes (last 5)
             $recentQuotes = $db->query("
