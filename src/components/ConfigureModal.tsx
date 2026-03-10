@@ -10,6 +10,7 @@ import { api, API_BASE_URL } from '@/lib/api';
 import { useSiteSettings, calculateTTC, calculateHT } from '@/hooks/use-site-settings';
 import { useToast } from '@/hooks/use-toast';
 import { evaluatePoolVariables, evaluateFormula, type PoolDimensions, type PoolVariable } from '@/lib/pool-formulas';
+import { getProButtonStyle } from '@/lib/pro-theme';
 
 interface BOQLine {
   id: number;
@@ -73,6 +74,7 @@ interface ConfigureModalProps {
 
 const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
   const { quoteData, toggleOption, setCustomerDetails, resetQuote } = useQuote();
+  const btnStyle = getProButtonStyle();
   const [expandedCategories, setExpandedCategories] = useState<string[]>([]);
   const [expandedSubOptions, setExpandedSubOptions] = useState<number[]>([]);
   const [options, setOptions] = useState<ModelOption[]>([]);
@@ -1240,6 +1242,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                 <Button 
                   onClick={() => setStep('details')}
                   className="bg-orange-600 hover:bg-orange-700"
+                  style={btnStyle}
                 >
                   Continuer
                   <ArrowRight className="w-4 h-4 ml-2" />
@@ -1436,6 +1439,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                   onClick={handleSubmit}
                   disabled={isSubmitting}
                   className="bg-orange-600 hover:bg-orange-700"
+                  style={btnStyle}
                 >
                   {isSubmitting ? (
                     <>
@@ -1486,6 +1490,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
               <Button 
                 onClick={handleClose}
                 className="bg-orange-600 hover:bg-orange-700"
+                style={btnStyle}
               >
                 Fermer
               </Button>

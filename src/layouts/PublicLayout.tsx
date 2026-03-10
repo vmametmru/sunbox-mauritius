@@ -24,13 +24,14 @@ const HEADER_HEIGHT_MAP: Record<string, string> = {
   small: '64px', medium: '80px', large: '120px', hero: '200px',
 };
 
-const LOGO_ALIGN_MAP: Record<string, string> = {
-  left: 'flex-start', center: 'center', right: 'flex-end',
-};
-
-const NAV_JUSTIFY_MAP: Record<string, string> = {
-  left: 'flex-start', center: 'center', right: 'flex-end',
-};
+/* ── Shared nav links ── */
+const NAV_LINKS = [
+  { to: '/',       label: 'Accueil' },
+  { to: '/models', label: 'Modèles' },
+  { to: '/about',  label: 'À propos' },
+  { to: '/contact', label: 'Contact' },
+  { to: '/legal',  label: 'Mentions légales' },
+];
 
 /* ── Header image slider component ── */
 function HeaderSlider({ images }: { images: string[] }) {
@@ -102,81 +103,92 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
 
   /* ── When a pro theme is active, derive inline styles ── */
   if (isProSite && proTheme) {
-    const headerH    = HEADER_HEIGHT_MAP[proTheme.header_height ?? 'medium'] ?? '80px';
-    const logoAlign  = LOGO_ALIGN_MAP[proTheme.logo_position ?? 'left'] ?? 'flex-start';
-    const navJustify = NAV_JUSTIFY_MAP[proTheme.nav_position ?? 'right'] ?? 'flex-end';
-    const font       = proTheme.font_family ?? 'Inter';
+    const headerH  = HEADER_HEIGHT_MAP[proTheme.header_height ?? 'medium'] ?? '80px';
+    const logoPos  = (proTheme.logo_position ?? 'left') as 'left' | 'center' | 'right';
+    const navPos   = (proTheme.nav_position  ?? 'right') as 'left' | 'center' | 'right';
+    const font     = proTheme.font_family ?? 'Inter';
+
+    /* ── Logo ── */
+    const LogoEl = (
+      <Link to="/" className="flex items-center gap-3" style={{ textDecoration: 'none', flexShrink: 0 }}>
+        {siteLogo && <img src={siteLogo} alt={companyName} className="h-10 w-auto" />}
+        <div className="text-sm leading-tight">
+          <div className="text-lg font-bold" style={{ color: proTheme.header_text_color ?? '#1A365D' }}>
+            {companyName}
+          </div>
+          {siteSlogan && (
+            <div className="text-xs" style={{ color: proTheme.header_text_color ?? '#1A365D', opacity: 0.7 }}>
+              {siteSlogan}
+            </div>
+          )}
+        </div>
+      </Link>
+    );
+
+    /* ── Nav ── */
+    const NavEl = (
+      <nav style={{
+        display: 'flex',
+        gap: '1.5rem',
+        fontSize: '0.875rem',
+        fontWeight: 500,
+        alignItems: 'center',
+        flexShrink: 0,
+        background: proTheme.nav_has_background ? (proTheme.nav_bg_color ?? '#FFFFFF') : 'transparent',
+        padding: proTheme.nav_has_background ? '0.5rem 1rem' : '0',
+        borderRadius: proTheme.nav_has_background ? '0.5rem' : '0',
+      }}>
+        {NAV_LINKS.map((item) => (
+          <Link
+            key={item.to}
+            to={item.to}
+            style={{ color: proTheme.nav_text_color ?? '#1A365D', transition: 'color 0.2s' }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = proTheme.nav_hover_color ?? '#F97316')}
+            onMouseLeave={(e) => (e.currentTarget.style.color = proTheme.nav_text_color ?? '#1A365D')}
+          >
+            {item.label}
+          </Link>
+        ))}
+      </nav>
+    );
+
+    /* ── Distribute logo + nav into the 3 header slots ── */
+    const slots: Record<'left' | 'center' | 'right', React.ReactNode[]> = { left: [], center: [], right: [] };
+    slots[logoPos].push(<React.Fragment key="logo">{LogoEl}</React.Fragment>);
+    slots[navPos].push(<React.Fragment key="nav">{NavEl}</React.Fragment>);
 
     return (
       <div
         className="flex flex-col min-h-screen"
-        style={{ fontFamily: `'${font}', sans-serif`, color: '#374151' }}
+        style={{
+          fontFamily: `'${font}', sans-serif`,
+          color: '#374151',
+          /* Expose button colors as CSS variables so child pages can consume them */
+          ['--pro-btn-bg' as string]: proTheme.button_color ?? '#F97316',
+          ['--pro-btn-text' as string]: proTheme.button_text_color ?? '#FFFFFF',
+        }}
       >
-        {/* ===== HEADER ===== */}
+        {/* ===== HEADER — 3-slot grid: left | center | right ===== */}
         <header
           style={{
             background: proTheme.header_bg_color ?? '#FFFFFF',
             minHeight: headerH,
-            display: 'flex',
+            display: 'grid',
+            gridTemplateColumns: '1fr auto 1fr',
             alignItems: 'center',
             padding: '0 1.5rem',
             boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
           }}
         >
-          <Link
-            to="/"
-            className="flex items-center gap-3"
-            style={{ marginInlineEnd: 'auto', justifyContent: logoAlign }}
-          >
-            {siteLogo && (
-              <img src={siteLogo} alt={companyName} className="h-10 w-auto" />
-            )}
-            <div className="text-sm leading-tight">
-              <div
-                className="text-lg font-bold"
-                style={{ color: proTheme.header_text_color ?? '#1A365D' }}
-              >
-                {companyName}
-              </div>
-              {siteSlogan && (
-                <div className="text-xs" style={{ color: proTheme.header_text_color ?? '#1A365D', opacity: 0.7 }}>
-                  {siteSlogan}
-                </div>
-              )}
-            </div>
-          </Link>
-
-          {/* Navigation */}
-          <nav
-            style={{
-              display: 'flex',
-              gap: '1.5rem',
-              fontSize: '0.875rem',
-              fontWeight: 500,
-              justifyContent: navJustify,
-              background: proTheme.nav_has_background ? (proTheme.nav_bg_color ?? '#FFFFFF') : 'transparent',
-              padding: proTheme.nav_has_background ? '0.5rem 1rem' : '0',
-              borderRadius: proTheme.nav_has_background ? '0.5rem' : '0',
-            }}
-          >
-            {[
-              { to: '/', label: 'Accueil' },
-              { to: '/models', label: 'Modèles' },
-              { to: '/about', label: 'À propos' },
-              { to: '/contact', label: 'Contact' },
-              { to: '/legal', label: 'Mentions légales' },
-            ].map((item) => (
-              <Link
-                key={item.to}
-                to={item.to}
-                style={{ color: proTheme.nav_text_color ?? '#1A365D', transition: 'color 0.2s' }}
-                onMouseEnter={(e) => (e.currentTarget.style.color = proTheme.nav_hover_color ?? '#F97316')}
-                onMouseLeave={(e) => (e.currentTarget.style.color = proTheme.nav_text_color ?? '#1A365D')}
-              >
-                {item.label}
-              </Link>
-            ))}
-          </nav>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: '1rem' }}>
+            {slots.left}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1rem' }}>
+            {slots.center}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '1rem' }}>
+            {slots.right}
+          </div>
         </header>
 
         {/* ===== UNDER CONSTRUCTION ===== */}
@@ -218,13 +230,7 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
             </div>
           </Link>
           <nav className="flex gap-6 text-sm font-medium">
-            {[
-              { to: '/', label: 'Accueil' },
-              { to: '/models', label: 'Modèles' },
-              { to: '/about', label: 'À propos' },
-              { to: '/contact', label: 'Contact' },
-              { to: '/legal', label: 'Mentions légales' },
-            ].map((item) => (
+            {NAV_LINKS.map((item) => (
               <Link key={item.to} to={item.to} className="hover:text-orange-500 transition-colors">{item.label}</Link>
             ))}
           </nav>
@@ -265,21 +271,11 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
 
         {/* Navigation */}
         <nav className="flex gap-6 text-sm font-medium">
-          <Link to="/" className="hover:text-orange-500 transition-colors">
-            Accueil
-          </Link>
-          <Link to="/models" className="hover:text-orange-500 transition-colors">
-            Modèles
-          </Link>
-          <Link to="/about" className="hover:text-orange-500 transition-colors">
-            À propos
-          </Link>
-          <Link to="/contact" className="hover:text-orange-500 transition-colors">
-            Contact
-          </Link>
-          <Link to="/legal" className="hover:text-orange-500 transition-colors">
-            Mentions légales
-          </Link>
+          <Link to="/" className="hover:text-orange-500 transition-colors">Accueil</Link>
+          <Link to="/models" className="hover:text-orange-500 transition-colors">Modèles</Link>
+          <Link to="/about" className="hover:text-orange-500 transition-colors">À propos</Link>
+          <Link to="/contact" className="hover:text-orange-500 transition-colors">Contact</Link>
+          <Link to="/legal" className="hover:text-orange-500 transition-colors">Mentions légales</Link>
         </nav>
       </header>
 

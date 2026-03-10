@@ -96,7 +96,20 @@ if ($proUserId > 0) {
             if ($_row2 && !empty($_row2['header_images_json'])) {
                 $_imgs = json_decode($_row2['header_images_json'], true);
                 if (is_array($_imgs) && count($_imgs) > 0) {
-                    $headerImgJson = json_encode(array_values($_imgs), JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE);
+                    // Convert relative URLs to absolute Sunbox URLs.
+                    // Images uploaded via the Sunbox portal are stored as relative paths
+                    // (e.g. /uploads/sketches/...). When served on the pro domain those
+                    // paths would resolve to the wrong host, so we prepend the Sunbox base.
+                    $_imgs = array_map(function ($url) use ($sunboxBase) {
+                        if ($url !== '' && strpos($url, 'http') !== 0) {
+                            return rtrim($sunboxBase, '/') . '/' . ltrim($url, '/');
+                        }
+                        return $url;
+                    }, $_imgs);
+                    $headerImgJson = json_encode(
+                        array_values(array_filter($_imgs)),
+                        JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE
+                    );
                 }
             }
         }

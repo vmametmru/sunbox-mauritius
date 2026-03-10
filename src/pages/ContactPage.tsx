@@ -4,8 +4,10 @@ import PublicLayout from "@/layouts/PublicLayout";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { getProButtonStyle } from "@/lib/pro-theme";
 
 export default function ContactPage() {
+  const btnStyle = getProButtonStyle();
   return (
     <PublicLayout>
       <div className="max-w-4xl mx-auto p-6 space-y-8">
@@ -52,7 +54,7 @@ export default function ContactPage() {
               <label className="block text-sm font-medium text-gray-700">Message</label>
               <Textarea rows={4} placeholder="Votre message..." required />
             </div>
-            <Button type="submit" className="bg-orange-500 hover:bg-orange-600 w-full">
+            <Button type="submit" className="bg-orange-500 hover:bg-orange-600 w-full" style={btnStyle}>
               Envoyer
             </Button>
           </form>
