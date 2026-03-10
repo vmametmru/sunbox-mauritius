@@ -16,28 +16,15 @@ try {
 
     switch ($action) {
 
-        // ── ADMIN AUTH ─────────────────────────────────────────────────────────
-        case 'login': {
-            validateRequired($body, ['password']);
-            $hash = (string)env('ADMIN_PASSWORD_HASH', '');
-            if (!$hash || !password_verify((string)$body['password'], $hash)) {
-                fail('Mot de passe incorrect.', 401);
-            }
-            session_regenerate_id(true);
-            $_SESSION['is_admin'] = true;
-            ok(['is_admin' => true]);
-            break;
-        }
-
-        case 'logout': {
-            $_SESSION = [];
-            session_destroy();
-            ok(['is_admin' => false]);
-            break;
-        }
-
+        // ── PRO-USER AUTH ──────────────────────────────────────────────────────
+        // Admin login is disabled on pro sites. Authentication is handled
+        // exclusively by pro_auth.php (is_pro_user session key).
+        case 'login':
+        case 'logout':
         case 'me': {
-            ok(['is_admin' => !empty($_SESSION['is_admin'])]);
+            // These endpoints are intentionally disabled in api/index.php on
+            // the deployed pro site. Use /api/pro_auth.php instead.
+            fail('Utilisez /api/pro_auth.php pour l\'authentification.', 403);
             break;
         }
 
@@ -931,11 +918,7 @@ try {
                 if ($existing) { ok(['report_id' => (int)$existing['id'], 'already_exists' => true]); break; }
             }
 
-            // Deduct 1 500 Rs ('boq_requested' is the allowed reason in deductCredits)
-            $creditResult = deductCredits(1500, 'boq_requested', $quoteId);
-            if (!($creditResult['success'] ?? false)) {
-                fail($creditResult['error'] ?? 'Crédits insuffisants', 402);
-            }
+            // Creating a BOQ report is free — no credit deduction.
 
             // Fetch base BOQ lines from Sunbox DB.
             // Try with replace_with_sunbox column first; fall back if Sunbox DB not yet upgraded.

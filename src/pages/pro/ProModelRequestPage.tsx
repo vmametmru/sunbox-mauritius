@@ -44,11 +44,16 @@ export default function ProModelRequestPage() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [uploadingSketch, setUploadingSketch] = useState(false);
+  const [modelRequestCost, setModelRequestCost] = useState<number>(5000);
   const sketchInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   useEffect(() => {
     loadRequests();
+    // Load the configurable model request cost
+    api.getProCredits().then((d: { model_request_cost?: number }) => {
+      if (d?.model_request_cost) setModelRequestCost(Number(d.model_request_cost));
+    }).catch(() => {});
   }, []);
 
   const loadRequests = async () => {
@@ -88,7 +93,7 @@ export default function ProModelRequestPage() {
       toast({ title: 'Erreur', description: 'La description est requise.', variant: 'destructive' });
       return;
     }
-    if (!confirm('Soumettre la demande de modèle ? (3 000 Rs seront déduits)')) return;
+    if (!confirm(`Soumettre la demande de modèle ? (${modelRequestCost.toLocaleString()} Rs seront déduits)`)) return;
     try {
       setSubmitting(true);
       await api.createModelRequest({
@@ -99,7 +104,7 @@ export default function ProModelRequestPage() {
         bathrooms: form.bathrooms,
         sketch_url: form.sketch_url || undefined,
       });
-      toast({ title: 'Demande envoyée', description: '3 000 Rs déduits. Votre demande est en cours de traitement.' });
+      toast({ title: 'Demande envoyée', description: `${modelRequestCost.toLocaleString()} Rs déduits. Votre demande est en cours de traitement.` });
       setForm({ ...emptyForm });
       loadRequests();
     } catch (err: any) {
@@ -113,7 +118,9 @@ export default function ProModelRequestPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold text-gray-900">Demande de Modèle</h1>
-        <p className="text-gray-500 mt-1">Demandez un modèle personnalisé — coût : 3 000 Rs</p>
+        <p className="text-gray-500 mt-1">
+          Demandez un modèle personnalisé — coût : <span className="font-semibold text-orange-600">{modelRequestCost.toLocaleString()} Rs</span>
+        </p>
       </div>
 
       {/* New request form */}
@@ -210,7 +217,7 @@ export default function ProModelRequestPage() {
                 disabled={submitting}
               >
                 <Cpu className="h-4 w-4 mr-2" />
-                {submitting ? 'Envoi...' : 'Soumettre (3 000 Rs)'}
+                {submitting ? 'Envoi...' : `Soumettre (${modelRequestCost.toLocaleString()} Rs)`}
               </Button>
             </div>
           </form>

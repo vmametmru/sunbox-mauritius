@@ -202,10 +202,7 @@ export default function ProLayout() {
 
   // ── Sidebar header content ───────────────────────────────────────────────
   const creditRules = [
-    { label: 'Créer un devis',       cost: '500 Rs' },
-    { label: 'Valider + email',      cost: '1 000 Rs' },
-    { label: 'Demande BOQ',          cost: '1 500 Rs' },
-    { label: 'Demande de modèle',    cost: '3 000 Rs' },
+    { label: 'Demande de modèle', cost: '5 000 Rs' },
   ];
 
   return (

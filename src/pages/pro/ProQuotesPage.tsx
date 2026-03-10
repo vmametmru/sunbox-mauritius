@@ -122,10 +122,10 @@ export default function ProQuotesPage() {
   };
 
   const handleValidate = async (quote: Quote) => {
-    if (!confirm(`Valider le devis ${quote.reference_number} ? (1 000 Rs seront déduits)`)) return;
+    if (!confirm(`Valider le devis ${quote.reference_number} ?`)) return;
     try {
       await api.updateQuoteStatus(quote.id, 'approved');
-      toast({ title: 'Devis validé', description: '1 000 Rs déduits.' });
+      toast({ title: 'Devis validé' });
       loadQuotes();
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
@@ -152,7 +152,7 @@ export default function ProQuotesPage() {
     setBoqLoading(true);
     try {
       const result = await api.requestBoqReport(boqConfirmQuote.id);
-      toast({ title: 'Rapport créé', description: '1 500 Rs déduits.' });
+      toast({ title: 'Rapport créé' });
       setBoqConfirmQuote(null);
       navigate(`/pro/reports/${result.report_id}`);
     } catch (err: any) {
@@ -332,7 +332,7 @@ export default function ProQuotesPage() {
                         </Button>
                         {isPending && (
                           <Button size="sm" variant="outline" className="h-7 text-xs px-2" onClick={() => handleValidate(q)}>
-                            Valider (1 000 Rs)
+                            Valider
                           </Button>
                         )}
                         {isApproved && (
@@ -476,7 +476,7 @@ export default function ProQuotesPage() {
                 </Button>
                 {selectedQuote.status === 'pending' && (
                   <Button size="sm" onClick={() => { handleValidate(selectedQuote!); setSelectedQuote(null); }}>
-                    Valider (1 000 Rs)
+                    Valider
                   </Button>
                 )}
                 {selectedQuote.status === 'approved' && (
@@ -522,10 +522,8 @@ export default function ProQuotesPage() {
               <strong>{boqConfirmQuote?.reference_number}</strong>.
             </DialogDescription>
           </DialogHeader>
-          <div className="rounded-lg bg-orange-50 border border-orange-200 p-4 text-center">
-            <p className="text-sm text-gray-600">Coût en crédits</p>
-            <p className="text-2xl font-bold text-orange-600 mt-1">1 500 Rs</p>
-            <p className="text-xs text-gray-500 mt-1">seront déduits de votre solde</p>
+          <div className="rounded-lg bg-blue-50 border border-blue-200 p-4 text-center">
+            <p className="text-sm text-gray-600">La création du rapport est gratuite.</p>
           </div>
           <DialogFooter className="gap-2">
             <Button variant="ghost" onClick={() => setBoqConfirmQuote(null)} disabled={boqLoading}>
@@ -533,7 +531,7 @@ export default function ProQuotesPage() {
             </Button>
             <Button onClick={confirmBoqReport} disabled={boqLoading}>
               {boqLoading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              Confirmer (1 500 Rs)
+              Confirmer
             </Button>
           </DialogFooter>
         </DialogContent>

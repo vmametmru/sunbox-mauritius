@@ -2,13 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { CreditCard, FileText, Cpu, ArrowRight, TrendingUp } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 
 interface Credits {
   credits: number;
+  model_request_cost?: number;
   transactions: Array<{
     id: number;
     amount: number;
@@ -18,13 +18,12 @@ interface Credits {
   }>;
 }
 
+/** Only model requests (paid) and credit top-ups are shown in the transaction block. */
+const VISIBLE_REASONS = new Set(['model_request', 'pack_purchase']);
+
 const reasonLabels: Record<string, string> = {
-  pack_purchase: 'Achat pack',
-  quote_created: 'Devis créé',
-  quote_validated: 'Devis validé',
-  boq_requested: 'BOQ demandé',
-  model_request: 'Demande modèle',
-  production_deduction: 'Déduction production',
+  pack_purchase:  'Crédit ajouté',
+  model_request:  'Demande modèle',
 };
 
 export default function ProDashboardPage() {
@@ -44,6 +43,12 @@ export default function ProDashboardPage() {
       }
     })();
   }, []);
+
+  const modelCost = credits?.model_request_cost ?? 5000;
+
+  const visibleTransactions = credits?.transactions?.filter(
+    (tx) => VISIBLE_REASONS.has(tx.reason)
+  ) ?? [];
 
   return (
     <div className="space-y-6">
@@ -103,17 +108,16 @@ export default function ProDashboardPage() {
             <Link to="/pro/quotes">
               <Button variant="outline" className="w-full justify-between">
                 <span className="flex items-center gap-2"><FileText className="h-4 w-4" /> Créer un devis</span>
-                <div className="flex items-center gap-2">
-                  <Badge variant="secondary">500 Rs</Badge>
-                  <ArrowRight className="h-4 w-4" />
-                </div>
+                <ArrowRight className="h-4 w-4" />
               </Button>
             </Link>
             <Link to="/pro/model-request">
               <Button variant="outline" className="w-full justify-between mt-2">
                 <span className="flex items-center gap-2"><Cpu className="h-4 w-4" /> Demander un modèle</span>
                 <div className="flex items-center gap-2">
-                  <Badge variant="secondary">3 000 Rs</Badge>
+                  <span className="text-xs text-orange-600 font-medium">
+                    {loading ? '…' : `${modelCost.toLocaleString()} Rs`}
+                  </span>
                   <ArrowRight className="h-4 w-4" />
                 </div>
               </Button>
@@ -121,10 +125,7 @@ export default function ProDashboardPage() {
             <Link to="/pro/settings">
               <Button variant="outline" className="w-full justify-between mt-2">
                 <span className="flex items-center gap-2"><TrendingUp className="h-4 w-4" /> Acheter un pack crédits</span>
-                <div className="flex items-center gap-2">
-                  <Badge className="bg-orange-500 text-white">10 000 Rs</Badge>
-                  <ArrowRight className="h-4 w-4" />
-                </div>
+                <ArrowRight className="h-4 w-4" />
               </Button>
             </Link>
           </CardContent>
@@ -138,14 +139,19 @@ export default function ProDashboardPage() {
           <CardContent>
             {loading ? (
               <p className="text-gray-400 text-sm">Chargement...</p>
-            ) : !credits?.transactions?.length ? (
+            ) : !visibleTransactions.length ? (
               <p className="text-gray-400 text-sm">Aucune transaction pour le moment.</p>
             ) : (
-              <div className="space-y-2">
-                {credits.transactions.slice(0, 5).map((tx) => (
-                  <div key={tx.id} className="flex items-center justify-between text-sm">
-                    <span className="text-gray-600">{reasonLabels[tx.reason] ?? tx.reason}</span>
-                    <span className={tx.amount > 0 ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
+              <div className="space-y-3">
+                {visibleTransactions.slice(0, 5).map((tx) => (
+                  <div key={tx.id} className="flex items-center justify-between text-sm border-b last:border-0 pb-2 last:pb-0">
+                    <div>
+                      <p className="text-gray-700 font-medium">{reasonLabels[tx.reason] ?? tx.reason}</p>
+                      <p className="text-xs text-gray-400">
+                        {new Date(tx.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                      </p>
+                    </div>
+                    <span className={tx.amount > 0 ? 'text-green-600 font-semibold' : 'text-red-600 font-semibold'}>
                       {tx.amount > 0 ? '+' : ''}{tx.amount.toLocaleString()} Rs
                     </span>
                   </div>

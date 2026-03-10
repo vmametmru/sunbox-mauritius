@@ -11,7 +11,7 @@ define('PRO_DB_SCHEMA_VERSION', '1.7.0');
 
 // Sunbox main database schema version.
 // Increment when new tables or columns are added.
-define('SUNBOX_DB_SCHEMA_VERSION', '2.4.0');
+define('SUNBOX_DB_SCHEMA_VERSION', '2.5.0');
 
 $action = $_GET['action'] ?? '';
 $body   = getRequestBody();
@@ -168,6 +168,9 @@ try {
             $addCol('quotes', 'pool_longueur_tb',   "DECIMAL(8,2) DEFAULT NULL AFTER `pool_profondeur_ta`");
             $addCol('quotes', 'pool_largeur_tb',    "DECIMAL(8,2) DEFAULT NULL AFTER `pool_longueur_tb`");
             $addCol('quotes', 'pool_profondeur_tb', "DECIMAL(8,2) DEFAULT NULL AFTER `pool_largeur_tb`");
+
+            // ── v2.5.0 ── Add model_request_cost to professional_profiles ────────
+            $addCol('professional_profiles', 'model_request_cost', "DECIMAL(10,2) NOT NULL DEFAULT 5000 AFTER `credits`");
 
             // ── Schema version table (always create / update) ─────────────────
             $db->exec("CREATE TABLE IF NOT EXISTS `db_schema_version` (
@@ -3081,8 +3084,9 @@ try {
             $stmt = $db->query("
                 SELECT u.id, u.name, u.email, u.role,
                        pp.company_name, pp.address, pp.vat_number, pp.brn_number,
-                       pp.phone, pp.logo_url, pp.sunbox_margin_percent, pp.credits, pp.is_active,
-                       pp.domain, pp.api_token, pp.db_name
+                       pp.phone, pp.logo_url, pp.sunbox_margin_percent, pp.credits,
+                       COALESCE(pp.model_request_cost, 5000) AS model_request_cost,
+                       pp.is_active, pp.domain, pp.api_token, pp.db_name
                 FROM users u
                 LEFT JOIN professional_profiles pp ON pp.user_id = u.id
                 WHERE u.role = 'professional'
@@ -3156,6 +3160,7 @@ try {
             if (array_key_exists('logo_url', $body)) { $profSets[] = 'logo_url = ?'; $profParams[] = $body['logo_url']; }
             if (array_key_exists('db_name', $body)) { $profSets[] = 'db_name = ?'; $profParams[] = $body['db_name']; }
             if (array_key_exists('sunbox_margin_percent', $body)) { $profSets[] = 'sunbox_margin_percent = ?'; $profParams[] = (float)$body['sunbox_margin_percent']; }
+            if (array_key_exists('model_request_cost', $body)) { $profSets[] = 'model_request_cost = ?'; $profParams[] = (float)$body['model_request_cost']; }
             if (array_key_exists('is_active', $body)) { $profSets[] = 'is_active = ?'; $profParams[] = (int)(bool)$body['is_active']; }
             if (!empty($profSets)) {
                 $profSets[] = 'updated_at = NOW()';
@@ -3817,9 +3822,11 @@ try {
             startSession();
             $userId = (int)($_SESSION['pro_user_id'] ?? $body['user_id'] ?? 0);
             if (!$userId) { fail('Non authentifié', 401); }
-            $stmt = $db->prepare("SELECT credits FROM professional_profiles WHERE user_id = ?");
+            $stmt = $db->prepare("SELECT credits, COALESCE(model_request_cost, 5000) AS model_request_cost FROM professional_profiles WHERE user_id = ?");
             $stmt->execute([$userId]);
-            $credits = (float)($stmt->fetchColumn() ?? 0);
+            $row     = $stmt->fetch();
+            $credits = (float)($row['credits'] ?? 0);
+            $modelRequestCost = (float)($row['model_request_cost'] ?? 5000);
 
             $txStmt = $db->prepare("
                 SELECT * FROM professional_credit_transactions
@@ -3829,7 +3836,7 @@ try {
             ");
             $txStmt->execute([$userId]);
             $transactions = $txStmt->fetchAll();
-            ok(['credits' => $credits, 'transactions' => $transactions]);
+            ok(['credits' => $credits, 'model_request_cost' => $modelRequestCost, 'transactions' => $transactions]);
             break;
         }
 
@@ -3885,14 +3892,15 @@ try {
             $userId = (int)($_SESSION['pro_user_id'] ?? 0);
             if (!$userId) { fail('Non authentifié', 401); }
             validateRequired($body, ['description']);
-            $cost = 3000;
             $db->beginTransaction();
             try {
-                // Check credits
-                $stmt = $db->prepare("SELECT credits FROM professional_profiles WHERE user_id = ? FOR UPDATE");
+                // Fetch credits and configurable cost in one query
+                $stmt = $db->prepare("SELECT credits, COALESCE(model_request_cost, 5000) AS cost FROM professional_profiles WHERE user_id = ? FOR UPDATE");
                 $stmt->execute([$userId]);
-                $credits = (float)$stmt->fetchColumn();
-                if ($credits < $cost) { $db->rollBack(); fail('Crédits insuffisants (3000 Rs requis)', 402); }
+                $row     = $stmt->fetch();
+                $credits = (float)($row['credits'] ?? 0);
+                $cost    = (float)($row['cost'] ?? 5000);
+                if ($credits < $cost) { $db->rollBack(); fail('Crédits insuffisants (' . number_format($cost, 0, '.', ' ') . ' Rs requis)', 402); }
                 // Deduct
                 $newBalance = $credits - $cost;
                 $db->prepare("UPDATE professional_profiles SET credits = ?, updated_at = NOW() WHERE user_id = ?")->execute([$newBalance, $userId]);
@@ -3918,7 +3926,7 @@ try {
                     VALUES (?, ?, 'model_request', ?)
                 ")->execute([$userId, -$cost, $newBalance]);
                 $db->commit();
-                ok(['id' => $reqId, 'credits' => $newBalance]);
+                ok(['id' => $reqId, 'credits' => $newBalance, 'cost' => $cost]);
             } catch (Throwable $e) {
                 $db->rollBack();
                 throw $e;

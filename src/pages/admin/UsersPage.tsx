@@ -45,6 +45,7 @@ interface ProUser {
   brn_number?: string;
   phone?: string;
   sunbox_margin_percent?: number;
+  model_request_cost?: number;
   credits?: number;
   is_active?: boolean;
   domain?: string;
@@ -76,6 +77,7 @@ const emptyUser: ProUser = {
   brn_number: '',
   phone: '',
   sunbox_margin_percent: 0,
+  model_request_cost: 5000,
   domain: '',
   logo_url: '',
   db_name: '',
@@ -668,6 +670,19 @@ function VersionChip({ ok, checking, label }: { ok: boolean; checking: boolean; 
                     value={editingUser.sunbox_margin_percent ?? 0}
                     onChange={(e) => setEditingUser({ ...editingUser, sunbox_margin_percent: parseFloat(e.target.value) || 0 })}
                   />
+                </div>
+                <div>
+                  <Label>Coût demande modèle (Rs)</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="100"
+                    value={editingUser.model_request_cost ?? 5000}
+                    onChange={(e) => setEditingUser({ ...editingUser, model_request_cost: parseFloat(e.target.value) || 5000 })}
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Crédits déduits à chaque demande de nouveau modèle (défaut : 5 000 Rs).
+                  </p>
                 </div>
               </div>
 

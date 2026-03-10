@@ -514,7 +514,7 @@ function startSession(): void
 function requireAdmin(): void
 {
     startSession();
-    if (empty($_SESSION['is_admin'])) { errorResponse('Unauthorized', 401); }
+    if (empty($_SESSION['is_pro_user'])) { errorResponse('Unauthorized', 401); }
 }
 
 function jsonResponse($data, $code = 200): void { http_response_code($code); echo json_encode($data, JSON_UNESCAPED_UNICODE); exit(); }
