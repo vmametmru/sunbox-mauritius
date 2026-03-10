@@ -230,6 +230,7 @@ export default function BOQPage() {
       setCategories([]);
       setExpandedCategories([]);
       setCategoryLines({});
+      setPendingSupplierChanges({});
       // Sync unforeseen cost percent from model
       const m = models.find(model => model.id === selectedModelId);
       setUnforeseenPercent(m?.unforeseen_cost_percent ?? 10);
@@ -759,28 +760,12 @@ export default function BOQPage() {
     if (entries.length === 0) return;
     try {
       setSavingPending(true);
-      // Build update tasks
+      // Use the lean supplier-only endpoint: no need for full line data from categoryLines
       const tasks = entries.map(([lineIdStr, newSupplierId]) => {
         const lineId = Number(lineIdStr);
-        let line: BOQLine | undefined;
-        for (const lines of Object.values(categoryLines)) {
-          line = lines.find(l => l.id === lineId);
-          if (line) break;
-        }
-        if (!line) return Promise.resolve({ lineId, ok: false, error: 'Ligne introuvable dans les données chargées' });
-        return api.updateBOQLine({
-          id: line.id,
-          description: line.description,
-          quantity: line.quantity,
-          quantity_formula: line.quantity_formula,
-          unit: line.unit,
-          unit_cost_ht: line.unit_cost_ht,
-          unit_cost_formula: line.unit_cost_formula,
-          price_list_id: line.price_list_id,
-          supplier_id: newSupplierId,
-          margin_percent: line.margin_percent,
-          display_order: line.display_order,
-        }).then(() => ({ lineId, ok: true, error: undefined })).catch((err: any) => ({ lineId, ok: false, error: (err?.message || String(err)) as string }));
+        return api.updateBOQLineSupplier(lineId, newSupplierId)
+          .then(() => ({ lineId, ok: true, error: undefined }))
+          .catch((err: any) => ({ lineId, ok: false, error: (err?.message || String(err)) as string }));
       });
 
       const results = await Promise.all(tasks);

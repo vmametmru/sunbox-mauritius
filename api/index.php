@@ -807,6 +807,19 @@ try {
             break;
         }
 
+        case 'update_boq_line_supplier': {
+            validateRequired($body, ['id']);
+            $stmt = $db->prepare("
+                UPDATE boq_lines SET supplier_id = ?, updated_at = NOW() WHERE id = ?
+            ");
+            $stmt->execute([
+                !empty($body['supplier_id']) ? (int)$body['supplier_id'] : null,
+                (int)$body['id'],
+            ]);
+            ok();
+            break;
+        }
+
         // === BOQ CLONE (Clone entire BOQ from one model to another)
         case 'clone_boq': {
             validateRequired($body, ['from_model_id', 'to_model_id']);

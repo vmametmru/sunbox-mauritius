@@ -296,6 +296,10 @@ export const api = {
     return this.query('delete_boq_line', { id });
   },
 
+  updateBOQLineSupplier(id: number, supplier_id: number | null) {
+    return this.query('update_boq_line_supplier', { id, supplier_id });
+  },
+
   /* =====================================================
      BOQ UTILITIES
   ===================================================== */
