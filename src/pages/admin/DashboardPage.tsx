@@ -13,6 +13,7 @@ import {
   Loader2,
   Upload,
   HardDrive,
+  ClipboardList,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -27,6 +28,8 @@ interface DashboardStats {
   today_quotes: number;
   total_revenue: number;
   new_contacts: number;
+  total_model_requests: number;
+  pending_model_requests: number;
   recent_quotes: any[];
   monthly_stats: any[];
 }
@@ -240,68 +243,97 @@ export default function DashboardPage() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <Card className="bg-gradient-to-br from-blue-500 to-blue-600 text-white">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-blue-100 text-sm">Total Devis</p>
-                <p className="text-3xl font-bold mt-1">{stats?.total_quotes || 0}</p>
-                {stats?.today_quotes ? (
-                  <p className="text-blue-200 text-xs mt-1">+{stats.today_quotes} aujourd'hui</p>
-                ) : null}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
+        <Link to="/admin/quotes" className="block">
+          <Card className="bg-gradient-to-br from-blue-500 to-blue-600 text-white hover:opacity-90 cursor-pointer transition-opacity">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-blue-100 text-sm">Total Devis</p>
+                  <p className="text-3xl font-bold mt-1">{stats?.total_quotes || 0}</p>
+                  {stats?.today_quotes ? (
+                    <p className="text-blue-200 text-xs mt-1">+{stats.today_quotes} aujourd'hui</p>
+                  ) : null}
+                </div>
+                <div className="w-12 h-12 bg-white/20 rounded-lg flex items-center justify-center">
+                  <FileText className="h-6 w-6" />
+                </div>
               </div>
-              <div className="w-12 h-12 bg-white/20 rounded-lg flex items-center justify-center">
-                <FileText className="h-6 w-6" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        </Link>
 
-        <Card className="bg-gradient-to-br from-yellow-500 to-orange-500 text-white">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-yellow-100 text-sm">En Attente</p>
-                <p className="text-3xl font-bold mt-1">{stats?.pending_quotes || 0}</p>
-                <p className="text-yellow-200 text-xs mt-1">À traiter</p>
+        <Link to="/admin/quotes" className="block">
+          <Card className="bg-gradient-to-br from-yellow-500 to-orange-500 text-white hover:opacity-90 cursor-pointer transition-opacity">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-yellow-100 text-sm">En Attente</p>
+                  <p className="text-3xl font-bold mt-1">{stats?.pending_quotes || 0}</p>
+                  <p className="text-yellow-200 text-xs mt-1">À traiter</p>
+                </div>
+                <div className="w-12 h-12 bg-white/20 rounded-lg flex items-center justify-center">
+                  <Clock className="h-6 w-6" />
+                </div>
               </div>
-              <div className="w-12 h-12 bg-white/20 rounded-lg flex items-center justify-center">
-                <Clock className="h-6 w-6" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        </Link>
 
-        <Card className="bg-gradient-to-br from-green-500 to-green-600 text-white">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-green-100 text-sm">Approuvés</p>
-                <p className="text-3xl font-bold mt-1">{stats?.approved_quotes || 0}</p>
-                <p className="text-green-200 text-xs mt-1">Validés</p>
+        <Link to="/admin/quotes" className="block">
+          <Card className="bg-gradient-to-br from-green-500 to-green-600 text-white hover:opacity-90 cursor-pointer transition-opacity">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-green-100 text-sm">Approuvés</p>
+                  <p className="text-3xl font-bold mt-1">{stats?.approved_quotes || 0}</p>
+                  <p className="text-green-200 text-xs mt-1">Validés</p>
+                </div>
+                <div className="w-12 h-12 bg-white/20 rounded-lg flex items-center justify-center">
+                  <CheckCircle className="h-6 w-6" />
+                </div>
               </div>
-              <div className="w-12 h-12 bg-white/20 rounded-lg flex items-center justify-center">
-                <CheckCircle className="h-6 w-6" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        </Link>
 
-        <Card className="bg-gradient-to-br from-purple-500 to-purple-600 text-white">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-purple-100 text-sm">Chiffre d'Affaires</p>
-                <p className="text-xl font-bold mt-1">{formatPrice(stats?.total_revenue || 0)}</p>
-                <p className="text-purple-200 text-xs mt-1">Devis approuvés</p>
+        <Link to="/admin/quotes" className="block">
+          <Card className="bg-gradient-to-br from-purple-500 to-purple-600 text-white hover:opacity-90 cursor-pointer transition-opacity">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-purple-100 text-sm">Chiffre d'Affaires</p>
+                  <p className="text-xl font-bold mt-1">{formatPrice(stats?.total_revenue || 0)}</p>
+                  <p className="text-purple-200 text-xs mt-1">Devis approuvés</p>
+                </div>
+                <div className="w-12 h-12 bg-white/20 rounded-lg flex items-center justify-center">
+                  <DollarSign className="h-6 w-6" />
+                </div>
               </div>
-              <div className="w-12 h-12 bg-white/20 rounded-lg flex items-center justify-center">
-                <DollarSign className="h-6 w-6" />
+            </CardContent>
+          </Card>
+        </Link>
+
+        <Link to="/admin/model-requests" className="block">
+          <Card className="bg-gradient-to-br from-teal-500 to-teal-600 text-white hover:opacity-90 cursor-pointer transition-opacity">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-teal-100 text-sm">Demandes de Modèles</p>
+                  <p className="text-3xl font-bold mt-1">{stats?.total_model_requests || 0}</p>
+                  {(stats?.pending_model_requests || 0) > 0 ? (
+                    <p className="text-teal-200 text-xs mt-1">{stats?.pending_model_requests} en attente</p>
+                  ) : (
+                    <p className="text-teal-200 text-xs mt-1">Total reçues</p>
+                  )}
+                </div>
+                <div className="w-12 h-12 bg-white/20 rounded-lg flex items-center justify-center">
+                  <ClipboardList className="h-6 w-6" />
+                </div>
               </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        </Link>
       </div>
 
       {/* DB Version Status — Sunbox */}
