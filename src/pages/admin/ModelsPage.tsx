@@ -36,10 +36,20 @@ import { useNavigate } from 'react-router-dom';
 /* ======================================================
    TYPES
 ====================================================== */
+interface ModelType {
+  id: number;
+  slug: string;
+  name: string;
+  description: string | null;
+  icon_name: string;
+  display_order: number;
+  is_active: boolean;
+}
+
 interface Model {
   id?: number;
   name: string;
-  type: 'container' | 'pool' | 'modular';
+  type: string;
   description: string;
   base_price: number;
   unforeseen_cost_percent: number;
@@ -90,9 +100,10 @@ const emptyModel: Model = {
 ====================================================== */
 export default function ModelsPage() {
   const [models, setModels] = useState<Model[]>([]);
+  const [customTypes, setCustomTypes] = useState<ModelType[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [typeFilter, setTypeFilter] = useState<'all' | 'container' | 'pool' | 'modular'>('all');
+  const [typeFilter, setTypeFilter] = useState<string>('all');
   const [editingModel, setEditingModel] = useState<Model | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -107,6 +118,7 @@ export default function ModelsPage() {
   ====================================================== */
   useEffect(() => {
     loadModels();
+    loadCustomTypes();
   }, []);
 
   const loadModels = async () => {
@@ -119,6 +131,15 @@ export default function ModelsPage() {
       setModels([]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadCustomTypes = async () => {
+    try {
+      const data = await api.getModelTypes(false);
+      setCustomTypes(Array.isArray(data) ? data : []);
+    } catch {
+      setCustomTypes([]);
     }
   };
 
@@ -228,7 +249,9 @@ export default function ModelsPage() {
                 <SelectItem value="all">Tous</SelectItem>
                 <SelectItem value="container">Containers</SelectItem>
                 <SelectItem value="pool">Piscines</SelectItem>
-                <SelectItem value="modular">Maisons Modulaires</SelectItem>
+                {customTypes.map(ct => (
+                  <SelectItem key={ct.slug} value={ct.slug}>{ct.name}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -272,7 +295,11 @@ export default function ModelsPage() {
                   model.type === 'container' ? 'bg-blue-500' :
                   model.type === 'pool' ? 'bg-cyan-500' : 'bg-green-600'
                 }>
-                  {model.type === 'container' ? 'Container' : model.type === 'pool' ? 'Piscine' : 'Modulaire'}
+                  {model.type === 'container'
+                    ? 'Container'
+                    : model.type === 'pool'
+                    ? 'Piscine'
+                    : (customTypes.find(ct => ct.slug === model.type)?.name ?? model.type)}
                 </Badge>
                 {!model.is_active && <Badge variant="secondary">Inactif</Badge>}
               </div>
@@ -359,7 +386,9 @@ export default function ModelsPage() {
                     <SelectContent>
                       <SelectItem value="container">Container</SelectItem>
                       <SelectItem value="pool">Piscine</SelectItem>
-                      <SelectItem value="modular">Maison Modulaire</SelectItem>
+                      {customTypes.map(ct => (
+                        <SelectItem key={ct.slug} value={ct.slug}>{ct.name}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -486,7 +515,7 @@ export default function ModelsPage() {
                   </>
                 )}
 
-                {editingModel.type === 'modular' && (
+                {editingModel.type !== 'container' && editingModel.type !== 'pool' && (
                   <>
                     <div>
                       <Label>Longueur (m)</Label>

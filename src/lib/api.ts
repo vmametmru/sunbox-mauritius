@@ -86,15 +86,48 @@ export const api = {
   },
 
   /* =====================================================
+     MODEL TYPES (admin-managed dynamic types)
+  ===================================================== */
+  getModelTypes(activeOnly: boolean = false) {
+    return this.query('get_model_types', { active_only: activeOnly });
+  },
+
+  createModelType(type: {
+    slug: string;
+    name: string;
+    description?: string;
+    icon_name?: string;
+    display_order?: number;
+    is_active?: boolean;
+  }) {
+    return this.query('create_model_type', type);
+  },
+
+  updateModelType(type: {
+    id: number;
+    name?: string;
+    description?: string;
+    icon_name?: string;
+    display_order?: number;
+    is_active?: boolean;
+  }) {
+    return this.query('update_model_type', type);
+  },
+
+  deleteModelType(id: number) {
+    return this.query('delete_model_type', { id });
+  },
+
+  /* =====================================================
      MODELS (DB-DRIVEN ONLY)
   ===================================================== */
-  getModels(type?: 'container' | 'pool' | 'modular', activeOnly: boolean = true, includeBOQPrice: boolean = true) {
+  getModels(type?: string, activeOnly: boolean = true, includeBOQPrice: boolean = true) {
     return this.query('get_models', { type, active_only: activeOnly, include_boq_price: includeBOQPrice });
   },
 
   createModel(model: {
     name: string;
-    type: 'container' | 'pool' | 'modular';
+    type: string;
     description?: string;
     base_price: number;
     unforeseen_cost_percent?: number;
@@ -118,7 +151,7 @@ export const api = {
   updateModel(model: {
     id: number;
     name?: string;
-    type?: 'container' | 'pool' | 'modular';
+    type?: string;
     description?: string;
     base_price?: number;
     unforeseen_cost_percent?: number;

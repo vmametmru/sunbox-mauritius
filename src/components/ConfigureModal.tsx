@@ -137,7 +137,8 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
 
   const model = quoteData.model;
   const isPoolModel = model?.type === 'pool';
-  const isModularModel = model?.type === 'modular';
+  const isCustomModel = model?.type !== undefined && model.type !== 'container' && model.type !== 'pool'; // any admin-created type uses the custom BOQ engine
+  const isModularModel = isCustomModel; // alias kept for compatibility
   const poolShape = model?.pool_shape || 'Rectangulaire';
 
   // All required dimensions must be filled before we show prices / options
@@ -340,8 +341,8 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
         // Reset dimensions so the user must enter them
         setPoolDimensions({ longueur: 0, largeur: 0, profondeur: 0 });
       }
-      // Load modular-specific data for modular models
-      if (model.type === 'modular') {
+      // Load custom BOQ data for any custom type (non-container, non-pool)
+      if (isCustomModel) {
         loadModularData(model.id);
         // Reset dimensions so the user must enter them
         setModularDimensions({ longueur: 0, largeur: 0, nombre_etages: 1 });

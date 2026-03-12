@@ -30,6 +30,7 @@ import {
   Bug,
   Cpu,
   Palette,
+  Layers,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -89,9 +90,10 @@ const navItems: NavItem[] = [
       { icon: DollarSign, label: 'Prix Piscine', path: '/admin/pool-prices' },
       { icon: Waves, label: 'Variables Piscine', path: '/admin/pool-variables' },
       { icon: FileCode, label: 'Modèles Piscine', path: '/admin/pool-template' },
-      { icon: DollarSign, label: 'Prix Modulaire', path: '/admin/modular-prices' },
-      { icon: Building2, label: 'Variables Modulaire', path: '/admin/modular-variables' },
-      { icon: FileCode, label: 'Modèles Modulaire', path: '/admin/modular-template' },
+      { icon: DollarSign, label: 'Prix Personnalisé', path: '/admin/modular-prices' },
+      { icon: Building2, label: 'Variables Personnalisées', path: '/admin/modular-variables' },
+      { icon: FileCode, label: 'Modèle BOQ Personnalisé', path: '/admin/modular-template' },
+      { icon: Layers, label: 'Types de Solutions', path: '/admin/model-types' },
       { icon: Mail, label: 'Email', path: '/admin/email' },
       { icon: CreditCard, label: 'Paiements', path: '/admin/payments' },
       { icon: Settings,    label: 'Site',       path: '/admin/site' },
@@ -110,6 +112,7 @@ const groupPaths: Record<string, string[]> = {
     '/admin/users', '/admin/themes', '/admin/models', '/admin/discounts', '/admin/media',
     '/admin/boq', '/admin/pool-prices', '/admin/pool-variables', '/admin/pool-template',
     '/admin/modular-prices', '/admin/modular-variables', '/admin/modular-template',
+    '/admin/model-types',
     '/admin/email', '/admin/payments', '/admin/site', '/admin/deploy', '/admin/debug',
   ],
 };

@@ -277,6 +277,18 @@ try {
             break;
         }
 
+        // ── MODEL TYPES (reads from Sunbox DB) ───────────────────────────────
+        case 'get_model_types': {
+            $sdb  = getSunboxDB();
+            $rows = $sdb->query("SELECT * FROM model_types WHERE is_active = 1 ORDER BY display_order ASC, name ASC")->fetchAll();
+            foreach ($rows as &$r) {
+                $r['is_active']     = (bool)$r['is_active'];
+                $r['display_order'] = (int)$r['display_order'];
+            }
+            ok($rows);
+            break;
+        }
+
         // ── MODULAR BOQ (reads from Sunbox DB) ────────────────────────────────
         case 'get_modular_boq_variables': {
             $sdb  = getSunboxDB();
@@ -785,7 +797,7 @@ try {
             try {
                 $yearMonth  = date('Ym');
                 $modelType  = $body['model_type'];
-                $refPrefix  = ($modelType === 'container') ? 'PCQ' : (($modelType === 'pool') ? 'PPQ' : 'PMQ');
+                $refPrefix  = ($modelType === 'container') ? 'PCQ' : (($modelType === 'pool') ? 'PPQ' : 'P' . strtoupper(substr($modelType, 0, 1)) . 'Q');
                 $maxNext    = (int)$db->query("SELECT COALESCE(MAX(id),0)+1 FROM pro_quotes")->fetchColumn();
                 $reference  = sprintf('%s-%s-%06d', $refPrefix, $yearMonth, $maxNext);
                 $validUntil = date('Y-m-d', strtotime('+30 days'));

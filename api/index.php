@@ -6,12 +6,12 @@ handleCORS();
 
 // Pro site deployment versions — increment these when templates or DB schema change.
 // PRO_FILE_VERSION must match define('PRO_FILE_VERSION', ...) in api/pro_deploy/api_config.php
-define('PRO_FILE_VERSION',      '2.9.4');
+define('PRO_FILE_VERSION',      '2.9.5');
 define('PRO_DB_SCHEMA_VERSION', '1.8.0');
 
 // Sunbox main database schema version.
 // Increment when new tables or columns are added.
-define('SUNBOX_DB_SCHEMA_VERSION', '2.10.0');
+define('SUNBOX_DB_SCHEMA_VERSION', '2.11.0');
 
 $action = $_GET['action'] ?? '';
 $body   = getRequestBody();
@@ -25,23 +25,27 @@ function ok($data = null): void {
 }
 
 /**
- * Map model_type to a quote reference prefix.
- * Sunbox portal:  WCQ (container) | WPQ (pool) | WMQ (modular) | WFQ (free quote)
- * Pro sites:      PCQ             | PPQ         | PMQ
+ * Get the list of valid model types: fixed types + all slugs from model_types table.
+ */
+function getValidModelTypes(PDO $db): array {
+    $custom = [];
+    try {
+        $custom = $db->query("SELECT slug FROM model_types WHERE is_active = 1")->fetchAll(PDO::FETCH_COLUMN);
+    } catch (\Throwable $e) {
+        // model_types table may not exist yet (pre-migration)
+    }
+    return array_unique(array_merge(['container', 'pool'], $custom));
+}
+ * Sunbox portal:  WCQ (container) | WPQ (pool) | WXQ (any custom type, X = first char of slug)
+ * Pro sites:      PCQ             | PPQ         | PXQ
  */
 function getQuotePrefix(string $modelType, bool $isFreeQuote = false, bool $isPro = false): string {
     if ($isFreeQuote) return 'WFQ';
-    if ($isPro) {
-        return match($modelType) {
-            'pool'    => 'PPQ',
-            'modular' => 'PMQ',
-            default   => 'PCQ',
-        };
-    }
+    $base = $isPro ? 'P' : 'W';
     return match($modelType) {
-        'pool'    => 'WPQ',
-        'modular' => 'WMQ',
-        default   => 'WCQ',
+        'container' => $base . 'CQ',
+        'pool'      => $base . 'PQ',
+        default     => $base . strtoupper(substr($modelType, 0, 1)) . 'Q',
     };
 }
 
@@ -362,6 +366,34 @@ try {
             $addCol('quotes', 'modular_longueur',  "DECIMAL(8,2) DEFAULT NULL");
             $addCol('quotes', 'modular_largeur',   "DECIMAL(8,2) DEFAULT NULL");
             $addCol('quotes', 'modular_nb_etages', "INT          DEFAULT NULL");
+
+            // ── v2.11.0 ── Dynamic model types (admin-managed) ───────────────
+            // Create model_types table so admins can create arbitrary solution types
+            $createTable('model_types', "
+                CREATE TABLE `model_types` (
+                    `id`            INT AUTO_INCREMENT PRIMARY KEY,
+                    `slug`          VARCHAR(50)  NOT NULL UNIQUE,
+                    `name`          VARCHAR(255) NOT NULL,
+                    `description`   TEXT         NULL,
+                    `icon_name`     VARCHAR(100) DEFAULT 'Box',
+                    `display_order` INT          DEFAULT 0,
+                    `is_active`     TINYINT(1)   DEFAULT 1,
+                    `created_at`    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at`    TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ");
+
+            // Migrate models.type from ENUM to VARCHAR(50) so any slug can be stored
+            $modelsTypeCheck2 = $db->prepare(
+                "SELECT DATA_TYPE FROM information_schema.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'models' AND COLUMN_NAME = 'type'"
+            );
+            $modelsTypeCheck2->execute();
+            $modelsDataType = (string)($modelsTypeCheck2->fetchColumn() ?? '');
+            if (strtolower($modelsDataType) === 'enum') {
+                $db->exec("ALTER TABLE `models` MODIFY COLUMN `type` VARCHAR(50) NOT NULL DEFAULT 'container'");
+                $messages[] = "Colonne modifiée : models.type (ENUM → VARCHAR(50) pour types dynamiques)";
+            }
 
             // ── Schema version table (always create / update) ─────────────────
             $db->exec("CREATE TABLE IF NOT EXISTS `db_schema_version` (
@@ -1336,8 +1368,7 @@ try {
             validateRequired($body, ['model_id', 'model_name', 'model_type', 'base_price', 'total_price', 'customer_name', 'customer_email', 'customer_phone']);
             
             // Validate model_type
-            $validTypes = ['container', 'pool', 'modular'];
-            if (!in_array($body['model_type'], $validTypes)) {
+            if (!in_array($body['model_type'], getValidModelTypes($db))) {
                 fail('Type de modèle invalide');
             }
             
@@ -1769,8 +1800,7 @@ try {
             $modelType = $body['model_type'] ?? 'container'; // Default to container for free quotes
             
             // Validate model_type
-            $validTypes = ['container', 'pool', 'modular'];
-            if (!in_array($modelType, $validTypes)) {
+            if (!in_array($modelType, getValidModelTypes($db))) {
                 fail('Type de modèle invalide');
             }
             
@@ -3164,6 +3194,82 @@ try {
                 $row['template_data'] = json_decode($row['template_data'], true);
             }
             ok($row ?: null);
+            break;
+        }
+
+        // ============================================
+        // === MODEL TYPES (admin-managed dynamic types)
+        // ============================================
+        case 'get_model_types': {
+            $activeOnly = $body['active_only'] ?? false;
+            $sql = "SELECT * FROM model_types";
+            if ($activeOnly) $sql .= " WHERE is_active = 1";
+            $sql .= " ORDER BY display_order ASC, name ASC";
+            $rows = $db->query($sql)->fetchAll();
+            foreach ($rows as &$r) {
+                $r['is_active'] = (bool)$r['is_active'];
+                $r['display_order'] = (int)$r['display_order'];
+            }
+            ok($rows);
+            break;
+        }
+
+        case 'create_model_type': {
+            requireAdmin();
+            validateRequired($body, ['name', 'slug']);
+            // Validate slug: only lowercase alphanumeric and hyphens
+            $slug = preg_replace('/[^a-z0-9\-]/', '', strtolower(trim($body['slug'])));
+            if (empty($slug)) fail('Slug invalide (caractères autorisés: a-z 0-9 -)');
+            if (in_array($slug, ['container', 'pool'])) fail('Ce slug est réservé');
+            $stmt = $db->prepare("
+                INSERT INTO model_types (slug, name, description, icon_name, display_order, is_active)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ");
+            $stmt->execute([
+                $slug,
+                trim($body['name']),
+                $body['description'] ?? null,
+                $body['icon_name']   ?? 'Box',
+                (int)($body['display_order'] ?? 0),
+                isset($body['is_active']) ? (int)(bool)$body['is_active'] : 1,
+            ]);
+            ok(['id' => (int)$db->lastInsertId(), 'slug' => $slug]);
+            break;
+        }
+
+        case 'update_model_type': {
+            requireAdmin();
+            validateRequired($body, ['id']);
+            $sets   = [];
+            $params = [];
+            if (isset($body['name']))          { $sets[] = 'name = ?';          $params[] = trim($body['name']); }
+            if (isset($body['description']))   { $sets[] = 'description = ?';   $params[] = $body['description']; }
+            if (isset($body['icon_name']))     { $sets[] = 'icon_name = ?';     $params[] = $body['icon_name']; }
+            if (isset($body['display_order'])) { $sets[] = 'display_order = ?'; $params[] = (int)$body['display_order']; }
+            if (isset($body['is_active']))     { $sets[] = 'is_active = ?';     $params[] = (int)(bool)$body['is_active']; }
+            if (empty($sets)) { ok(); break; }
+            $params[] = (int)$body['id'];
+            $db->prepare("UPDATE model_types SET " . implode(', ', $sets) . " WHERE id = ?")->execute($params);
+            ok();
+            break;
+        }
+
+        case 'delete_model_type': {
+            requireAdmin();
+            validateRequired($body, ['id']);
+            // Check for models using this type first
+            $typeStmt = $db->prepare("SELECT slug FROM model_types WHERE id = ?");
+            $typeStmt->execute([(int)$body['id']]);
+            $typeRow = $typeStmt->fetch();
+            if ($typeRow) {
+                $usageStmt = $db->prepare("SELECT COUNT(*) FROM models WHERE type = ?");
+                $usageStmt->execute([$typeRow['slug']]);
+                if ((int)$usageStmt->fetchColumn() > 0) {
+                    fail("Ce type est utilisé par des modèles existants. Supprimez ou reclassifiez ces modèles d'abord.");
+                }
+            }
+            $db->prepare("DELETE FROM model_types WHERE id = ?")->execute([(int)$body['id']]);
+            ok();
             break;
         }
 
