@@ -6,7 +6,7 @@ handleCORS();
 
 // Pro site deployment versions — increment these when templates or DB schema change.
 // PRO_FILE_VERSION must match define('PRO_FILE_VERSION', ...) in api/pro_deploy/api_config.php
-define('PRO_FILE_VERSION',      '2.9.2');
+define('PRO_FILE_VERSION',      '2.9.3');
 define('PRO_DB_SCHEMA_VERSION', '1.8.0');
 
 // Sunbox main database schema version.
@@ -3395,6 +3395,13 @@ try {
                 $rootIndexDest = dirname($proApiDir) . '/index.php';
                 if (is_file($rootIndexSrc) && !copy($rootIndexSrc, $rootIndexDest)) {
                     $warnings[] = "Échec copie index.php → {$rootIndexDest}";
+                }
+                // Also propagate root .htaccess (fixes DirectoryIndex: ensures index.php
+                // is executed for root requests instead of serving the static index.html)
+                $rootHtaccessSrc  = $templateDir . '/htaccess';
+                $rootHtaccessDest = dirname($proApiDir) . '/.htaccess';
+                if (is_file($rootHtaccessSrc) && !copy($rootHtaccessSrc, $rootHtaccessDest)) {
+                    $warnings[] = "Échec copie .htaccess → {$rootHtaccessDest}";
                 }
                 // Update .deploy_version
                 @file_put_contents(dirname($proApiDir) . '/.deploy_version', PRO_FILE_VERSION);

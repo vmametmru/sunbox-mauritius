@@ -1,4 +1,11 @@
 Options -MultiViews +FollowSymLinks
+
+# Always execute index.php for directory requests (e.g. /).
+# Without this, Apache's default DirectoryIndex would serve the static
+# index.html fallback instead of running index.php, so __PRO_THEME__ and
+# __PRO_HEADER_IMAGES__ would never be injected for the home page.
+DirectoryIndex index.php index.html
+
 RewriteEngine On
 RewriteBase /
 
@@ -10,7 +17,7 @@ RewriteBase /
 # API requests go directly to api/
 RewriteRule ^api/ - [L]
 
-# Everything else → index.html (React SPA)
+# Everything else → index.php (React SPA served dynamically)
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule . index.php [L]
