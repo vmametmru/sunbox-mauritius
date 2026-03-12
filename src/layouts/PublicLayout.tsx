@@ -1,4 +1,4 @@
-import React, { ReactNode, useEffect, useState } from "react";
+import React, { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useSiteSettings } from "@/hooks/use-settings";
 
@@ -33,52 +33,9 @@ const NAV_LINKS = [
   { to: '/legal',  label: 'Mentions légales' },
 ];
 
-/* ── Header image slider component ── */
-function HeaderSlider({ images }: { images: string[] }) {
-  const [idx, setIdx] = useState(0);
-
-  useEffect(() => {
-    if (images.length <= 1) return;
-    const timer = setInterval(() => setIdx((i) => (i + 1) % images.length), 5000);
-    return () => clearInterval(timer);
-  }, [images.length]);
-
-  if (images.length === 0) return null;
-
-  return (
-    <div className="relative w-full overflow-hidden" style={{ height: '340px' }}>
-      {images.map((src, i) => (
-        <img
-          key={i}
-          src={src}
-          alt={`Bandeau ${i + 1}`}
-          className="absolute inset-0 w-full h-full object-cover transition-opacity duration-700"
-          style={{ opacity: i === idx ? 1 : 0 }}
-        />
-      ))}
-      {/* Dots */}
-      {images.length > 1 && (
-        <div className="absolute bottom-3 left-0 right-0 flex justify-center gap-2">
-          {images.map((_, i) => (
-            <button
-              key={i}
-              onClick={() => setIdx(i)}
-              className="rounded-full transition-all duration-300"
-              style={{
-                width: i === idx ? '20px' : '8px',
-                height: '8px',
-                background: i === idx ? '#fff' : 'rgba(255,255,255,0.5)',
-                border: 'none',
-                cursor: 'pointer',
-              }}
-              aria-label={`Slide ${i + 1}`}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
+/* ── Header image slider removed: BannerCarousel in HomePage.tsx now handles
+   the pro-site banner using window.__PRO_HEADER_IMAGES__, keeping the banner
+   on the homepage only (not on every layout page). ── */
 
 export default function PublicLayout({ children }: { children: ReactNode }) {
   const { data: settings } = useSiteSettings();
@@ -86,10 +43,6 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
   const isProSite = typeof window !== 'undefined' && !!(window as any).__PRO_SITE__;
   const proTheme: ProThemeConfig | null =
     typeof window !== 'undefined' ? ((window as any).__PRO_THEME__ ?? null) : null;
-  const proHeaderImages: string[] =
-    typeof window !== 'undefined'
-      ? (Array.isArray((window as any).__PRO_HEADER_IMAGES__) ? (window as any).__PRO_HEADER_IMAGES__ : [])
-      : [];
 
   const siteLogo = isProSite
     ? ((window as any).__PRO_LOGO_URL__ || '')
@@ -198,9 +151,6 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
           </div>
         )}
 
-        {/* ===== HEADER SLIDER ===== */}
-        {proHeaderImages.length > 0 && <HeaderSlider images={proHeaderImages} />}
-
         {/* ===== MAIN ===== */}
         <main className="flex-1">{children}</main>
 
@@ -218,8 +168,8 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
     );
   }
 
-  /* ── Pro site with header images but no custom theme ── */
-  if (isProSite && proHeaderImages.length > 0) {
+  /* ── Pro site with no custom theme — use default layout with pro branding ── */
+  if (isProSite) {
     return (
       <div className="flex flex-col min-h-screen text-gray-800">
         <header className="bg-white shadow-sm py-4 px-6 flex items-center justify-between">
@@ -238,7 +188,6 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
         {siteUnderConstruction && (
           <div className="bg-yellow-100 text-yellow-800 text-sm text-center py-2 px-4">{constructionMessage}</div>
         )}
-        <HeaderSlider images={proHeaderImages} />
         <main className="flex-1">{children}</main>
         <footer className="bg-[#1A365D] text-white text-center text-sm py-6 mt-12">
           © {new Date().getFullYear()} {companyName} — Tous droits réservés
