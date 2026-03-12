@@ -924,7 +924,7 @@ export const api = {
     return this.query('create_pro_user', user);
   },
 
-  updateProUser(user: { id: number; name?: string; email?: string; password?: string; is_active?: boolean; company_name?: string; address?: string; vat_number?: string; brn_number?: string; phone?: string; sunbox_margin_percent?: number; domain?: string; logo_url?: string; db_name?: string }) {
+  updateProUser(user: { id: number; name?: string; email?: string; password?: string; is_active?: boolean; company_name?: string; address?: string; vat_number?: string; brn_number?: string; phone?: string; sunbox_margin_percent?: number; domain?: string; logo_url?: string; db_name?: string; theme_id?: number | null }) {
     return this.query('update_pro_user', user);
   },
 
@@ -1034,6 +1034,36 @@ export const api = {
   },
 
   /* =====================================================
+     PRO THEMES (admin)
+  ===================================================== */
+  getProThemes() {
+    return this.query('get_pro_themes');
+  },
+
+  createProTheme(theme: Partial<ProTheme> & { name: string }) {
+    return this.query('create_pro_theme', theme);
+  },
+
+  updateProTheme(theme: Partial<ProTheme> & { id: number }) {
+    return this.query('update_pro_theme', theme);
+  },
+
+  deleteProTheme(id: number) {
+    return this.query('delete_pro_theme', { id });
+  },
+
+  /* =====================================================
+     HEADER IMAGES (pro user self-serve OR admin by userId)
+  ===================================================== */
+  getHeaderImages(userId?: number) {
+    return this.query('get_header_images', userId ? { user_id: userId } : {});
+  },
+
+  updateHeaderImages(images: string[], userId?: number) {
+    return this.query('update_header_images', { images, ...(userId ? { user_id: userId } : {}) });
+  },
+
+  /* =====================================================
      DEBUG
   ===================================================== */
   getDebugInfo() {
@@ -1046,3 +1076,27 @@ export const api = {
 };
 
 export default api;
+
+/* =====================================================
+   SHARED TYPES
+===================================================== */
+export interface ProTheme {
+  id: number;
+  name: string;
+  logo_position: 'left' | 'center' | 'right';
+  header_height: 'small' | 'medium' | 'large' | 'hero';
+  header_bg_color: string;
+  header_text_color: string;
+  font_family: string;
+  nav_position: 'left' | 'center' | 'right';
+  nav_has_background: boolean;
+  nav_bg_color: string;
+  nav_text_color: string;
+  nav_hover_color: string;
+  button_color: string;
+  button_text_color: string;
+  footer_bg_color: string;
+  footer_text_color: string;
+  created_at?: string;
+  updated_at?: string;
+}

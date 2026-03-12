@@ -6,18 +6,32 @@ interface BannerImage {
 }
 
 export default function BannerCarousel() {
-  const [images, setImages] = useState<BannerImage[]>([]);
+  // On deployed pro sites the pro API has no get_banner_images endpoint.
+  // Banner images for pro sites come from window.__PRO_HEADER_IMAGES__,
+  // injected by the pro site's dynamic index.php on every page load.
+  const isProSite = typeof window !== 'undefined' && !!(window as any).__PRO_SITE__;
+
+  const [images, setImages] = useState<BannerImage[]>(() => {
+    // Guard against SSR and non-pro contexts before touching window globals.
+    if (typeof window === 'undefined' || !(window as any).__PRO_SITE__) return [];
+    const proImgs: string[] = Array.isArray((window as any).__PRO_HEADER_IMAGES__)
+      ? (window as any).__PRO_HEADER_IMAGES__
+      : [];
+    return proImgs.map((url, i) => ({ id: i, url }));
+  });
   const [current, setCurrent] = useState(0);
 
   useEffect(() => {
+    if (isProSite) return; // already initialised from window.__PRO_HEADER_IMAGES__
     fetch("/api/index.php?action=get_banner_images")
       .then(res => res.json())
       .then(json => {
         if (json.success && Array.isArray(json.data)) {
           setImages(json.data);
         }
-      });
-  }, []);
+      })
+      .catch(() => {}); // fail silently
+  }, [isProSite]);
 
   useEffect(() => {
     if (images.length < 2) return;

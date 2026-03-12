@@ -1,11 +1,13 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { ArrowRight, Package, Phone, Home } from 'lucide-react';
-import PublicLayout from '@/layouts/PublicLayout'; // ✅ Corrigé ici
+import { Package, Phone, Home } from 'lucide-react';
+import PublicLayout from '@/layouts/PublicLayout';
 import BannerCarousel from '@/components/public/BannerCarousel';
+import { getProButtonStyle } from '@/lib/pro-theme';
 
 export default function HomePage() {
+  const btnStyle = getProButtonStyle();
   return (
     <PublicLayout>
       <BannerCarousel />
@@ -40,12 +42,12 @@ export default function HomePage() {
       </section>
 
       <section className="bg-orange-100 py-16 px-6 text-center">
-        <h2 className="text-3xl font-bold mb-4">Besoin d’aide ou d’un devis ?</h2>
+        <h2 className="text-3xl font-bold mb-4">Besoin d'aide ou d'un devis ?</h2>
         <p className="text-gray-700 mb-6">
           Contactez-nous pour discuter de votre projet, obtenir un devis personnalisé ou visiter un modèle.
         </p>
         <Link to="/contact">
-          <Button className="bg-orange-500 hover:bg-orange-600 text-white">
+          <Button className="bg-orange-500 hover:bg-orange-600 text-white" style={btnStyle}>
             Contactez-nous <Phone className="ml-2 h-4 w-4" />
           </Button>
         </Link>

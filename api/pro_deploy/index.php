@@ -31,12 +31,95 @@ function proIndexParseEnv(string $path): array {
 
 // ── Load pro config from .env ─────────────────────────────────────────────────
 $proEnv      = proIndexParseEnv($proDir . '/.env');
-$sunboxEnv   = proIndexParseEnv($sunboxRoot . '/.env');
+// Try several parent candidates for the Sunbox root .env
+$sunboxEnv = [];
+foreach ([
+    $sunboxRoot . '/.env',
+    $sunboxRoot . '/api/.env',
+    dirname($sunboxRoot) . '/.env',
+] as $_candidate) {
+    $parsed = proIndexParseEnv($_candidate);
+    if (!empty($parsed)) { $sunboxEnv = $parsed; break; }
+}
 
 $proAppUrl   = rtrim($proEnv['APP_URL']      ?? '', '/');
 $logoUrl     = $proEnv['LOGO_URL']           ?? '';
 $companyName = $proEnv['COMPANY_NAME']       ?? '';
 $sunboxBase  = rtrim($sunboxEnv['APP_URL']   ?? 'https://sunbox-mauritius.com', '/');
+
+// ── Fetch theme & header images from Sunbox DB on every request ───────────────
+// This makes theme changes take effect immediately without redeploying.
+$proUserId     = (int)($proEnv['SUNBOX_USER_ID'] ?? 0);
+$themeJson     = 'null';
+$headerImgJson = '[]';
+
+if ($proUserId > 0) {
+    try {
+        $_dbHost = $sunboxEnv['DB_HOST'] ?? 'localhost';
+        $_dbName = $sunboxEnv['DB_NAME'] ?? '';
+        $_dbUser = $sunboxEnv['DB_USER'] ?? '';
+        $_dbPass = $sunboxEnv['DB_PASS'] ?? '';
+        if ($_dbName && $_dbUser) {
+            $_pdo = new PDO(
+                "mysql:host={$_dbHost};dbname={$_dbName};charset=utf8mb4",
+                $_dbUser, $_dbPass,
+                [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                 PDO::ATTR_EMULATE_PREPARES   => false]
+            );
+
+            // Fetch assigned theme
+            $_stmt = $_pdo->prepare("
+                SELECT pt.logo_position, pt.header_height, pt.header_bg_color,
+                       pt.header_text_color, pt.font_family, pt.nav_position,
+                       pt.nav_has_background, pt.nav_bg_color, pt.nav_text_color,
+                       pt.nav_hover_color, pt.button_color, pt.button_text_color,
+                       pt.footer_bg_color, pt.footer_text_color
+                FROM professional_profiles pp
+                JOIN professional_themes pt ON pt.id = pp.theme_id
+                WHERE pp.user_id = ?
+                LIMIT 1
+            ");
+            $_stmt->execute([$proUserId]);
+            $_theme = $_stmt->fetch();
+            if ($_theme) {
+                $_theme['nav_has_background'] = (bool)$_theme['nav_has_background'];
+                $themeJson = json_encode($_theme, JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE);
+            }
+
+            // Fetch header images
+            $_stmt2 = $_pdo->prepare(
+                "SELECT header_images_json FROM professional_profiles WHERE user_id = ? LIMIT 1"
+            );
+            $_stmt2->execute([$proUserId]);
+            $_row2 = $_stmt2->fetch();
+            if ($_row2 && !empty($_row2['header_images_json'])) {
+                $_imgs = json_decode($_row2['header_images_json'], true);
+                if (is_array($_imgs) && count($_imgs) > 0) {
+                    // Convert relative URLs to absolute Sunbox URLs.
+                    // Images uploaded via the Sunbox portal are stored as relative paths
+                    // (e.g. /uploads/sketches/...). When served on the pro domain those
+                    // paths would resolve to the wrong host, so we prepend the Sunbox base.
+                    $_imgs = array_map(function ($url) use ($sunboxBase) {
+                        if ($url !== '' && strpos($url, 'http') !== 0) {
+                            return rtrim($sunboxBase, '/') . '/' . ltrim($url, '/');
+                        }
+                        return $url;
+                    }, $_imgs);
+                    $headerImgJson = json_encode(
+                        array_values(array_filter($_imgs)),
+                        JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE
+                    );
+                }
+            }
+        }
+    } catch (\Throwable $_e) {
+        // Fail silently — site still renders without theme customisation
+        if (($proEnv['API_DEBUG'] ?? '') === 'true') {
+            error_log('[index.php] Theme/images load failed: ' . $_e->getMessage());
+        }
+    }
+}
 
 // ── Read Sunbox index.html ────────────────────────────────────────────────────
 $indexHtml = null;
@@ -94,6 +177,8 @@ $inject = '<script>'
     . 'window.__API_BASE_URL__='     . json_encode($apiBaseUrl,   JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE) . ';'
     . 'window.__PRO_LOGO_URL__='     . json_encode($logoUrl,      JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE) . ';'
     . 'window.__PRO_COMPANY_NAME__=' . json_encode($companyName,  JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE) . ';'
+    . 'window.__PRO_THEME__='        . $themeJson        . ';'
+    . 'window.__PRO_HEADER_IMAGES__=' . $headerImgJson   . ';'
     . '</script>';
 
 $closeHeadPos = stripos($indexHtml, '</head>');
