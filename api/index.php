@@ -24,6 +24,27 @@ function ok($data = null): void {
     successResponse($data);
 }
 
+/**
+ * Map model_type to a quote reference prefix.
+ * Sunbox portal:  WCQ (container) | WPQ (pool) | WMQ (modular) | WFQ (free quote)
+ * Pro sites:      PCQ             | PPQ         | PMQ
+ */
+function getQuotePrefix(string $modelType, bool $isFreeQuote = false, bool $isPro = false): string {
+    if ($isFreeQuote) return 'WFQ';
+    if ($isPro) {
+        return match($modelType) {
+            'pool'    => 'PPQ',
+            'modular' => 'PMQ',
+            default   => 'PCQ',
+        };
+    }
+    return match($modelType) {
+        'pool'    => 'WPQ',
+        'modular' => 'WMQ',
+        default   => 'WCQ',
+    };
+}
+
 try {
     $db = getDB();
 
@@ -1328,7 +1349,7 @@ try {
                 // The xxxxxx is a combined sequential counter shared between both types
                 $yearMonth = date('Ym');
                 $modelType = $body['model_type'];
-                $prefix = ($modelType === 'container') ? 'WCQ' : (($modelType === 'pool') ? 'WPQ' : 'WMQ');
+                $prefix = getQuotePrefix($modelType);
                 $maxIdStmt = $db->query("SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM quotes");
                 $nextId = (int)$maxIdStmt->fetchColumn();
                 $reference = sprintf('%s-%s-%06d', $prefix, $yearMonth, $nextId);
@@ -1758,7 +1779,7 @@ try {
             try {
                 // Generate reference number
                 $yearMonth = date('Ym');
-                $prefix = $isFreeQuote ? 'WFQ' : (($modelType === 'container') ? 'WCQ' : (($modelType === 'pool') ? 'WPQ' : 'WMQ'));
+                $prefix = getQuotePrefix($modelType, (bool)$isFreeQuote);
                 $maxIdStmt = $db->query("SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM quotes");
                 $nextId = (int)$maxIdStmt->fetchColumn();
                 $reference = sprintf('%s-%s-%06d', $prefix, $yearMonth, $nextId);
@@ -2136,7 +2157,7 @@ try {
                 $yearMonth = date('Ym');
                 $isFreeQuote = $sourceQuote['is_free_quote'] ?? false;
                 $modelType = $sourceQuote['model_type'];
-                $prefix = $isFreeQuote ? 'WFQ' : (($modelType === 'container') ? 'WCQ' : (($modelType === 'pool') ? 'WPQ' : 'WMQ'));
+                $prefix = getQuotePrefix($modelType, (bool)$isFreeQuote);
                 $maxIdStmt = $db->query("SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM quotes");
                 $nextId = (int)$maxIdStmt->fetchColumn();
                 $reference = sprintf('%s-%s-%06d', $prefix, $yearMonth, $nextId);
