@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { CreditCard, TrendingUp, Upload, ImageIcon, Trash2, GripVertical } from 'lucide-react';
-import { api } from '@/lib/api';
+import { api, API_BASE_URL } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 
 interface Profile {
@@ -115,7 +115,7 @@ export default function ProSettingsPage() {
     formData.append('file', file);
     try {
       setUploadingLogo(true);
-      const r = await fetch('/api/upload_sketch.php', { method: 'POST', body: formData, credentials: 'include' });
+      const r = await fetch(`${API_BASE_URL}/upload_sketch.php`, { method: 'POST', body: formData, credentials: 'include' });
       const j = await r.json();
       if (!r.ok || j.error) throw new Error(j.error || 'Upload échoué');
       await api.updateProProfile({ logo_url: j.url });
@@ -137,14 +137,18 @@ export default function ProSettingsPage() {
       for (const file of files) {
         const formData = new FormData();
         formData.append('file', file);
-        const r = await fetch('/api/upload_sketch.php', { method: 'POST', body: formData, credentials: 'include' });
+        // Use API_BASE_URL so on deployed pro sites the request goes to the
+        // pro site's own upload endpoint, not the main Sunbox API.
+        const r = await fetch(`${API_BASE_URL}/upload_sketch.php`, { method: 'POST', body: formData, credentials: 'include' });
         const j = await r.json();
         if (!r.ok || j.error) throw new Error(j.error || 'Upload échoué');
         uploaded.push(j.url as string);
       }
       const updated = [...headerImages, ...uploaded];
       setHeaderImages(updated);
-      toast({ title: `${uploaded.length} image(s) uploadée(s)` });
+      // Persist immediately so images survive a page refresh.
+      await api.updateHeaderImages(updated);
+      toast({ title: `${uploaded.length} image${uploaded.length > 1 ? 's' : ''} uploadée${uploaded.length > 1 ? 's' : ''} et sauvegardée${uploaded.length > 1 ? 's' : ''}` });
     } catch (err: any) {
       toast({ title: 'Erreur upload image header', description: err.message, variant: 'destructive' });
     } finally {
@@ -153,8 +157,15 @@ export default function ProSettingsPage() {
     }
   };
 
-  const removeHeaderImage = (idx: number) => {
-    setHeaderImages((prev) => prev.filter((_, i) => i !== idx));
+  const removeHeaderImage = async (idx: number) => {
+    const updated = headerImages.filter((_, i) => i !== idx);
+    setHeaderImages(updated);
+    try {
+      await api.updateHeaderImages(updated);
+      toast({ title: 'Image supprimée' });
+    } catch (err: any) {
+      toast({ title: 'Erreur suppression', description: err.message, variant: 'destructive' });
+    }
   };
 
   const saveHeaderImages = async () => {
