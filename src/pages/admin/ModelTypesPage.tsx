@@ -347,6 +347,7 @@ const ModelTypesPage: React.FC = () => {
                     placeholder="ex: kiosk"
                     className="font-mono text-sm"
                     disabled={dialog !== 'create'}
+                    aria-describedby={dialog !== 'create' ? 'slug-locked-hint' : undefined}
                   />
                   {dialog === 'create' && (
                     <Button
@@ -360,7 +361,7 @@ const ModelTypesPage: React.FC = () => {
                   )}
                 </div>
                 {dialog !== 'create' && (
-                  <p className="text-xs text-amber-600 mt-1">⚠ Le slug ne peut pas être modifié après la création (clé des modèles associés).</p>
+                  <p id="slug-locked-hint" className="text-xs text-amber-600 mt-1">⚠ Le slug ne peut pas être modifié après la création (clé des modèles associés).</p>
                 )}
               </div>
 

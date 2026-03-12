@@ -1,8 +1,11 @@
 -- ============================================================
 -- SUNBOX MAURITIUS - Modular BOQ System Migration
 -- ============================================================
--- This migration adds support for a third model type: 'modular'
--- (Maisons Modulaires) with its own price list, variables, and
+-- This migration adds support for the 'modular' BOQ tables
+-- (modular_boq_variables, modular_boq_price_list, modular_boq_templates).
+-- NOTE: The ENUM modification below (adding 'modular') is superseded by
+-- the v2.11.0 migration in api/index.php which converts models.type
+-- from ENUM to VARCHAR(50) to support unlimited admin-created types.
 -- BOQ template tables — following the same pattern as Pool BOQ.
 -- ============================================================
 

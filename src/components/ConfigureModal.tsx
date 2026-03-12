@@ -137,7 +137,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
 
   const model = quoteData.model;
   const isPoolModel = model?.type === 'pool';
-  const isCustomModel = model?.type !== undefined && model.type !== 'container' && model.type !== 'pool'; // any admin-created type uses the custom BOQ engine
+  const isCustomModel = !!model?.type && !['container', 'pool'].includes(model.type); // any admin-created type uses the custom BOQ engine
   const isModularModel = isCustomModel; // alias kept for compatibility
   const poolShape = model?.pool_shape || 'Rectangulaire';
 

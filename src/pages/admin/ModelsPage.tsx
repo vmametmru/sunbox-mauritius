@@ -6,7 +6,7 @@ import {
   Search,
   Home,
   Droplets,
-  Building2,
+  Box,
   Calculator
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
@@ -275,7 +275,7 @@ export default function ModelsPage() {
                     ? <Home className="h-16 w-16 text-gray-300" />
                     : model.type === 'pool'
                     ? <Droplets className="h-16 w-16 text-gray-300" />
-                    : <Building2 className="h-16 w-16 text-gray-300" />}
+                    : <Box className="h-16 w-16 text-gray-300" />}
                 </div>
               )}
 

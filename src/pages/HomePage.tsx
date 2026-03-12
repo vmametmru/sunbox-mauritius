@@ -18,11 +18,13 @@ interface ModelType {
 }
 
 // Build a dynamic grid column class based on total count
+// Returns a responsive Tailwind column class based on total block count.
+// For 5+ types we wrap at 3 columns per row on large screens to keep cards readable.
 function gridCols(count: number): string {
   if (count <= 2) return 'sm:grid-cols-2';
   if (count === 3) return 'sm:grid-cols-3';
   if (count === 4) return 'sm:grid-cols-2 lg:grid-cols-4';
-  return 'sm:grid-cols-2 lg:grid-cols-3';
+  return 'sm:grid-cols-2 lg:grid-cols-3'; // 5+ blocks: 2 rows of 3 on large screens
 }
 
 export default function HomePage() {

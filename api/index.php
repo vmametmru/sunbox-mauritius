@@ -36,6 +36,8 @@ function getValidModelTypes(PDO $db): array {
     }
     return array_unique(array_merge(['container', 'pool'], $custom));
 }
+/**
+ * Map model_type to a quote reference prefix.
  * Sunbox portal:  WCQ (container) | WPQ (pool) | WXQ (any custom type, X = first char of slug)
  * Pro sites:      PCQ             | PPQ         | PXQ
  */
@@ -570,6 +572,9 @@ try {
 
         case 'create_model': {
             validateRequired($body, ['name', 'type', 'base_price']);
+            if (!in_array($body['type'], getValidModelTypes($db))) {
+                fail('Type de modèle invalide');
+            }
             $stmt = $db->prepare("
                 INSERT INTO models (
                     name, type, description, base_price, unforeseen_cost_percent,
@@ -605,6 +610,9 @@ try {
 
         case 'update_model': {
             validateRequired($body, ['id']);
+            if (isset($body['type']) && !in_array($body['type'], getValidModelTypes($db))) {
+                fail('Type de modèle invalide');
+            }
             $allowed = [
                 'name','type','description','base_price','unforeseen_cost_percent','surface_m2',
                 'bedrooms','bathrooms','container_20ft_count','container_40ft_count',
