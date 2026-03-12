@@ -89,6 +89,9 @@ const navItems: NavItem[] = [
       { icon: DollarSign, label: 'Prix Piscine', path: '/admin/pool-prices' },
       { icon: Waves, label: 'Variables Piscine', path: '/admin/pool-variables' },
       { icon: FileCode, label: 'Modèles Piscine', path: '/admin/pool-template' },
+      { icon: DollarSign, label: 'Prix Modulaire', path: '/admin/modular-prices' },
+      { icon: Building2, label: 'Variables Modulaire', path: '/admin/modular-variables' },
+      { icon: FileCode, label: 'Modèles Modulaire', path: '/admin/modular-template' },
       { icon: Mail, label: 'Email', path: '/admin/email' },
       { icon: CreditCard, label: 'Paiements', path: '/admin/payments' },
       { icon: Settings,    label: 'Site',       path: '/admin/site' },
@@ -106,6 +109,7 @@ const groupPaths: Record<string, string[]> = {
   parametres: [
     '/admin/users', '/admin/themes', '/admin/models', '/admin/discounts', '/admin/media',
     '/admin/boq', '/admin/pool-prices', '/admin/pool-variables', '/admin/pool-template',
+    '/admin/modular-prices', '/admin/modular-variables', '/admin/modular-template',
     '/admin/email', '/admin/payments', '/admin/site', '/admin/deploy', '/admin/debug',
   ],
 };

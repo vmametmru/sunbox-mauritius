@@ -10,6 +10,7 @@ import { api, API_BASE_URL } from '@/lib/api';
 import { useSiteSettings, calculateTTC, calculateHT } from '@/hooks/use-site-settings';
 import { useToast } from '@/hooks/use-toast';
 import { evaluatePoolVariables, evaluateFormula, type PoolDimensions, type PoolVariable } from '@/lib/pool-formulas';
+import { evaluateModularVariables, type ModularDimensions, type ModularVariable } from '@/lib/modular-formulas';
 import { getProButtonStyle } from '@/lib/pro-theme';
 
 interface BOQLine {
@@ -104,6 +105,16 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
   const [poolVariables, setPoolVariables] = useState<PoolVariable[]>([]);
   const [boqFullCategories, setBOQFullCategories] = useState<BOQFullCategory[]>([]);
   const [isLoadingPoolData, setIsLoadingPoolData] = useState(false);
+
+  // Modular dimensions state (for modular models) — start empty so user must enter them
+  const [modularDimensions, setModularDimensions] = useState<ModularDimensions>({
+    longueur: 0,
+    largeur: 0,
+    nombre_etages: 1,
+  });
+  const [modularVariables, setModularVariables] = useState<ModularVariable[]>([]);
+  const [modularBOQCategories, setModularBOQCategories] = useState<BOQFullCategory[]>([]);
+  const [isLoadingModularData, setIsLoadingModularData] = useState(false);
   
   // Multi-step state
   const [step, setStep] = useState<'options' | 'details' | 'confirmation'>('options');
@@ -126,6 +137,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
 
   const model = quoteData.model;
   const isPoolModel = model?.type === 'pool';
+  const isModularModel = model?.type === 'modular';
   const poolShape = model?.pool_shape || 'Rectangulaire';
 
   // All required dimensions must be filled before we show prices / options
@@ -154,11 +166,25 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
   // True while we have dimensions but BOQ data hasn't loaded yet
   const isCalculatingPrice = isPoolModel && poolDimensionsReady && isLoadingPoolData;
 
+  // Modular dimensions ready check
+  const modularDimensionsReady = isModularModel
+    && modularDimensions.longueur > 0
+    && modularDimensions.largeur > 0
+    && modularDimensions.nombre_etages >= 1;
+
+  const isCalculatingModularPrice = isModularModel && modularDimensionsReady && isLoadingModularData;
+
   // Compute pool variable context (surface_m2, volume_m3, etc.) from dimensions
   const poolVarContext = useMemo(() => {
     if (!isPoolModel) return {};
     return evaluatePoolVariables(poolDimensions, poolVariables);
   }, [isPoolModel, poolDimensions, poolVariables]);
+
+  // Compute modular variable context from dimensions
+  const modularVarContext = useMemo(() => {
+    if (!isModularModel) return {};
+    return evaluateModularVariables(modularDimensions, modularVariables);
+  }, [isModularModel, modularDimensions, modularVariables]);
 
   // Calculate dynamic base price for pool models from BOQ formulas
   const poolBasePrice = useMemo(() => {
@@ -212,6 +238,52 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
     
     return prices;
   }, [isPoolModel, boqFullCategories, poolVarContext]);
+
+  // Calculate dynamic base price for modular models from BOQ formulas
+  const modularBasePrice = useMemo(() => {
+    if (!isModularModel || modularBOQCategories.length === 0) return 0;
+    const baseCats = modularBOQCategories.filter(c => !c.is_option);
+    let totalSaleHT = 0;
+    for (const cat of baseCats) {
+      for (const line of cat.lines) {
+        const qty = line.quantity_formula
+          ? evaluateFormula(line.quantity_formula, modularVarContext)
+          : Number(line.quantity);
+        const unitCost = line.unit_cost_formula
+          ? evaluateFormula(line.unit_cost_formula, modularVarContext)
+          : (line.price_list_id && line.price_list_unit_price != null
+            ? Number(line.price_list_unit_price)
+            : Number(line.unit_cost_ht));
+        const lineCost = qty * unitCost;
+        totalSaleHT += lineCost * (1 + Number(line.margin_percent) / 100);
+      }
+    }
+    return totalSaleHT;
+  }, [isModularModel, modularBOQCategories, modularVarContext]);
+
+  // Calculate dynamic option prices for modular BOQ options
+  const modularOptionPrices = useMemo(() => {
+    if (!isModularModel || modularBOQCategories.length === 0) return {};
+    const optionCategories = modularBOQCategories.filter(c => c.is_option);
+    const prices: Record<number, number> = {};
+    for (const cat of optionCategories) {
+      let totalSaleHT = 0;
+      for (const line of cat.lines) {
+        const qty = line.quantity_formula
+          ? evaluateFormula(line.quantity_formula, modularVarContext)
+          : Number(line.quantity);
+        const unitCost = line.unit_cost_formula
+          ? evaluateFormula(line.unit_cost_formula, modularVarContext)
+          : (line.price_list_id && line.price_list_unit_price != null
+            ? Number(line.price_list_unit_price)
+            : Number(line.unit_cost_ht));
+        const lineCost = qty * unitCost;
+        totalSaleHT += lineCost * (1 + Number(line.margin_percent) / 100);
+      }
+      prices[cat.id] = totalSaleHT;
+    }
+    return prices;
+  }, [isModularModel, modularBOQCategories, modularVarContext]);
   
   // Generate or retrieve device ID for client info reuse
   const getDeviceId = () => {
@@ -267,6 +339,12 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
         loadPoolData(model.id);
         // Reset dimensions so the user must enter them
         setPoolDimensions({ longueur: 0, largeur: 0, profondeur: 0 });
+      }
+      // Load modular-specific data for modular models
+      if (model.type === 'modular') {
+        loadModularData(model.id);
+        // Reset dimensions so the user must enter them
+        setModularDimensions({ longueur: 0, largeur: 0, nombre_etages: 1 });
       }
       // Reset to first step when opening
       setStep('options');
@@ -588,11 +666,31 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
     }
   };
 
+  const loadModularData = async (modelId: number) => {
+    setIsLoadingModularData(true);
+    try {
+      const [variables, fullCategories] = await Promise.all([
+        api.getModularBOQVariables(),
+        api.getModularBOQFull(modelId),
+      ]);
+      setModularVariables(Array.isArray(variables) ? variables : []);
+      setModularBOQCategories(Array.isArray(fullCategories) ? fullCategories : []);
+    } catch (err) {
+      console.error('Error loading modular data:', err);
+    } finally {
+      setIsLoadingModularData(false);
+    }
+  };
+
   // Get the effective base price HT (for storage in DB)
   const getEffectiveBasePriceHT = () => {
     if (isPoolModel && boqFullCategories.length > 0) {
       const unforeseen = Number(model?.unforeseen_cost_percent ?? 10);
       return poolBasePrice * (1 + unforeseen / 100);
+    }
+    if (isModularModel && modularBOQCategories.length > 0 && modularDimensionsReady) {
+      const unforeseen = Number(model?.unforeseen_cost_percent ?? 10);
+      return modularBasePrice * (1 + unforeseen / 100);
     }
     // model.base_price is HT (set from ModelsPage)
     return Number(model?.base_price ?? 0);
@@ -608,6 +706,9 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
     if (isPoolModel && opt.id >= BOQ_OPTION_ID_OFFSET) {
       return getPoolOptionPrice(opt.id);
     }
+    if (isModularModel && opt.id >= BOQ_OPTION_ID_OFFSET) {
+      return getModularOptionPrice(opt.id);
+    }
     return Number(opt.price || 0);
   };
 
@@ -616,6 +717,11 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
     // optionId is offset by BOQ_OPTION_ID_OFFSET
     const realId = optionId - BOQ_OPTION_ID_OFFSET;
     return poolOptionPrices[realId] ?? 0;
+  };
+
+  const getModularOptionPrice = (optionId: number): number => {
+    const realId = optionId - BOQ_OPTION_ID_OFFSET;
+    return modularOptionPrices[realId] ?? 0;
   };
 
   // Combine regular options and BOQ options
@@ -653,9 +759,13 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
   const calculateOptionsTotalTTC = () => {
     return quoteData.selectedOptions.reduce((sum, opt) => {
       const qty = getOptionQty(opt.id);
-      // For pool BOQ options, use the dynamically calculated price based on dimensions
+      // For pool/modular BOQ options, use the dynamically calculated price based on dimensions
       if (isPoolModel && opt.id >= BOQ_OPTION_ID_OFFSET) {
         const dynamicPrice = getPoolOptionPrice(opt.id);
+        return sum + calculateTTC(dynamicPrice, vatRate) * qty;
+      }
+      if (isModularModel && opt.id >= BOQ_OPTION_ID_OFFSET) {
+        const dynamicPrice = getModularOptionPrice(opt.id);
         return sum + calculateTTC(dynamicPrice, vatRate) * qty;
       }
       return sum + calculateTTC(Number(opt.price || 0), vatRate) * qty;
@@ -667,11 +777,15 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
     return base + calculateOptionsTotalTTC();
   };
 
-  // Get the display price for an option (dynamic for pool models), includes quantity multiplier
+  // Get the display price for an option (dynamic for pool/modular models), includes quantity multiplier
   const getOptionDisplayPrice = (opt: ModelOption) => {
     const qty = getOptionQty(opt.id);
     if (isPoolModel && opt.id >= BOQ_OPTION_ID_OFFSET) {
       const dynamicPrice = getPoolOptionPrice(opt.id);
+      return calculateTTC(dynamicPrice, vatRate) * qty;
+    }
+    if (isModularModel && opt.id >= BOQ_OPTION_ID_OFFSET) {
+      const dynamicPrice = getModularOptionPrice(opt.id);
       return calculateTTC(dynamicPrice, vatRate) * qty;
     }
     return calculateTTC(opt.price, vatRate) * qty;
@@ -681,6 +795,10 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
   const getOptionUnitPrice = (opt: ModelOption) => {
     if (isPoolModel && opt.id >= BOQ_OPTION_ID_OFFSET) {
       const dynamicPrice = getPoolOptionPrice(opt.id);
+      return calculateTTC(dynamicPrice, vatRate);
+    }
+    if (isModularModel && opt.id >= BOQ_OPTION_ID_OFFSET) {
+      const dynamicPrice = getModularOptionPrice(opt.id);
       return calculateTTC(dynamicPrice, vatRate);
     }
     return calculateTTC(opt.price, vatRate);
@@ -990,6 +1108,73 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                 </div>
               )}
 
+              {/* MODULAR DIMENSIONS INPUT */}
+              {isModularModel && (
+                <div className="bg-green-50 border border-green-200 p-4 rounded">
+                  <h3 className="text-base font-semibold text-green-800 mb-3 flex items-center gap-2">
+                    <Ruler className="w-4 h-4" />
+                    Dimensions de votre maison modulaire
+                  </h3>
+                  <p className="text-xs text-green-600 mb-3">Veuillez saisir les dimensions pour voir le prix estimé.</p>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-green-700 mb-1">Longueur (m)</label>
+                      <Input
+                        type="number"
+                        step="0.5"
+                        min="3"
+                        max="50"
+                        value={modularDimensions.longueur || ''}
+                        placeholder="ex: 10"
+                        onChange={(e) => {
+                          const v = Number(e.target.value);
+                          setModularDimensions(prev => ({ ...prev, longueur: v >= 0 ? v : 0 }));
+                        }}
+                        className="h-9 text-sm bg-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-green-700 mb-1">Largeur (m)</label>
+                      <Input
+                        type="number"
+                        step="0.5"
+                        min="3"
+                        max="30"
+                        value={modularDimensions.largeur || ''}
+                        placeholder="ex: 8"
+                        onChange={(e) => {
+                          const v = Number(e.target.value);
+                          setModularDimensions(prev => ({ ...prev, largeur: v >= 0 ? v : 0 }));
+                        }}
+                        className="h-9 text-sm bg-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-green-700 mb-1">Nombre d&apos;étages</label>
+                      <Input
+                        type="number"
+                        step="1"
+                        min="1"
+                        max="5"
+                        value={modularDimensions.nombre_etages || 1}
+                        placeholder="ex: 1"
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value, 10) || 1;
+                          setModularDimensions(prev => ({ ...prev, nombre_etages: v >= 1 ? v : 1 }));
+                        }}
+                        className="h-9 text-sm bg-white"
+                      />
+                    </div>
+                  </div>
+                  {modularDimensionsReady && (
+                    <p className="mt-2 text-xs text-green-700">
+                      Surface plancher : {(modularDimensions.longueur * modularDimensions.largeur).toFixed(1)} m² •
+                      Surface totale : {(modularDimensions.longueur * modularDimensions.largeur * modularDimensions.nombre_etages).toFixed(1)} m²
+                    </p>
+                  )}
+                </div>
+              )}
+
               {/* For pool models: show calculating indicator or hide sections until dimensions are ready */}
               {isPoolModel && !poolDimensionsReady && (
                 <div className="bg-yellow-50 border border-yellow-200 p-4 rounded text-center">
@@ -1009,8 +1194,27 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                 </div>
               )}
 
-              {/* Show content when: not a pool model OR (pool with dimensions ready and not loading) */}
-              {(!isPoolModel || (poolDimensionsReady && !isCalculatingPrice)) && (
+              {/* For modular models: show indicator until dimensions are ready */}
+              {isModularModel && !modularDimensionsReady && (
+                <div className="bg-yellow-50 border border-yellow-200 p-4 rounded text-center">
+                  <p className="text-sm text-yellow-700">
+                    Renseignez les dimensions ci-dessus pour voir le prix estimé et les options disponibles.
+                  </p>
+                </div>
+              )}
+
+              {isModularModel && modularDimensionsReady && isCalculatingModularPrice && (
+                <div className="bg-blue-50 border border-blue-200 p-6 rounded text-center">
+                  <Loader2 className="w-6 h-6 animate-spin text-blue-600 mx-auto mb-2" />
+                  <p className="text-sm font-medium text-blue-700">Calculs en cours…</p>
+                  <p className="text-xs text-blue-500 mt-1">Estimation du prix en fonction de vos dimensions</p>
+                </div>
+              )}
+
+              {/* Show content when: not a BOQ model OR (BOQ model with dimensions ready and not loading) */}
+              {((!isPoolModel && !isModularModel)
+                || (isPoolModel && poolDimensionsReady && !isCalculatingPrice)
+                || (isModularModel && modularDimensionsReady && !isCalculatingModularPrice)) && (
                 <>
               {/* INCLUS DANS LE PRIX DE BASE */}
               {baseCategories.length > 0 && (
@@ -1407,6 +1611,14 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                         : poolShape === 'T'
                         ? `TA: ${poolDimensions.longueur_ta ?? 0}×${poolDimensions.largeur_ta ?? 0}×${poolDimensions.profondeur_ta ?? 0}m / TB: ${poolDimensions.longueur_tb ?? 0}×${poolDimensions.largeur_tb ?? 0}×${poolDimensions.profondeur_tb ?? 0}m`
                         : `${poolDimensions.longueur}m × ${poolDimensions.largeur}m × ${poolDimensions.profondeur}m`}
+                    </span>
+                  </div>
+                )}
+                {isModularModel && modularDimensionsReady && (
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-600">Dimensions</span>
+                    <span className="font-medium">
+                      {modularDimensions.longueur}m × {modularDimensions.largeur}m × {modularDimensions.nombre_etages} étage{modularDimensions.nombre_etages > 1 ? 's' : ''}
                     </span>
                   </div>
                 )}

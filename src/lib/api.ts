@@ -88,13 +88,13 @@ export const api = {
   /* =====================================================
      MODELS (DB-DRIVEN ONLY)
   ===================================================== */
-  getModels(type?: 'container' | 'pool', activeOnly: boolean = true, includeBOQPrice: boolean = true) {
+  getModels(type?: 'container' | 'pool' | 'modular', activeOnly: boolean = true, includeBOQPrice: boolean = true) {
     return this.query('get_models', { type, active_only: activeOnly, include_boq_price: includeBOQPrice });
   },
 
   createModel(model: {
     name: string;
-    type: 'container' | 'pool';
+    type: 'container' | 'pool' | 'modular';
     description?: string;
     base_price: number;
     unforeseen_cost_percent?: number;
@@ -105,6 +105,9 @@ export const api = {
     container_40ft_count?: number;
     pool_shape?: string;
     has_overflow?: boolean;
+    modular_longueur?: number | null;
+    modular_largeur?: number | null;
+    modular_nb_etages?: number | null;
     image_url?: string;
     is_active?: boolean;
     display_order?: number;
@@ -115,7 +118,7 @@ export const api = {
   updateModel(model: {
     id: number;
     name?: string;
-    type?: 'container' | 'pool';
+    type?: 'container' | 'pool' | 'modular';
     description?: string;
     base_price?: number;
     unforeseen_cost_percent?: number;
@@ -126,6 +129,9 @@ export const api = {
     container_40ft_count?: number;
     pool_shape?: string;
     has_overflow?: boolean;
+    modular_longueur?: number | null;
+    modular_largeur?: number | null;
+    modular_nb_etages?: number | null;
     image_url?: string;
     is_active?: boolean;
     display_order?: number;
@@ -867,6 +873,114 @@ export const api = {
 
   getDefaultPoolBOQTemplateFromDB() {
     return this.query('get_default_pool_boq_template');
+  },
+
+  /* =====================================================
+     MODULAR BOQ VARIABLES
+  ===================================================== */
+  getModularBOQVariables() {
+    return this.query('get_modular_boq_variables');
+  },
+
+  createModularBOQVariable(variable: {
+    name: string;
+    label: string;
+    unit?: string;
+    formula: string;
+    display_order?: number;
+  }) {
+    return this.query('create_modular_boq_variable', variable);
+  },
+
+  updateModularBOQVariable(variable: {
+    id: number;
+    name: string;
+    label: string;
+    unit?: string;
+    formula: string;
+    display_order?: number;
+  }) {
+    return this.query('update_modular_boq_variable', variable);
+  },
+
+  deleteModularBOQVariable(id: number) {
+    return this.query('delete_modular_boq_variable', { id });
+  },
+
+  /* =====================================================
+     MODULAR BOQ PRICE LIST
+  ===================================================== */
+  getModularBOQPriceList() {
+    return this.query('get_modular_boq_price_list');
+  },
+
+  createModularBOQPriceListItem(item: {
+    name: string;
+    unit?: string;
+    unit_price?: number;
+    has_vat?: boolean;
+    supplier_id?: number | null;
+    display_order?: number;
+  }) {
+    return this.query('create_modular_boq_price_list_item', item);
+  },
+
+  updateModularBOQPriceListItem(item: {
+    id: number;
+    name: string;
+    unit?: string;
+    unit_price?: number;
+    has_vat?: boolean;
+    supplier_id?: number | null;
+    display_order?: number;
+  }) {
+    return this.query('update_modular_boq_price_list_item', item);
+  },
+
+  deleteModularBOQPriceListItem(id: number) {
+    return this.query('delete_modular_boq_price_list_item', { id });
+  },
+
+  /* =====================================================
+     MODULAR BOQ TEMPLATES
+  ===================================================== */
+  getModularBOQTemplates() {
+    return this.query('get_modular_boq_templates');
+  },
+
+  createModularBOQTemplate(template: {
+    name: string;
+    description?: string;
+    is_default?: boolean;
+    template_data?: any;
+  }) {
+    return this.query('create_modular_boq_template', template);
+  },
+
+  updateModularBOQTemplate(template: {
+    id: number;
+    name?: string;
+    description?: string;
+    is_default?: boolean;
+    template_data?: any;
+  }) {
+    return this.query('update_modular_boq_template', template);
+  },
+
+  deleteModularBOQTemplate(id: number) {
+    return this.query('delete_modular_boq_template', { id });
+  },
+
+  getModularBOQTemplateById(id: number) {
+    return this.query('get_modular_boq_template_by_id', { id });
+  },
+
+  getDefaultModularBOQTemplateFromDB() {
+    return this.query('get_default_modular_boq_template');
+  },
+
+  getModularBOQFull(modelId: number) {
+    return this.query('get_modular_boq_full', { model_id: modelId });
   },
 
   /* =====================================================

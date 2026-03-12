@@ -39,6 +39,9 @@ import BOQPage from "./pages/admin/BOQPage";
 import PoolBOQVariablesPage from "./pages/admin/PoolBOQVariablesPage";
 import PoolBOQPriceListPage from "./pages/admin/PoolBOQPriceListPage";
 import PoolBOQTemplatePage from "./pages/admin/PoolBOQTemplatePage";
+import ModularBOQVariablesPage from "./pages/admin/ModularBOQVariablesPage";
+import ModularBOQPriceListPage from "./pages/admin/ModularBOQPriceListPage";
+import ModularBOQTemplatePage from "./pages/admin/ModularBOQTemplatePage";
 import DevIdeasPage from "./pages/admin/DevIdeasPage";
 import DiscountsPage from "./pages/admin/DiscountsPage";
 import UsersPage from "./pages/admin/UsersPage";
@@ -104,6 +107,9 @@ const App = () => (
                   <Route path="pool-variables" element={<PoolBOQVariablesPage />} />
                   <Route path="pool-prices" element={<PoolBOQPriceListPage />} />
                   <Route path="pool-template" element={<PoolBOQTemplatePage />} />
+                  <Route path="modular-variables" element={<ModularBOQVariablesPage />} />
+                  <Route path="modular-prices" element={<ModularBOQPriceListPage />} />
+                  <Route path="modular-template" element={<ModularBOQTemplatePage />} />
                   <Route path="suppliers" element={<SuppliersPage />} />
                   <Route path="email" element={<EmailSettingsPage />} />
                   <Route path="payments" element={<PaymentsPage />} />

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { Package, Phone, Home } from 'lucide-react';
+import { Package, Phone, Home, Building2 } from 'lucide-react';
 import PublicLayout from '@/layouts/PublicLayout';
 import BannerCarousel from '@/components/public/BannerCarousel';
 import { getProButtonStyle } from '@/lib/pro-theme';
@@ -13,11 +13,11 @@ export default function HomePage() {
       <BannerCarousel />
 
       <section className="mt-12 py-16 px-6 max-w-5xl mx-auto text-center">
-        <h2 className="text-3xl font-bold mb-4">Nos solutions</h2>
+        <h2 className="text-3xl font-bold mb-4">Nos Solutions</h2>
         <p className="text-gray-600 mb-10">
-          Des containers aménagés pour tous les usages et des piscines modernes livrées prêtes à plonger.
+          Des containers aménagés pour tous les usages, des piscines modernes livrées prêtes à plonger, et des maisons modulaires clés en main.
         </p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
           <div className="bg-white p-6 rounded-xl shadow hover:shadow-md transition">
             <Home className="w-12 h-12 text-orange-500 mx-auto mb-4" />
             <h3 className="text-xl font-semibold mb-2">Containers Aménagés</h3>
@@ -36,6 +36,16 @@ export default function HomePage() {
             </p>
             <Link to="/models?type=pool">
               <Button variant="outline">Voir les piscines</Button>
+            </Link>
+          </div>
+          <div className="bg-white p-6 rounded-xl shadow hover:shadow-md transition">
+            <Building2 className="w-12 h-12 text-orange-500 mx-auto mb-4" />
+            <h3 className="text-xl font-semibold mb-2">Maisons Modulaires</h3>
+            <p className="text-gray-600 mb-4">
+              Des maisons clés en main, modulables et économiques, livrées et montées sur site.
+            </p>
+            <Link to="/models?type=modular">
+              <Button variant="outline">Voir les maisons</Button>
             </Link>
           </div>
         </div>

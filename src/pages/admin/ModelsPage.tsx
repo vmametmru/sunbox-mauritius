@@ -6,6 +6,7 @@ import {
   Search,
   Home,
   Droplets,
+  Building2,
   Calculator
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
@@ -38,7 +39,7 @@ import { useNavigate } from 'react-router-dom';
 interface Model {
   id?: number;
   name: string;
-  type: 'container' | 'pool';
+  type: 'container' | 'pool' | 'modular';
   description: string;
   base_price: number;
   unforeseen_cost_percent: number;
@@ -53,6 +54,9 @@ interface Model {
   container_40ft_count?: number;
   pool_shape?: 'Rectangulaire' | 'T' | 'L';
   has_overflow?: boolean;
+  modular_longueur?: number;
+  modular_largeur?: number;
+  modular_nb_etages?: number;
   image_url: string;
   plan_url?: string;
   features: string[];
@@ -72,6 +76,9 @@ const emptyModel: Model = {
   container_40ft_count: 0,
   pool_shape: 'Rectangulaire',
   has_overflow: false,
+  modular_longueur: 0,
+  modular_largeur: 0,
+  modular_nb_etages: 1,
   image_url: '',
   plan_url: '',
   features: [],
@@ -85,7 +92,7 @@ export default function ModelsPage() {
   const [models, setModels] = useState<Model[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [typeFilter, setTypeFilter] = useState<'all' | 'container' | 'pool'>('all');
+  const [typeFilter, setTypeFilter] = useState<'all' | 'container' | 'pool' | 'modular'>('all');
   const [editingModel, setEditingModel] = useState<Model | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -221,6 +228,7 @@ export default function ModelsPage() {
                 <SelectItem value="all">Tous</SelectItem>
                 <SelectItem value="container">Containers</SelectItem>
                 <SelectItem value="pool">Piscines</SelectItem>
+                <SelectItem value="modular">Maisons Modulaires</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -242,7 +250,9 @@ export default function ModelsPage() {
                 <div className="w-full h-full flex items-center justify-center">
                   {model.type === 'container'
                     ? <Home className="h-16 w-16 text-gray-300" />
-                    : <Droplets className="h-16 w-16 text-gray-300" />}
+                    : model.type === 'pool'
+                    ? <Droplets className="h-16 w-16 text-gray-300" />
+                    : <Building2 className="h-16 w-16 text-gray-300" />}
                 </div>
               )}
 
@@ -258,8 +268,11 @@ export default function ModelsPage() {
               )}
 
               <div className="absolute top-2 right-2 flex gap-2">
-                <Badge className={model.type === 'container' ? 'bg-blue-500' : 'bg-cyan-500'}>
-                  {model.type === 'container' ? 'Container' : 'Piscine'}
+                <Badge className={
+                  model.type === 'container' ? 'bg-blue-500' :
+                  model.type === 'pool' ? 'bg-cyan-500' : 'bg-green-600'
+                }>
+                  {model.type === 'container' ? 'Container' : model.type === 'pool' ? 'Piscine' : 'Modulaire'}
                 </Badge>
                 {!model.is_active && <Badge variant="secondary">Inactif</Badge>}
               </div>
@@ -346,6 +359,7 @@ export default function ModelsPage() {
                     <SelectContent>
                       <SelectItem value="container">Container</SelectItem>
                       <SelectItem value="pool">Piscine</SelectItem>
+                      <SelectItem value="modular">Maison Modulaire</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -468,6 +482,48 @@ export default function ModelsPage() {
                         }
                       />
                       <Label>Avec débordement</Label>
+                    </div>
+                  </>
+                )}
+
+                {editingModel.type === 'modular' && (
+                  <>
+                    <div>
+                      <Label>Longueur (m)</Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.1"
+                        value={editingModel.modular_longueur || 0}
+                        onChange={(e) =>
+                          setEditingModel({ ...editingModel, modular_longueur: Number(e.target.value) })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>Largeur (m)</Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.1"
+                        value={editingModel.modular_largeur || 0}
+                        onChange={(e) =>
+                          setEditingModel({ ...editingModel, modular_largeur: Number(e.target.value) })
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label>Nombre d&apos;étages</Label>
+                      <Input
+                        type="number"
+                        min="1"
+                        max="10"
+                        step="1"
+                        value={editingModel.modular_nb_etages || 1}
+                        onChange={(e) =>
+                          setEditingModel({ ...editingModel, modular_nb_etages: Number(e.target.value) })
+                        }
+                      />
                     </div>
                   </>
                 )}
