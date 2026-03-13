@@ -1,10 +1,9 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { Plus, Edit, Trash2, Calculator, Ruler } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
   SelectContent,
@@ -63,6 +62,111 @@ const emptyDim: DimForm = {
   slug: '', label: '', unit: 'm', min_value: 0, max_value: 1000, step: 0.5, default_value: 1, display_order: 0,
 };
 
+/* ─────────────────────────────── FormulaInput ───────────────────────────── */
+
+const FORMULA_FUNCTIONS = ['CEIL', 'FLOOR', 'ROUND', 'ROUNDUP', 'ROUNDDOWN', 'IF'];
+
+interface FormulaInputProps {
+  value: string;
+  onChange: (value: string) => void;
+  availableVars: string[];
+  placeholder?: string;
+}
+
+const FormulaInput: React.FC<FormulaInputProps> = ({ value, onChange, availableVars, placeholder }) => {
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [selectedIdx, setSelectedIdx] = useState(0);
+  const [currentToken, setCurrentToken] = useState('');
+  const [tokenStart, setTokenStart] = useState(0);
+
+  const allTokens = useMemo(
+    () => [...FORMULA_FUNCTIONS, ...availableVars],
+    [availableVars]
+  );
+
+  const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    onChange(val);
+    const pos = e.target.selectionStart ?? val.length;
+    // extract current token (identifier chars before cursor)
+    let start = pos;
+    while (start > 0 && /[a-zA-Z0-9_]/.test(val[start - 1])) start--;
+    const token = val.slice(start, pos);
+    setTokenStart(start);
+    setCurrentToken(token);
+    if (token.length >= 1) {
+      const lower = token.toLowerCase();
+      setSuggestions(allTokens.filter(t => t.toLowerCase().startsWith(lower) && t !== token));
+      setSelectedIdx(0);
+    } else {
+      setSuggestions([]);
+    }
+  }, [onChange, allTokens]);
+
+  const applySuggestion = useCallback((suggestion: string) => {
+    if (!inputRef.current) return;
+    const pos = inputRef.current.selectionStart ?? value.length;
+    const before = value.slice(0, tokenStart);
+    const after = value.slice(pos);
+    const newVal = before + suggestion + after;
+    onChange(newVal);
+    setSuggestions([]);
+    setCurrentToken('');
+    // restore focus
+    setTimeout(() => {
+      if (inputRef.current) {
+        const newPos = tokenStart + suggestion.length;
+        inputRef.current.focus();
+        inputRef.current.setSelectionRange(newPos, newPos);
+      }
+    }, 0);
+  }, [value, tokenStart, onChange]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (suggestions.length === 0) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); setSelectedIdx(i => Math.min(i + 1, suggestions.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setSelectedIdx(i => Math.max(i - 1, 0)); }
+    else if (e.key === 'Tab' || e.key === 'Enter') {
+      if (suggestions.length > 0) { e.preventDefault(); applySuggestion(suggestions[selectedIdx]); }
+    } else if (e.key === 'Escape') { setSuggestions([]); }
+  }, [suggestions, selectedIdx, applySuggestion]);
+
+  return (
+    <div className="relative">
+      <textarea
+        ref={inputRef}
+        value={value}
+        onChange={handleChange}
+        onKeyDown={handleKeyDown}
+        onBlur={() => setTimeout(() => setSuggestions([]), 150)}
+        placeholder={placeholder ?? 'ex: longueur * largeur'}
+        rows={3}
+        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 resize-y"
+        autoComplete="off"
+      />
+      {suggestions.length > 0 && (
+        <div className="absolute z-50 top-full left-0 mt-0.5 w-full max-h-48 overflow-y-auto bg-white border border-gray-200 rounded-md shadow-lg text-sm">
+          {suggestions.map((s, i) => (
+            <div
+              key={s}
+              className={`px-3 py-1.5 cursor-pointer font-mono ${
+                i === selectedIdx ? 'bg-blue-100 text-blue-900' : 'hover:bg-gray-50'
+              } ${FORMULA_FUNCTIONS.includes(s) ? 'text-purple-700' : 'text-blue-700'}`}
+              onMouseDown={(e) => { e.preventDefault(); applySuggestion(s); }}
+            >
+              {s}{FORMULA_FUNCTIONS.includes(s) ? '()' : ''}
+              <span className="ml-2 text-xs text-gray-400">
+                {FORMULA_FUNCTIONS.includes(s) ? 'fonction' : 'variable'}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 /* ─────────────────────────────── Component ─────────────────────────────── */
 
 export default function ModularBOQVariablesPage() {
@@ -95,12 +199,11 @@ export default function ModularBOQVariablesPage() {
       const t = (Array.isArray(types) ? types : []) as ModelType[];
       setCustomTypes(t);
     }).catch(() => {});
-    loadVariables();
   }, []);
 
   /* ─────────────────── Load dimensions when type changes ──────────────────*/
   useEffect(() => {
-    if (!selectedSlug) { setTypeDimensions([]); return; }
+    if (!selectedSlug) { setTypeDimensions([]); setVariables([]); setLoading(false); return; }
     setLoadingDims(true);
     api.getModelTypeDimensions(selectedSlug)
       .then((dims: any) => {
@@ -113,13 +216,15 @@ export default function ModularBOQVariablesPage() {
       })
       .catch(() => setTypeDimensions([]))
       .finally(() => setLoadingDims(false));
+    loadVariables(selectedSlug);
   }, [selectedSlug]);
 
   /* ─────────────────── Load formula variables ──────────────────────────── */
-  const loadVariables = async () => {
+  const loadVariables = async (typeSlug: string) => {
+    if (!typeSlug) { setVariables([]); setLoading(false); return; }
     try {
       setLoading(true);
-      const data = await api.getModularBOQVariables();
+      const data = await api.getModularBOQVariables(typeSlug);
       setVariables(Array.isArray(data) ? data : []);
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
@@ -237,7 +342,7 @@ export default function ModularBOQVariablesPage() {
   };
 
   const saveVariable = async () => {
-    if (!editing) return;
+    if (!editing || !selectedSlug) return;
     if (!editing.name.trim() || !editing.formula.trim()) {
       toast({ title: 'Erreur', description: 'Le nom et la formule sont requis', variant: 'destructive' });
       return;
@@ -257,17 +362,19 @@ export default function ModularBOQVariablesPage() {
         await api.updateModularBOQVariable({
           id: editing.id, name: editing.name, label: editing.label,
           unit: editing.unit, formula: editing.formula, display_order: editing.display_order,
+          model_type_slug: selectedSlug,
         });
         toast({ title: 'Succès', description: 'Variable mise à jour' });
       } else {
         await api.createModularBOQVariable({
           name: editing.name, label: editing.label, unit: editing.unit,
           formula: editing.formula, display_order: editing.display_order,
+          model_type_slug: selectedSlug,
         });
         toast({ title: 'Succès', description: 'Variable créée' });
       }
       setIsDialogOpen(false);
-      loadVariables();
+      loadVariables(selectedSlug);
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
     } finally {
@@ -280,7 +387,7 @@ export default function ModularBOQVariablesPage() {
     try {
       await api.deleteModularBOQVariable(id);
       toast({ title: 'Succès', description: 'Variable supprimée' });
-      loadVariables();
+      loadVariables(selectedSlug);
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
     }
@@ -469,8 +576,11 @@ export default function ModularBOQVariablesPage() {
 
       {/* ── Variables Table ── */}
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-semibold">Variables de calcul configurées</h2>
-        <Button onClick={openNew} className="bg-orange-500 hover:bg-orange-600">
+        <h2 className="text-xl font-semibold">
+          Variables de calcul
+          {selectedType ? <span className="text-base font-normal text-orange-600 ml-2">— {selectedType.name}</span> : null}
+        </h2>
+        <Button onClick={openNew} disabled={!selectedSlug} className="bg-orange-500 hover:bg-orange-600">
           <Plus className="h-4 w-4 mr-2" />
           Ajouter une Variable
         </Button>
@@ -478,10 +588,14 @@ export default function ModularBOQVariablesPage() {
 
       <Card>
         <CardContent className="p-0">
-          {loading ? (
+          {!selectedSlug ? (
+            <p className="text-muted-foreground text-center py-8 italic">
+              Sélectionnez un type de modèle ci-dessus pour gérer ses variables.
+            </p>
+          ) : loading ? (
             <p className="text-muted-foreground text-center py-8">Chargement…</p>
           ) : sortedVariables.length === 0 ? (
-            <p className="text-muted-foreground text-center py-8">Aucune variable configurée</p>
+            <p className="text-muted-foreground text-center py-8">Aucune variable configurée pour ce type</p>
           ) : (
             <Table>
               <TableHeader>
@@ -623,7 +737,8 @@ export default function ModularBOQVariablesPage() {
               {editing?.id ? 'Modifier la Variable' : 'Nouvelle Variable'}
             </DialogTitle>
             <DialogDescription>
-              Variables disponibles dans les formules : {availableVarHint || '(configurez des dimensions d\'abord)'}
+              Type : <strong>{selectedType?.name ?? selectedSlug}</strong>.
+              Variables disponibles : {availableVarHint || '(configurez des dimensions d\'abord)'}
             </DialogDescription>
           </DialogHeader>
 
@@ -662,12 +777,11 @@ export default function ModularBOQVariablesPage() {
 
               <div className="space-y-2">
                 <Label>Formule *</Label>
-                <Textarea
+                <FormulaInput
                   value={editing.formula}
-                  onChange={e => setEditing({ ...editing, formula: e.target.value })}
+                  onChange={formula => setEditing({ ...editing, formula })}
+                  availableVars={[...reservedNames, ...sortedVariables.filter(v => v.id !== editing.id).map(v => v.name)]}
                   placeholder="ex: longueur * largeur"
-                  className="font-mono text-sm"
-                  rows={3}
                 />
                 <p className="text-xs text-muted-foreground">
                   Supports : +, -, *, /, parenthèses, CEIL(), FLOOR(), ROUND(), IF(cond, a, b).

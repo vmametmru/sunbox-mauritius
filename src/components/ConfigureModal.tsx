@@ -701,8 +701,9 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
   const loadModularData = async (modelId: number) => {
     setIsLoadingModularData(true);
     try {
+      const modelType = quoteData?.model?.type;
       const [variables, fullCategories] = await Promise.all([
-        api.getModularBOQVariables(),
+        api.getModularBOQVariables(modelType || undefined),
         api.getModularBOQFull(modelId),
       ]);
       setModularVariables(Array.isArray(variables) ? variables : []);

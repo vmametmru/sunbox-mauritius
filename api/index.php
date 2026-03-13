@@ -6,12 +6,12 @@ handleCORS();
 
 // Pro site deployment versions — increment these when templates or DB schema change.
 // PRO_FILE_VERSION must match define('PRO_FILE_VERSION', ...) in api/pro_deploy/api_config.php
-define('PRO_FILE_VERSION',      '2.9.6');
+define('PRO_FILE_VERSION',      '2.9.7');
 define('PRO_DB_SCHEMA_VERSION', '1.8.0');
 
 // Sunbox main database schema version.
 // Increment when new tables or columns are added.
-define('SUNBOX_DB_SCHEMA_VERSION', '2.12.0');
+define('SUNBOX_DB_SCHEMA_VERSION', '2.13.0');
 
 $action = $_GET['action'] ?? '';
 $body   = getRequestBody();
@@ -441,6 +441,33 @@ try {
             if ((bool)$chkProQuotes->fetchColumn()) {
                 $addCol('pro_quotes', 'custom_dimensions', "JSON NULL DEFAULT NULL");
             }
+
+            // ── v2.13.0 ── Per-type BOQ variables and templates ──────────────────
+            // Add model_type_slug to modular_boq_variables
+            $addCol('modular_boq_variables', 'model_type_slug', "VARCHAR(50) DEFAULT NULL AFTER `id`");
+            // Replace the global unique-on-name constraint with a per-(type,name) composite one
+            $dropUniqueStmt = $db->prepare(
+                "SELECT COUNT(*) FROM information_schema.STATISTICS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'modular_boq_variables'
+                 AND INDEX_NAME = 'name' AND NON_UNIQUE = 0"
+            );
+            $dropUniqueStmt->execute();
+            if ((bool)$dropUniqueStmt->fetchColumn()) {
+                try { $db->exec("ALTER TABLE `modular_boq_variables` DROP INDEX `name`"); } catch (\Throwable $e) {}
+                $messages[] = "Index supprimé : modular_boq_variables.name (unique global → unique par type)";
+            }
+            $addCompUniqueStmt = $db->prepare(
+                "SELECT COUNT(*) FROM information_schema.STATISTICS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'modular_boq_variables'
+                 AND INDEX_NAME = 'uq_type_var_name'"
+            );
+            $addCompUniqueStmt->execute();
+            if (!(bool)$addCompUniqueStmt->fetchColumn()) {
+                try { $db->exec("ALTER TABLE `modular_boq_variables` ADD UNIQUE KEY `uq_type_var_name` (`model_type_slug`, `name`)"); } catch (\Throwable $e) {}
+                $messages[] = "Index ajouté : modular_boq_variables.uq_type_var_name (model_type_slug, name)";
+            }
+            // Add model_type_slug to modular_boq_templates
+            $addCol('modular_boq_templates', 'model_type_slug', "VARCHAR(50) DEFAULT NULL AFTER `id`");
 
             // ── Schema version table (always create / update) ─────────────────
             $db->exec("CREATE TABLE IF NOT EXISTS `db_schema_version` (
@@ -3389,18 +3416,26 @@ try {
         // === MODULAR BOQ VARIABLES
         // ============================================
         case 'get_modular_boq_variables': {
-            $stmt = $db->query("SELECT * FROM modular_boq_variables ORDER BY display_order ASC");
+            $typeSlug = isset($body['model_type_slug']) ? sanitize($body['model_type_slug']) : null;
+            if ($typeSlug !== null && $typeSlug !== '') {
+                $stmt = $db->prepare("SELECT * FROM modular_boq_variables WHERE model_type_slug = ? ORDER BY display_order ASC");
+                $stmt->execute([$typeSlug]);
+            } else {
+                $stmt = $db->query("SELECT * FROM modular_boq_variables ORDER BY display_order ASC");
+            }
             ok($stmt->fetchAll());
             break;
         }
 
         case 'create_modular_boq_variable': {
             validateRequired($body, ['name', 'label', 'formula']);
+            $varTypeSlug = isset($body['model_type_slug']) ? sanitize($body['model_type_slug']) : null;
             $stmt = $db->prepare("
-                INSERT INTO modular_boq_variables (name, label, unit, formula, display_order)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO modular_boq_variables (model_type_slug, name, label, unit, formula, display_order)
+                VALUES (?, ?, ?, ?, ?, ?)
             ");
             $stmt->execute([
+                $varTypeSlug ?: null,
                 $body['name'],
                 $body['label'],
                 $body['unit'] ?? '',
@@ -3413,8 +3448,10 @@ try {
 
         case 'update_modular_boq_variable': {
             validateRequired($body, ['id', 'name', 'label', 'formula']);
+            $varTypeSlug = isset($body['model_type_slug']) ? sanitize($body['model_type_slug']) : null;
             $stmt = $db->prepare("
                 UPDATE modular_boq_variables SET
+                    model_type_slug = ?,
                     name          = ?,
                     label         = ?,
                     unit          = ?,
@@ -3423,6 +3460,7 @@ try {
                 WHERE id = ?
             ");
             $stmt->execute([
+                $varTypeSlug ?: null,
                 $body['name'],
                 $body['label'],
                 $body['unit'] ?? '',
@@ -3516,7 +3554,13 @@ try {
         // === MODULAR BOQ TEMPLATES
         // ============================================
         case 'get_modular_boq_templates': {
-            $stmt = $db->query("SELECT * FROM modular_boq_templates ORDER BY is_default DESC, name ASC");
+            $tplTypeSlug = isset($body['model_type_slug']) ? sanitize($body['model_type_slug']) : null;
+            if ($tplTypeSlug !== null && $tplTypeSlug !== '') {
+                $stmt = $db->prepare("SELECT * FROM modular_boq_templates WHERE model_type_slug = ? ORDER BY is_default DESC, name ASC");
+                $stmt->execute([$tplTypeSlug]);
+            } else {
+                $stmt = $db->query("SELECT * FROM modular_boq_templates ORDER BY is_default DESC, name ASC");
+            }
             $rows = $stmt->fetchAll();
             foreach ($rows as &$r) {
                 $r['is_default'] = (bool)$r['is_default'];
@@ -3530,6 +3574,7 @@ try {
 
         case 'create_modular_boq_template': {
             validateRequired($body, ['name']);
+            $tplTypeSlug = isset($body['model_type_slug']) ? sanitize($body['model_type_slug']) : null;
             $templateData = null;
             if (isset($body['template_data'])) {
                 $templateData = is_string($body['template_data'])
@@ -3537,10 +3582,11 @@ try {
                     : json_encode($body['template_data']);
             }
             $stmt = $db->prepare("
-                INSERT INTO modular_boq_templates (name, description, is_default, template_data)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO modular_boq_templates (model_type_slug, name, description, is_default, template_data)
+                VALUES (?, ?, ?, ?, ?)
             ");
             $stmt->execute([
+                $tplTypeSlug ?: null,
                 $body['name'],
                 $body['description'] ?? null,
                 isset($body['is_default']) ? (int)(bool)$body['is_default'] : 0,
@@ -3554,6 +3600,7 @@ try {
             validateRequired($body, ['id']);
             $sets   = [];
             $params = [];
+            if (array_key_exists('model_type_slug', $body)) { $sets[] = 'model_type_slug = ?'; $params[] = $body['model_type_slug'] ? sanitize($body['model_type_slug']) : null; }
             if (isset($body['name']))        { $sets[] = 'name = ?';        $params[] = $body['name']; }
             if (isset($body['description'])) { $sets[] = 'description = ?'; $params[] = $body['description']; }
             if (isset($body['is_default']))  { $sets[] = 'is_default = ?';  $params[] = (int)(bool)$body['is_default']; }
@@ -3593,8 +3640,14 @@ try {
         }
 
         case 'get_default_modular_boq_template': {
-            $stmt = $db->prepare("SELECT * FROM modular_boq_templates WHERE is_default = 1 LIMIT 1");
-            $stmt->execute();
+            $tplTypeSlug = isset($body['model_type_slug']) ? sanitize($body['model_type_slug']) : null;
+            if ($tplTypeSlug !== null && $tplTypeSlug !== '') {
+                $stmt = $db->prepare("SELECT * FROM modular_boq_templates WHERE model_type_slug = ? AND is_default = 1 LIMIT 1");
+                $stmt->execute([$tplTypeSlug]);
+            } else {
+                $stmt = $db->prepare("SELECT * FROM modular_boq_templates WHERE is_default = 1 LIMIT 1");
+                $stmt->execute();
+            }
             $row = $stmt->fetch();
             if ($row && isset($row['template_data']) && is_string($row['template_data'])) {
                 $row['template_data'] = json_decode($row['template_data'], true);

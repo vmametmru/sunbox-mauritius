@@ -39,6 +39,7 @@ export interface ModularVariable {
   unit: string;
   formula: string;
   display_order: number;
+  model_type_slug?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -272,14 +273,14 @@ export interface ModularBOQTemplateRecord {
   template_data: string | null;
 }
 
-export async function loadModularTemplateFromDB(): Promise<{
+export async function loadModularTemplateFromDB(modelTypeSlug?: string): Promise<{
   base: ModularBOQTemplateCategory[] | null;
   options: ModularBOQTemplateCategory[] | null;
 }> {
   try {
-    const tpl: ModularBOQTemplateRecord = await api.getDefaultModularBOQTemplateFromDB();
+    const tpl: ModularBOQTemplateRecord = await api.getDefaultModularBOQTemplateFromDB(modelTypeSlug);
     if (!tpl || !tpl.template_data) return { base: null, options: null };
-    const data = JSON.parse(tpl.template_data);
+    const data = JSON.parse(typeof tpl.template_data === 'string' ? tpl.template_data : JSON.stringify(tpl.template_data));
     return {
       base:    Array.isArray(data.base)    ? data.base    : null,
       options: Array.isArray(data.options) ? data.options : null,
@@ -291,11 +292,12 @@ export async function loadModularTemplateFromDB(): Promise<{
 
 export async function saveModularTemplateToDB(
   base: ModularBOQTemplateCategory[],
-  options: ModularBOQTemplateCategory[]
+  options: ModularBOQTemplateCategory[],
+  modelTypeSlug?: string
 ): Promise<void> {
   const templateData = JSON.stringify({ base, options });
 
-  const existing: ModularBOQTemplateRecord[] = await api.getModularBOQTemplates();
+  const existing: ModularBOQTemplateRecord[] = await api.getModularBOQTemplates(modelTypeSlug);
   const defaultTpl = Array.isArray(existing) ? existing.find(t => t.is_default) : null;
 
   if (defaultTpl) {
@@ -305,10 +307,11 @@ export async function saveModularTemplateToDB(
     });
   } else {
     await api.createModularBOQTemplate({
-      name: 'Modèle par défaut',
-      description: 'Modèle BOQ par défaut pour Maisons Modulaires',
+      name: modelTypeSlug ? `Modèle par défaut (${modelTypeSlug})` : 'Modèle par défaut',
+      description: 'Modèle BOQ par défaut pour Solutions Personnalisées',
       is_default: true,
       template_data: templateData,
+      model_type_slug: modelTypeSlug,
     });
   }
 }

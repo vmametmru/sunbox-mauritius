@@ -17,7 +17,17 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
+import { api } from '@/lib/api';
+import type { ModelType, ModelTypeDimension } from '@/lib/api';
 import {
   clearSavedModularBOQTemplates,
   getHardcodedModularBaseTemplate,
@@ -27,6 +37,7 @@ import {
   validateFormulaSyntax,
   ModularBOQTemplateCategory,
   ModularBOQTemplateLine,
+  type ModularVariable,
 } from '@/lib/modular-formulas';
 
 /* ======================================================
@@ -90,6 +101,7 @@ const UNIT_OPTIONS = [
 interface FormulaInputProps {
   value: string;
   onChange: (value: string) => void;
+  /** All available variable/dimension names — will be combined with FORMULA_FUNCTIONS */
   extraVars?: string[];
   error?: string | null;
 }
@@ -102,8 +114,6 @@ const FormulaInput: React.FC<FormulaInputProps> = ({ value, onChange, extraVars 
   const inputRef = useRef<HTMLInputElement>(null);
 
   const allSuggestions = [
-    ...BASE_VARS,
-    ...COMMON_DERIVED_VARS,
     ...extraVars,
     ...FORMULA_FUNCTIONS,
   ];
@@ -193,12 +203,18 @@ const FormulaInput: React.FC<FormulaInputProps> = ({ value, onChange, extraVars 
 const ModularBOQTemplatePage: React.FC = () => {
   const { toast } = useToast();
 
+  /* ── Custom model types ── */
+  const [customTypes, setCustomTypes]   = useState<ModelType[]>([]);
+  const [selectedSlug, setSelectedSlug] = useState<string>('');
+  const [typeDimensions, setTypeDimensions] = useState<ModelTypeDimension[]>([]);
+  const [typeVariables, setTypeVariables]   = useState<ModularVariable[]>([]);
+
   const [baseTemplate, setBaseTemplate] = useState<ModularBOQTemplateCategory[]>([]);
   const [optionsTemplate, setOptionsTemplate] = useState<ModularBOQTemplateCategory[]>([]);
   const [expandedCategories, setExpandedCategories] = useState<number[]>([]);
   const [hasChanges, setHasChanges] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
 
   // Inline edit state for lines
   const [editingLine, setEditingLine] = useState<{
@@ -213,29 +229,60 @@ const ModularBOQTemplatePage: React.FC = () => {
   const [renamingCat, setRenamingCat] = useState<{ type: 'base' | 'options'; catIndex: number } | null>(null);
   const [renameCatValue, setRenameCatValue] = useState('');
 
+  // All available variable names for autocomplete (dims + derived vars)
+  const availableVars = [
+    ...typeDimensions.map(d => d.slug),
+    ...typeVariables.map(v => v.name),
+  ];
+
+  /* Load custom types on mount */
   useEffect(() => {
-    loadTemplates();
+    api.getModelTypes(false).then((types: any) => {
+      const t = (Array.isArray(types) ? types : []) as ModelType[];
+      setCustomTypes(t);
+    }).catch(() => {});
   }, []);
 
-  const loadTemplates = async () => {
+  /* When type changes → load dimensions, variables, and template */
+  useEffect(() => {
+    if (!selectedSlug) {
+      setTypeDimensions([]);
+      setTypeVariables([]);
+      setBaseTemplate([]);
+      setOptionsTemplate([]);
+      setHasChanges(false);
+      return;
+    }
+    // Load dimensions and variables in parallel
+    Promise.all([
+      api.getModelTypeDimensions(selectedSlug),
+      api.getModularBOQVariables(selectedSlug),
+    ]).then(([dims, vars]) => {
+      setTypeDimensions((Array.isArray(dims) ? dims : []) as ModelTypeDimension[]);
+      setTypeVariables((Array.isArray(vars) ? vars : []) as ModularVariable[]);
+    }).catch(() => {});
+    loadTemplates(selectedSlug);
+  }, [selectedSlug]);
+
+  const loadTemplates = async (typeSlug: string) => {
     setIsLoading(true);
     setExpandedCategories([]);
     setEditingLine(null);
     setEditForm({});
     setRenamingCat(null);
     try {
-      const { base, options } = await loadModularTemplateFromDB();
+      const { base, options } = await loadModularTemplateFromDB(typeSlug);
       if (base && base.length > 0) {
         setBaseTemplate(base);
-        setOptionsTemplate(options ?? getHardcodedModularOptionsTemplate());
+        setOptionsTemplate(options ?? []);
       } else {
-        setBaseTemplate(getHardcodedModularBaseTemplate());
-        setOptionsTemplate(getHardcodedModularOptionsTemplate());
+        setBaseTemplate([]);
+        setOptionsTemplate([]);
       }
       setHasChanges(false);
     } catch (err: any) {
-      setBaseTemplate(getHardcodedModularBaseTemplate());
-      setOptionsTemplate(getHardcodedModularOptionsTemplate());
+      setBaseTemplate([]);
+      setOptionsTemplate([]);
       setHasChanges(false);
     } finally {
       setIsLoading(false);
@@ -252,9 +299,10 @@ const ModularBOQTemplatePage: React.FC = () => {
      SAVE / RESET
   ====================================================== */
   const handleSave = async () => {
+    if (!selectedSlug) return;
     try {
       setIsSaving(true);
-      await saveModularTemplateToDB(baseTemplate, optionsTemplate);
+      await saveModularTemplateToDB(baseTemplate, optionsTemplate, selectedSlug);
       clearSavedModularBOQTemplates();
       setHasChanges(false);
       toast({ title: 'Succès', description: 'Modèle BOQ sauvegardé en base de données' });
@@ -266,16 +314,16 @@ const ModularBOQTemplatePage: React.FC = () => {
   };
 
   const handleReset = () => {
-    if (!confirm('Réinitialiser au modèle par défaut ? Toutes les modifications non sauvegardées seront perdues.')) return;
+    if (!confirm('Réinitialiser le modèle à vide ? Toutes les modifications non sauvegardées seront perdues.')) return;
     clearSavedModularBOQTemplates();
-    setBaseTemplate(getHardcodedModularBaseTemplate());
-    setOptionsTemplate(getHardcodedModularOptionsTemplate());
+    setBaseTemplate([]);
+    setOptionsTemplate([]);
     setExpandedCategories([]);
     setEditingLine(null);
     setEditForm({});
     setRenamingCat(null);
     setHasChanges(true);
-    toast({ title: 'Réinitialisé', description: 'Modèle remis aux valeurs par défaut. Sauvegardez pour persister.' });
+    toast({ title: 'Réinitialisé', description: 'Modèle remis à vide. Sauvegardez pour persister.' });
   };
 
   /* ======================================================
@@ -436,6 +484,7 @@ const ModularBOQTemplatePage: React.FC = () => {
               <FormulaInput
                 value={editForm.quantity_formula ?? ''}
                 onChange={(v) => setEditForm(prev => ({ ...prev, quantity_formula: v }))}
+                extraVars={availableVars}
                 error={formulaError}
               />
             </div>
@@ -625,8 +674,8 @@ const ModularBOQTemplatePage: React.FC = () => {
             Modèle BOQ — Solutions Personnalisées
           </h1>
           <p className="text-muted-foreground mt-1">
-            Configurez la structure de calcul du BOQ pour les types personnalisés.
-            Les formules utilisent les dimensions configurées par type et les variables dérivées.
+            Configurez la structure de calcul du BOQ pour chaque type personnalisé.
+            Les formules utilisent les dimensions et variables configurées pour le type sélectionné.
           </p>
         </div>
 
@@ -641,6 +690,7 @@ const ModularBOQTemplatePage: React.FC = () => {
             variant="outline"
             size="sm"
             onClick={handleReset}
+            disabled={!selectedSlug}
             className="gap-2"
           >
             <RotateCcw className="h-4 w-4" />
@@ -649,7 +699,7 @@ const ModularBOQTemplatePage: React.FC = () => {
           <Button
             size="sm"
             onClick={handleSave}
-            disabled={isSaving || !hasChanges}
+            disabled={isSaving || !hasChanges || !selectedSlug}
             className="gap-2 bg-orange-500 hover:bg-orange-600"
           >
             {isSaving
@@ -659,6 +709,47 @@ const ModularBOQTemplatePage: React.FC = () => {
         </div>
       </div>
 
+      {/* Type selector */}
+      <Card>
+        <CardContent className="pt-4 pb-4">
+          {customTypes.length === 0 ? (
+            <p className="text-sm text-muted-foreground italic">
+              Aucun type personnalisé configuré. Créez-en un dans{' '}
+              <a href="#/admin/model-types" className="underline text-orange-600">Types de Solutions</a>.
+            </p>
+          ) : (
+            <div className="flex items-center gap-3">
+              <Label className="whitespace-nowrap font-medium">Type de modèle</Label>
+              <Select value={selectedSlug} onValueChange={setSelectedSlug}>
+                <SelectTrigger className="w-72">
+                  <SelectValue placeholder="— Sélectionner un type pour modifier son BOQ —" />
+                </SelectTrigger>
+                <SelectContent>
+                  {customTypes.map(t => (
+                    <SelectItem key={t.slug} value={t.slug}>{t.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {selectedSlug && (
+                <span className="text-sm text-muted-foreground">
+                  {typeDimensions.length} dimension{typeDimensions.length !== 1 ? 's' : ''} ·{' '}
+                  {typeVariables.length} variable{typeVariables.length !== 1 ? 's' : ''}
+                </span>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Prompt when no type selected */}
+      {!selectedSlug ? (
+        <p className="text-center text-muted-foreground py-12 italic">
+          Sélectionnez un type de modèle ci-dessus pour créer ou modifier son modèle BOQ.
+        </p>
+      ) : isLoading ? (
+        <p className="text-center text-muted-foreground py-12">Chargement…</p>
+      ) : (
+        <>
       {/* Base template */}
       <Card>
         <CardHeader className="pb-3">
@@ -714,6 +805,8 @@ const ModularBOQTemplatePage: React.FC = () => {
           )}
         </CardContent>
       </Card>
+        </>
+      )}
     </div>
   );
 };

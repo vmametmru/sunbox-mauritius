@@ -972,8 +972,8 @@ export const api = {
   /* =====================================================
      MODULAR BOQ VARIABLES
   ===================================================== */
-  getModularBOQVariables() {
-    return this.query('get_modular_boq_variables');
+  getModularBOQVariables(modelTypeSlug?: string) {
+    return this.query('get_modular_boq_variables', modelTypeSlug ? { model_type_slug: modelTypeSlug } : {});
   },
 
   createModularBOQVariable(variable: {
@@ -982,6 +982,7 @@ export const api = {
     unit?: string;
     formula: string;
     display_order?: number;
+    model_type_slug?: string;
   }) {
     return this.query('create_modular_boq_variable', variable);
   },
@@ -993,6 +994,7 @@ export const api = {
     unit?: string;
     formula: string;
     display_order?: number;
+    model_type_slug?: string;
   }) {
     return this.query('update_modular_boq_variable', variable);
   },
@@ -1038,8 +1040,8 @@ export const api = {
   /* =====================================================
      MODULAR BOQ TEMPLATES
   ===================================================== */
-  getModularBOQTemplates() {
-    return this.query('get_modular_boq_templates');
+  getModularBOQTemplates(modelTypeSlug?: string) {
+    return this.query('get_modular_boq_templates', modelTypeSlug ? { model_type_slug: modelTypeSlug } : {});
   },
 
   createModularBOQTemplate(template: {
@@ -1047,6 +1049,7 @@ export const api = {
     description?: string;
     is_default?: boolean;
     template_data?: any;
+    model_type_slug?: string;
   }) {
     return this.query('create_modular_boq_template', template);
   },
@@ -1057,6 +1060,7 @@ export const api = {
     description?: string;
     is_default?: boolean;
     template_data?: any;
+    model_type_slug?: string;
   }) {
     return this.query('update_modular_boq_template', template);
   },
@@ -1069,8 +1073,8 @@ export const api = {
     return this.query('get_modular_boq_template_by_id', { id });
   },
 
-  getDefaultModularBOQTemplateFromDB() {
-    return this.query('get_default_modular_boq_template');
+  getDefaultModularBOQTemplateFromDB(modelTypeSlug?: string) {
+    return this.query('get_default_modular_boq_template', modelTypeSlug ? { model_type_slug: modelTypeSlug } : {});
   },
 
   getModularBOQFull(modelId: number) {
