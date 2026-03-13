@@ -289,6 +289,16 @@ try {
             break;
         }
 
+        case 'get_model_type_dimensions': {
+            $sdb  = getSunboxDB();
+            $slug = sanitize($body['model_type_slug'] ?? '');
+            if (!$slug) fail('model_type_slug requis');
+            $stmt = $sdb->prepare("SELECT * FROM model_type_dimensions WHERE model_type_slug = ? ORDER BY display_order ASC");
+            $stmt->execute([$slug]);
+            ok($stmt->fetchAll(PDO::FETCH_ASSOC));
+            break;
+        }
+
         // ── MODULAR BOQ (reads from Sunbox DB) ────────────────────────────────
         case 'get_modular_boq_variables': {
             $sdb  = getSunboxDB();
@@ -838,10 +848,11 @@ try {
                              pool_longueur_lb, pool_largeur_lb, pool_profondeur_lb,
                              pool_longueur_ta, pool_largeur_ta, pool_profondeur_ta,
                              pool_longueur_tb, pool_largeur_tb, pool_profondeur_tb,
-                             modular_longueur, modular_largeur, modular_nb_etages)
+                             modular_longueur, modular_largeur, modular_nb_etages,
+                             custom_dimensions)
                         VALUES (?,?,?,?,?, ?,?,?,?,?, ?,?,?,'open',?,
                                 ?, ?,?,?, ?,?,?, ?,?,?, ?,?,?, ?,?,?,
-                                ?,?,?)
+                                ?,?,?,?)
                     ")->execute([
                         $reference,
                         $contactId,
@@ -863,6 +874,7 @@ try {
                         $nullFloat('pool_longueur_tb'), $nullFloat('pool_largeur_tb'), $nullFloat('pool_profondeur_tb'),
                         $nullFloat('modular_longueur'), $nullFloat('modular_largeur'),
                         isset($body['modular_nb_etages']) ? (int)$body['modular_nb_etages'] : null,
+                        isset($body['custom_dimensions']) ? json_encode($body['custom_dimensions']) : null,
                     ]);
                     $proInserted = true;
                 } catch (PDOException $dimEx) { /* dimension columns not yet added – fall through */ }

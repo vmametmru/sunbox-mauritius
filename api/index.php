@@ -6,12 +6,12 @@ handleCORS();
 
 // Pro site deployment versions — increment these when templates or DB schema change.
 // PRO_FILE_VERSION must match define('PRO_FILE_VERSION', ...) in api/pro_deploy/api_config.php
-define('PRO_FILE_VERSION',      '2.9.5');
+define('PRO_FILE_VERSION',      '2.9.6');
 define('PRO_DB_SCHEMA_VERSION', '1.8.0');
 
 // Sunbox main database schema version.
 // Increment when new tables or columns are added.
-define('SUNBOX_DB_SCHEMA_VERSION', '2.11.0');
+define('SUNBOX_DB_SCHEMA_VERSION', '2.12.0');
 
 $action = $_GET['action'] ?? '';
 $body   = getRequestBody();
@@ -396,6 +396,41 @@ try {
                 $db->exec("ALTER TABLE `models` MODIFY COLUMN `type` VARCHAR(50) NOT NULL DEFAULT 'container'");
                 $messages[] = "Colonne modifiée : models.type (ENUM → VARCHAR(50) pour types dynamiques)";
             }
+
+            // ── v2.12.0 ── Per-type configurable dimensions ──────────────────────────
+            $createTable('model_type_dimensions', "
+                CREATE TABLE `model_type_dimensions` (
+                    `id`              INT AUTO_INCREMENT PRIMARY KEY,
+                    `model_type_slug`  VARCHAR(50)   NOT NULL,
+                    `slug`            VARCHAR(50)   NOT NULL,
+                    `label`           VARCHAR(100)  NOT NULL,
+                    `unit`            VARCHAR(20)   DEFAULT 'm',
+                    `min_value`       DECIMAL(10,4) DEFAULT 0,
+                    `max_value`       DECIMAL(10,4) DEFAULT 1000,
+                    `step`            DECIMAL(10,4) DEFAULT 0.5,
+                    `default_value`   DECIMAL(10,4) DEFAULT 1,
+                    `display_order`   INT           DEFAULT 0,
+                    UNIQUE KEY `uq_model_type_dim` (`model_type_slug`, `slug`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ");
+
+            // Seed default 3 dimensions for legacy 'modular' type (backward compat)
+            try {
+                $dimCount = (int)$db->query("SELECT COUNT(*) FROM `model_type_dimensions` WHERE `model_type_slug` = 'modular'")->fetchColumn();
+                if ($dimCount === 0) {
+                    $db->exec("INSERT INTO `model_type_dimensions`
+                        (`model_type_slug`,`slug`,`label`,`unit`,`min_value`,`max_value`,`step`,`default_value`,`display_order`)
+                        VALUES
+                        ('modular','longueur','Longueur','m',3,50,0.5,10,1),
+                        ('modular','largeur','Largeur','m',3,30,0.5,8,2),
+                        ('modular','nombre_etages','Nombre d''étages','',1,5,1,1,3)");
+                    $messages[] = "Dimensions par défaut ajoutées pour le type 'modular'";
+                }
+            } catch (\Throwable $e) { /* ignore – table may already be populated */ }
+
+            // Add custom_dimensions JSON column to quotes and pro_quotes
+            $addCol('quotes',     'custom_dimensions', "JSON NULL DEFAULT NULL");
+            $addCol('pro_quotes', 'custom_dimensions', "JSON NULL DEFAULT NULL");
 
             // ── Schema version table (always create / update) ─────────────────
             $db->exec("CREATE TABLE IF NOT EXISTS `db_schema_version` (
@@ -1461,10 +1496,11 @@ try {
                             pool_longueur_lb, pool_largeur_lb, pool_profondeur_lb,
                             pool_longueur_ta, pool_largeur_ta, pool_profondeur_ta,
                             pool_longueur_tb, pool_largeur_tb, pool_profondeur_tb,
-                            modular_longueur, modular_largeur, modular_nb_etages
+                            modular_longueur, modular_largeur, modular_nb_etages,
+                            custom_dimensions
                                                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?,
                                   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                                  ?, ?, ?)
+                                  ?, ?, ?, ?)
                     ");
                     $stmt->execute([
                         $reference,
@@ -1489,6 +1525,7 @@ try {
                         $nullFloat('pool_longueur_tb'), $nullFloat('pool_largeur_tb'), $nullFloat('pool_profondeur_tb'),
                         $nullFloat('modular_longueur'), $nullFloat('modular_largeur'),
                         isset($body['modular_nb_etages']) ? (int)$body['modular_nb_etages'] : null,
+                        isset($body['custom_dimensions']) ? json_encode($body['custom_dimensions']) : null,
                     ]);
                     $inserted = true;
                 } catch (PDOException $dimEx) { /* dimension columns not yet added – fall through */ }
@@ -3282,6 +3319,63 @@ try {
         }
 
         // ============================================
+// === MODEL TYPE DIMENSIONS (per-type configurable dimensions)
+        // ============================================
+        case 'get_model_type_dimensions': {
+            $slug = sanitize($body['model_type_slug'] ?? '');
+            if (!$slug) fail('model_type_slug requis');
+            $stmt = $db->prepare("SELECT * FROM model_type_dimensions WHERE model_type_slug = ? ORDER BY display_order ASC");
+            $stmt->execute([$slug]);
+            ok($stmt->fetchAll(PDO::FETCH_ASSOC));
+            break;
+        }
+
+        case 'create_model_type_dimension': {
+            validateRequired($body, ['model_type_slug', 'slug', 'label']);
+            $typeSlug = sanitize($body['model_type_slug']);
+            $dimSlug  = preg_replace('/[^a-z0-9_]/', '_', strtolower(sanitize($body['slug'])));
+            $stmt = $db->prepare("
+                INSERT INTO model_type_dimensions
+                    (model_type_slug, slug, label, unit, min_value, max_value, step, default_value, display_order)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ");
+            $stmt->execute([
+                $typeSlug, $dimSlug, sanitize($body['label']),
+                sanitize($body['unit'] ?? 'm'),
+                (float)($body['min_value'] ?? 0),
+                (float)($body['max_value'] ?? 1000),
+                (float)($body['step'] ?? 0.5),
+                (float)($body['default_value'] ?? 1),
+                (int)($body['display_order'] ?? 0),
+            ]);
+            ok(['id' => (int)$db->lastInsertId()]);
+            break;
+        }
+
+        case 'update_model_type_dimension': {
+            validateRequired($body, ['id']);
+            $fields = []; $params = [];
+            foreach (['label','unit','min_value','max_value','step','default_value','display_order'] as $f) {
+                if (!array_key_exists($f, $body)) continue;
+                $fields[] = "$f = ?";
+                if (in_array($f, ['min_value','max_value','step','default_value'])) $params[] = (float)$body[$f];
+                elseif ($f === 'display_order') $params[] = (int)$body[$f];
+                else $params[] = sanitize($body[$f]);
+            }
+            if (!$fields) fail('Nothing to update');
+            $params[] = (int)$body['id'];
+            $db->prepare("UPDATE model_type_dimensions SET ".implode(', ', $fields)." WHERE id = ?")->execute($params);
+            ok();
+            break;
+        }
+
+        case 'delete_model_type_dimension': {
+            validateRequired($body, ['id']);
+            $db->prepare("DELETE FROM model_type_dimensions WHERE id = ?")->execute([(int)$body['id']]);
+            ok();
+            break;
+        }
+
         // === MODULAR BOQ VARIABLES
         // ============================================
         case 'get_modular_boq_variables': {

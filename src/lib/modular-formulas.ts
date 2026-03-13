@@ -25,11 +25,12 @@ import { evaluateFormula } from './pool-formulas';
 // Types
 // ---------------------------------------------------------------------------
 
-export interface ModularDimensions {
-  longueur: number;
-  largeur: number;
-  nombre_etages: number;
-}
+/**
+ * Flexible dimensions map for any custom model type.
+ * Keys are dimension slugs (e.g. 'longueur', 'hauteur', 'nombre_etages').
+ * Replaces the old fixed 3-field interface while remaining backward-compatible.
+ */
+export type ModularDimensions = Record<string, number>;
 
 export interface ModularVariable {
   id: number;
@@ -52,11 +53,8 @@ export function evaluateModularVariables(
   dimensions: ModularDimensions,
   variables: ModularVariable[]
 ): Record<string, number> {
-  const context: Record<string, number> = {
-    longueur:       dimensions.longueur,
-    largeur:        dimensions.largeur,
-    nombre_etages:  dimensions.nombre_etages,
-  };
+  // Spread all dimension values (slug → value) into the evaluation context
+  const context: Record<string, number> = { ...dimensions };
 
   const sorted = [...variables].sort((a, b) => a.display_order - b.display_order);
   for (const v of sorted) {

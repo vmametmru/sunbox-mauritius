@@ -119,6 +119,44 @@ export const api = {
   },
 
   /* =====================================================
+     MODEL TYPE DIMENSIONS (per-type configurable input dims)
+  ===================================================== */
+  getModelTypeDimensions(modelTypeSlug: string) {
+    return this.query('get_model_type_dimensions', { model_type_slug: modelTypeSlug });
+  },
+
+  createModelTypeDimension(dim: {
+    model_type_slug: string;
+    slug: string;
+    label: string;
+    unit?: string;
+    min_value?: number;
+    max_value?: number;
+    step?: number;
+    default_value?: number;
+    display_order?: number;
+  }) {
+    return this.query('create_model_type_dimension', dim);
+  },
+
+  updateModelTypeDimension(dim: {
+    id: number;
+    label?: string;
+    unit?: string;
+    min_value?: number;
+    max_value?: number;
+    step?: number;
+    default_value?: number;
+    display_order?: number;
+  }) {
+    return this.query('update_model_type_dimension', dim);
+  },
+
+  deleteModelTypeDimension(id: number) {
+    return this.query('delete_model_type_dimension', { id });
+  },
+
+  /* =====================================================
      MODELS (DB-DRIVEN ONLY)
   ===================================================== */
   getModels(type?: string, activeOnly: boolean = true, includeBOQPrice: boolean = true) {
@@ -395,7 +433,7 @@ export const api = {
   createQuote(quote: {
     model_id: number;
     model_name: string;
-    model_type: 'container' | 'pool';
+    model_type: string;
     base_price: number;
     options_total: number;
     total_price: number;
@@ -405,7 +443,30 @@ export const api = {
     customer_address?: string;
     customer_message?: string;
     device_id?: string;
-    selected_options?: Array<{ option_id: number; option_name: string; option_price: number }>;
+    selected_options?: Array<{ option_id: number; option_name: string; option_price: number; quantity?: number }>;
+    // Pool dimensions
+    pool_shape?: string;
+    pool_longueur?: number | null;
+    pool_largeur?: number | null;
+    pool_profondeur?: number | null;
+    pool_longueur_la?: number | null;
+    pool_largeur_la?: number | null;
+    pool_profondeur_la?: number | null;
+    pool_longueur_lb?: number | null;
+    pool_largeur_lb?: number | null;
+    pool_profondeur_lb?: number | null;
+    pool_longueur_ta?: number | null;
+    pool_largeur_ta?: number | null;
+    pool_profondeur_ta?: number | null;
+    pool_longueur_tb?: number | null;
+    pool_largeur_tb?: number | null;
+    pool_profondeur_tb?: number | null;
+    // Custom type dimensions (backward compat legacy columns)
+    modular_longueur?: number | null;
+    modular_largeur?: number | null;
+    modular_nb_etages?: number | null;
+    // Generic custom dimensions (slug → value) for all admin-created types
+    custom_dimensions?: Record<string, number> | null;
   }) {
     return this.query('create_quote', quote);
   },
@@ -1246,4 +1307,29 @@ export interface ProTheme {
   footer_text_color: string;
   created_at?: string;
   updated_at?: string;
+}
+
+/** Configurable dimension for a custom model type (e.g. Longueur, Hauteur). */
+export interface ModelTypeDimension {
+  id: number;
+  model_type_slug: string;
+  slug: string;
+  label: string;
+  unit: string;
+  min_value: number;
+  max_value: number;
+  step: number;
+  default_value: number;
+  display_order: number;
+}
+
+/** Admin-managed custom model type. */
+export interface ModelType {
+  id: number;
+  slug: string;
+  name: string;
+  description: string | null;
+  icon_name: string;
+  display_order: number;
+  is_active: boolean;
 }

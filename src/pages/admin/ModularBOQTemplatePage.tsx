@@ -622,13 +622,11 @@ const ModularBOQTemplatePage: React.FC = () => {
         <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
             <Home className="h-7 w-7 text-orange-500" />
-            Modèle BOQ — Maisons Modulaires
+            Modèle BOQ — Solutions Personnalisées
           </h1>
           <p className="text-muted-foreground mt-1">
-            Configurez la structure de calcul du BOQ pour les maisons modulaires.
-            Les formules utilisent les variables : <code className="text-xs bg-gray-100 px-1 rounded">longueur</code>,{' '}
-            <code className="text-xs bg-gray-100 px-1 rounded">largeur</code>,{' '}
-            <code className="text-xs bg-gray-100 px-1 rounded">nombre_etages</code> et les variables dérivées.
+            Configurez la structure de calcul du BOQ pour les types personnalisés.
+            Les formules utilisent les dimensions configurées par type et les variables dérivées.
           </p>
         </div>
 

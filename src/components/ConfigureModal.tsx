@@ -6,11 +6,11 @@ import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useQuote, ModelOption } from '@/contexts/QuoteContext';
-import { api, API_BASE_URL } from '@/lib/api';
+import { api, API_BASE_URL, type ModelTypeDimension } from '@/lib/api';
 import { useSiteSettings, calculateTTC, calculateHT } from '@/hooks/use-site-settings';
 import { useToast } from '@/hooks/use-toast';
 import { evaluatePoolVariables, evaluateFormula, type PoolDimensions, type PoolVariable } from '@/lib/pool-formulas';
-import { evaluateModularVariables, type ModularDimensions, type ModularVariable } from '@/lib/modular-formulas';
+import { evaluateModularVariables, type ModularVariable } from '@/lib/modular-formulas';
 import { getProButtonStyle } from '@/lib/pro-theme';
 
 interface BOQLine {
@@ -106,12 +106,10 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
   const [boqFullCategories, setBOQFullCategories] = useState<BOQFullCategory[]>([]);
   const [isLoadingPoolData, setIsLoadingPoolData] = useState(false);
 
-  // Modular dimensions state (for modular models) — start empty so user must enter them
-  const [modularDimensions, setModularDimensions] = useState<ModularDimensions>({
-    longueur: 0,
-    largeur: 0,
-    nombre_etages: 1,
-  });
+    // Modular dimensions state — loaded per model type, then filled by user
+  const [modularDimensions, setModularDimensions] = useState<Record<string, number>>({});
+  const [modelTypeDimensions, setModelTypeDimensions] = useState<ModelTypeDimension[]>([]);
+  const [loadingModelTypeDimensions, setLoadingModelTypeDimensions] = useState(false);
   const [modularVariables, setModularVariables] = useState<ModularVariable[]>([]);
   const [modularBOQCategories, setModularBOQCategories] = useState<BOQFullCategory[]>([]);
   const [isLoadingModularData, setIsLoadingModularData] = useState(false);
@@ -167,11 +165,16 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
   // True while we have dimensions but BOQ data hasn't loaded yet
   const isCalculatingPrice = isPoolModel && poolDimensionsReady && isLoadingPoolData;
 
-  // Modular dimensions ready check
+    // Modular dimensions ready check:
+  // - not loading the dimension config yet
+  // - if no dimensions configured for this type: consider ready (BOQ without dims)
+  // - if dimensions configured: all values must be > 0
   const modularDimensionsReady = isModularModel
-    && modularDimensions.longueur > 0
-    && modularDimensions.largeur > 0
-    && modularDimensions.nombre_etages >= 1;
+    && !loadingModelTypeDimensions
+    && (
+      modelTypeDimensions.length === 0
+      || modelTypeDimensions.every(d => (modularDimensions[d.slug] ?? 0) > 0)
+    );
 
   const isCalculatingModularPrice = isModularModel && modularDimensionsReady && isLoadingModularData;
 
@@ -345,7 +348,8 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
       if (isCustomModel) {
         loadModularData(model.id);
         // Reset dimensions so the user must enter them
-        setModularDimensions({ longueur: 0, largeur: 0, nombre_etages: 1 });
+        setModularDimensions({});
+        setModelTypeDimensions([]);
       }
       // Reset to first step when opening
       setStep('options');
@@ -355,6 +359,23 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
       setOptionQuantities({});
     }
   }, [open, model?.id]);
+
+  // Load dimension configuration for the current custom model type
+  useEffect(() => {
+    if (!open || !isCustomModel || !model?.type) return;
+    setLoadingModelTypeDimensions(true);
+    api.getModelTypeDimensions(model.type)
+      .then((dims: any) => {
+        const d = (Array.isArray(dims) ? dims : []) as ModelTypeDimension[];
+        setModelTypeDimensions(d);
+        // Initialize each dimension to 0 (user must enter values)
+        const init: Record<string, number> = {};
+        for (const dim of d) init[dim.slug] = 0;
+        setModularDimensions(init);
+      })
+      .catch(() => setModelTypeDimensions([]))
+      .finally(() => setLoadingModelTypeDimensions(false));
+  }, [open, model?.id, model?.type, isCustomModel]);
   
   // Handle checkbox to use saved client info
   useEffect(() => {
@@ -465,6 +486,16 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
             pool_longueur_tb: poolDimensions.longueur_tb,
             pool_largeur_tb: poolDimensions.largeur_tb,
             pool_profondeur_tb: poolDimensions.profondeur_tb,
+          } : {}),
+        } : {}),
+        // Custom type dimensions — stored as JSON (slug → value)
+        ...(isModularModel && Object.keys(modularDimensions).length > 0 ? {
+          custom_dimensions: modularDimensions,
+          // Backward-compat: populate legacy columns for 'modular' type
+          ...(model?.type === 'modular' ? {
+            modular_longueur:  modularDimensions['longueur']      ?? null,
+            modular_largeur:   modularDimensions['largeur']       ?? null,
+            modular_nb_etages: modularDimensions['nombre_etages'] ?? null,
           } : {}),
         } : {}),
       });
@@ -1109,69 +1140,53 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                 </div>
               )}
 
-              {/* MODULAR DIMENSIONS INPUT */}
+              {/* MODULAR DIMENSIONS INPUT — dynamic per model type */}
               {isModularModel && (
                 <div className="bg-green-50 border border-green-200 p-4 rounded">
                   <h3 className="text-base font-semibold text-green-800 mb-3 flex items-center gap-2">
                     <Ruler className="w-4 h-4" />
-                    Dimensions de votre maison modulaire
+                    Dimensions
                   </h3>
-                  <p className="text-xs text-green-600 mb-3">Veuillez saisir les dimensions pour voir le prix estimé.</p>
-                  <div className="grid grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-xs font-medium text-green-700 mb-1">Longueur (m)</label>
-                      <Input
-                        type="number"
-                        step="0.5"
-                        min="3"
-                        max="50"
-                        value={modularDimensions.longueur || ''}
-                        placeholder="ex: 10"
-                        onChange={(e) => {
-                          const v = Number(e.target.value);
-                          setModularDimensions(prev => ({ ...prev, longueur: v >= 0 ? v : 0 }));
-                        }}
-                        className="h-9 text-sm bg-white"
-                      />
+                  {loadingModelTypeDimensions ? (
+                    <div className="flex items-center gap-2 text-sm text-green-700">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Chargement des dimensions…
                     </div>
-                    <div>
-                      <label className="block text-xs font-medium text-green-700 mb-1">Largeur (m)</label>
-                      <Input
-                        type="number"
-                        step="0.5"
-                        min="3"
-                        max="30"
-                        value={modularDimensions.largeur || ''}
-                        placeholder="ex: 8"
-                        onChange={(e) => {
-                          const v = Number(e.target.value);
-                          setModularDimensions(prev => ({ ...prev, largeur: v >= 0 ? v : 0 }));
-                        }}
-                        className="h-9 text-sm bg-white"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-green-700 mb-1">Nombre d&apos;étages</label>
-                      <Input
-                        type="number"
-                        step="1"
-                        min="1"
-                        max="5"
-                        value={modularDimensions.nombre_etages || 1}
-                        placeholder="ex: 1"
-                        onChange={(e) => {
-                          const v = parseInt(e.target.value, 10) || 1;
-                          setModularDimensions(prev => ({ ...prev, nombre_etages: v >= 1 ? v : 1 }));
-                        }}
-                        className="h-9 text-sm bg-white"
-                      />
-                    </div>
-                  </div>
-                  {modularDimensionsReady && (
-                    <p className="mt-2 text-xs text-green-700">
-                      Surface plancher : {(modularDimensions.longueur * modularDimensions.largeur).toFixed(1)} m² •
-                      Surface totale : {(modularDimensions.longueur * modularDimensions.largeur * modularDimensions.nombre_etages).toFixed(1)} m²
+                  ) : modelTypeDimensions.length === 0 ? (
+                    <p className="text-xs text-green-600 italic">
+                      Aucune dimension requise pour ce type de modèle.
                     </p>
+                  ) : (
+                    <>
+                      <p className="text-xs text-green-600 mb-3">
+                        Veuillez saisir les dimensions pour voir le prix estimé.
+                      </p>
+                      <div
+                        className="grid gap-4"
+                        style={{ gridTemplateColumns: `repeat(${Math.min(modelTypeDimensions.length, 3)}, minmax(140px, 1fr))` }}
+                      >
+                        {modelTypeDimensions.map(dim => (
+                          <div key={dim.slug}>
+                            <label className="block text-xs font-medium text-green-700 mb-1">
+                              {dim.label}{dim.unit ? ` (${dim.unit})` : ''}
+                            </label>
+                            <Input
+                              type="number"
+                              step={dim.step}
+                              min={dim.min_value}
+                              max={dim.max_value}
+                              value={modularDimensions[dim.slug] || ''}
+                              placeholder={`ex: ${dim.default_value}`}
+                              onChange={(e) => {
+                                const v = Number(e.target.value);
+                                setModularDimensions(prev => ({ ...prev, [dim.slug]: v >= 0 ? v : 0 }));
+                              }}
+                              className="h-9 text-sm bg-white"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </>
                   )}
                 </div>
               )}
@@ -1196,7 +1211,7 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
               )}
 
               {/* For modular models: show indicator until dimensions are ready */}
-              {isModularModel && !modularDimensionsReady && (
+              {isModularModel && !modularDimensionsReady && !loadingModelTypeDimensions && modelTypeDimensions.length > 0 && (
                 <div className="bg-yellow-50 border border-yellow-200 p-4 rounded text-center">
                   <p className="text-sm text-yellow-700">
                     Renseignez les dimensions ci-dessus pour voir le prix estimé et les options disponibles.
@@ -1615,11 +1630,13 @@ const ConfigureModal: React.FC<ConfigureModalProps> = ({ open, onClose }) => {
                     </span>
                   </div>
                 )}
-                {isModularModel && modularDimensionsReady && (
+                {isModularModel && modularDimensionsReady && modelTypeDimensions.length > 0 && (
                   <div className="flex justify-between items-center text-sm">
                     <span className="text-gray-600">Dimensions</span>
                     <span className="font-medium">
-                      {modularDimensions.longueur}m × {modularDimensions.largeur}m × {modularDimensions.nombre_etages} étage{modularDimensions.nombre_etages > 1 ? 's' : ''}
+                      {modelTypeDimensions.map(d =>
+                        `${d.label}: ${modularDimensions[d.slug] ?? 0}${d.unit ? ' ' + d.unit : ''}`
+                      ).join(' × ')}
                     </span>
                   </div>
                 )}

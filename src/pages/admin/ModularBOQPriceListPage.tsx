@@ -181,9 +181,9 @@ export default function ModularBOQPriceListPage() {
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Base de Prix — Maisons Modulaires</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Base de Prix — Solutions Personnalisées</h1>
           <p className="text-muted-foreground">
-            Gérez les prix unitaires des matériaux et services pour les BOQ des maisons modulaires
+            Gérez les prix unitaires des matériaux et services partagés par tous les types personnalisés
           </p>
         </div>
         <Button onClick={openNew} className="bg-orange-500 hover:bg-orange-600">
