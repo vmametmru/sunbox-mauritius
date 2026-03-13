@@ -258,8 +258,8 @@ const ModularBOQTemplatePage: React.FC = () => {
       });
   }, [priceMap]);
 
-  // Compute a single BOQ line's qty, unitCost, totalHT
-  const computeLine = useCallback((line: ModularBOQTemplateLine): { qty: number; unitCost: number; totalHT: number } | null => {
+  // Compute a single BOQ line's qty, unitCost, costTotalHT, totalSaleHT
+  const computeLine = useCallback((line: ModularBOQTemplateLine): { qty: number; unitCost: number; costTotalHT: number; totalSaleHT: number } | null => {
     if (!simVarContext) return null;
     try {
       const qty = evaluateFormula(line.quantity_formula || '0', simVarContext);
@@ -272,8 +272,9 @@ const ModularBOQTemplatePage: React.FC = () => {
         unitCost = evaluateFormula(resolved, simVarContext);
       }
       const margin = (line.margin_percent ?? 0) / 100;
-      const totalHT = qty * unitCost * (1 + margin);
-      return { qty, unitCost, totalHT };
+      const costTotalHT = qty * unitCost;
+      const totalSaleHT = costTotalHT * (1 + margin);
+      return { qty, unitCost, costTotalHT, totalSaleHT };
     } catch {
       return null;
     }
@@ -615,7 +616,8 @@ const ModularBOQTemplatePage: React.FC = () => {
             <span className="text-xs font-mono text-green-700 w-14 text-right shrink-0">{computed.qty % 1 === 0 ? computed.qty : computed.qty.toFixed(2)}</span>
             <Badge variant="outline" className="text-xs shrink-0">{line.unit}</Badge>
             <span className="text-xs font-mono text-gray-600 w-20 text-right shrink-0">{computed.unitCost.toLocaleString('fr-MU', { maximumFractionDigits: 0 })} Rs</span>
-            <span className="text-xs font-bold text-orange-700 w-24 text-right shrink-0">{computed.totalHT.toLocaleString('fr-MU', { maximumFractionDigits: 0 })} Rs</span>
+            <span className="text-xs font-mono text-gray-500 w-24 text-right shrink-0">{computed.costTotalHT.toLocaleString('fr-MU', { maximumFractionDigits: 0 })} Rs</span>
+            <span className="text-xs font-bold text-orange-700 w-24 text-right shrink-0">{computed.totalSaleHT.toLocaleString('fr-MU', { maximumFractionDigits: 0 })} Rs</span>
           </>
         ) : (
           <>
@@ -896,14 +898,14 @@ const ModularBOQTemplatePage: React.FC = () => {
                 ...[...optionsTemplate].map(c => ({ catName: c.name, isOption: true, lines: c.lines })),
               ];
               let baseTotal = 0;
-              const rows: Array<{ desc: string; qty: number; unit: string; unitCost: number; totalHT: number; isOption: boolean; catName?: string }> = [];
+              const rows: Array<{ desc: string; qty: number; unit: string; unitCost: number; costTotalHT: number; totalSaleHT: number; isOption: boolean; catName?: string }> = [];
               for (const sec of allSections) {
                 let first = true;
                 for (const line of sec.lines) {
                   const vals = computeLine(line);
                   if (!vals) continue;
-                  rows.push({ desc: line.description, qty: vals.qty, unit: line.unit, unitCost: vals.unitCost, totalHT: vals.totalHT, isOption: sec.isOption, catName: first ? sec.catName : undefined });
-                  if (!sec.isOption) baseTotal += vals.totalHT;
+                  rows.push({ desc: line.description, qty: vals.qty, unit: line.unit, unitCost: vals.unitCost, costTotalHT: vals.costTotalHT, totalSaleHT: vals.totalSaleHT, isOption: sec.isOption, catName: first ? sec.catName : undefined });
+                  if (!sec.isOption) baseTotal += vals.totalSaleHT;
                   first = false;
                 }
               }
@@ -915,10 +917,11 @@ const ModularBOQTemplatePage: React.FC = () => {
                     <thead>
                       <tr className="bg-green-100 text-green-800">
                         <th className="text-left px-3 py-2 font-medium">Description</th>
-                        <th className="text-right px-3 py-2 font-medium w-20">Qté</th>
+                        <th className="text-right px-3 py-2 font-medium w-16">Qté</th>
                         <th className="text-left px-3 py-2 font-medium w-16">Unité</th>
-                        <th className="text-right px-3 py-2 font-medium w-28">Coût HT</th>
-                        <th className="text-right px-3 py-2 font-medium w-28">Total HT</th>
+                        <th className="text-right px-3 py-2 font-medium w-28">Coût Unitaire HT</th>
+                        <th className="text-right px-3 py-2 font-medium w-28">Coût Total HT</th>
+                        <th className="text-right px-3 py-2 font-medium w-32">Prix de Vente Total HT</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -926,7 +929,7 @@ const ModularBOQTemplatePage: React.FC = () => {
                         <React.Fragment key={i}>
                           {row.catName && (
                             <tr className="bg-gray-50">
-                              <td colSpan={5} className="px-3 py-1.5 text-xs font-semibold text-gray-600 uppercase tracking-wide">
+                              <td colSpan={6} className="px-3 py-1.5 text-xs font-semibold text-gray-600 uppercase tracking-wide">
                                 {row.catName}{row.isOption ? ' (Option)' : ''}
                               </td>
                             </tr>
@@ -936,14 +939,15 @@ const ModularBOQTemplatePage: React.FC = () => {
                             <td className="text-right px-3 py-1.5 font-mono text-green-700">{row.qty % 1 === 0 ? row.qty : row.qty.toFixed(2)}</td>
                             <td className="px-3 py-1.5 text-gray-500">{row.unit}</td>
                             <td className="text-right px-3 py-1.5 font-mono text-gray-600">{fmt(row.unitCost)} Rs</td>
-                            <td className="text-right px-3 py-1.5 font-mono font-medium text-orange-700">{fmt(row.totalHT)} Rs</td>
+                            <td className="text-right px-3 py-1.5 font-mono text-gray-700">{fmt(row.costTotalHT)} Rs</td>
+                            <td className="text-right px-3 py-1.5 font-mono font-medium text-orange-700">{fmt(row.totalSaleHT)} Rs</td>
                           </tr>
                         </React.Fragment>
                       ))}
                     </tbody>
                     <tfoot>
                       <tr className="border-t-2 border-green-300 bg-green-50">
-                        <td colSpan={4} className="px-3 py-2 font-bold text-green-900">Total BOQ (Base HT)</td>
+                        <td colSpan={5} className="px-3 py-2 font-bold text-green-900">Prix de Vente Total HT (Base)</td>
                         <td className="text-right px-3 py-2 font-bold text-orange-700 text-base">{fmt(baseTotal)} Rs</td>
                       </tr>
                     </tfoot>
