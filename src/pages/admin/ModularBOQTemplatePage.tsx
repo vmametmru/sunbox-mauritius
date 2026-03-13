@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import {
   ChevronDown,
   ChevronRight,
@@ -12,6 +12,7 @@ import {
   Plus,
   Trash2,
   Loader2,
+  Calculator,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -33,10 +34,12 @@ import {
   loadModularTemplateFromDB,
   saveModularTemplateToDB,
   validateFormulaSyntax,
+  evaluateModularVariables,
   ModularBOQTemplateCategory,
   ModularBOQTemplateLine,
   type ModularVariable,
 } from '@/lib/modular-formulas';
+import { evaluateFormula } from '@/lib/pool-formulas';
 
 /* ======================================================
    Autocomplete constants
@@ -219,11 +222,74 @@ const ModularBOQTemplatePage: React.FC = () => {
   const [renamingCat, setRenamingCat] = useState<{ type: 'base' | 'options'; catIndex: number } | null>(null);
   const [renameCatValue, setRenameCatValue] = useState('');
 
+  // ── Simulator state ──
+  const [simValues, setSimValues] = useState<Record<string, number>>({});
+  const [priceList, setPriceList] = useState<Array<{ name: string; unit_price: number }>>([]);
+
   // All available variable names for autocomplete (dims + derived vars)
   const availableVars = [
     ...typeDimensions.map(d => d.slug),
     ...typeVariables.map(v => v.name),
   ];
+
+  // price name → unit_price lookup
+  const priceMap = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const item of priceList) m[item.name] = item.unit_price;
+    return m;
+  }, [priceList]);
+
+  // Compute full variable context from simValues + typeVariables
+  const simVarContext = useMemo(() => {
+    if (Object.keys(simValues).length === 0 && typeDimensions.length > 0) return null;
+    if (Object.keys(simValues).length === 0) return null;
+    return evaluateModularVariables(simValues, typeVariables);
+  }, [simValues, typeVariables, typeDimensions]);
+
+  // Resolve prix('name') or prix("name") in a formula string
+  const resolvePrix = useCallback((formula: string): string => {
+    return formula
+      .replace(/prix\('((?:[^']|'')*)'\)/g, (_match, raw: string) => {
+        const name = raw.replace(/''/g, "'");
+        return String(priceMap[name] ?? 0);
+      })
+      .replace(/prix\("([^"]*)"\)/g, (_match, name: string) => {
+        return String(priceMap[name] ?? 0);
+      });
+  }, [priceMap]);
+
+  // Compute a single BOQ line's qty, unitCost, totalHT
+  const computeLine = useCallback((line: ModularBOQTemplateLine): { qty: number; unitCost: number; totalHT: number } | null => {
+    if (!simVarContext) return null;
+    try {
+      const qty = evaluateFormula(line.quantity_formula || '0', simVarContext);
+      // Unit cost: prefer price_list_name lookup, else evaluate unit_cost_formula with prix resolved
+      let unitCost = 0;
+      if (line.price_list_name && priceMap[line.price_list_name] !== undefined) {
+        unitCost = priceMap[line.price_list_name];
+      } else if (line.unit_cost_formula) {
+        const resolved = resolvePrix(line.unit_cost_formula);
+        unitCost = evaluateFormula(resolved, simVarContext);
+      }
+      const margin = (line.margin_percent ?? 0) / 100;
+      const totalHT = qty * unitCost * (1 + margin);
+      return { qty, unitCost, totalHT };
+    } catch {
+      return null;
+    }
+  }, [simVarContext, priceMap, resolvePrix]);
+
+  /* Load price list on mount */
+  useEffect(() => {
+    api.getModularBOQPriceList().then((data: any) => {
+      if (Array.isArray(data)) {
+        setPriceList(data.map((item: any) => ({
+          name: String(item.name),
+          unit_price: Number(item.unit_price ?? 0),
+        })));
+      }
+    }).catch(() => {});
+  }, []);
 
   /* Load custom types on mount */
   useEffect(() => {
@@ -240,6 +306,7 @@ const ModularBOQTemplatePage: React.FC = () => {
       setTypeVariables([]);
       setBaseTemplate([]);
       setOptionsTemplate([]);
+      setSimValues({});
       setHasChanges(false);
       return;
     }
@@ -248,8 +315,13 @@ const ModularBOQTemplatePage: React.FC = () => {
       api.getModelTypeDimensions(selectedSlug),
       api.getModularBOQVariables(selectedSlug),
     ]).then(([dims, vars]) => {
-      setTypeDimensions((Array.isArray(dims) ? dims : []) as ModelTypeDimension[]);
+      const d = (Array.isArray(dims) ? dims : []) as ModelTypeDimension[];
+      setTypeDimensions(d);
       setTypeVariables((Array.isArray(vars) ? vars : []) as ModularVariable[]);
+      // Init simulator with default values
+      const init: Record<string, number> = {};
+      for (const dim of d) init[dim.slug] = Number(dim.default_value ?? 0);
+      setSimValues(init);
     }).catch(() => {});
     loadTemplates(selectedSlug);
   }, [selectedSlug]);
@@ -496,7 +568,16 @@ const ModularBOQTemplatePage: React.FC = () => {
                 className="h-8 text-sm w-full rounded-md border border-input px-2 bg-white"
               >
                 <option value="">— saisir manuellement —</option>
-                {PRICE_LIST_OPTIONS.map(p => <option key={p} value={p}>{p}</option>)}
+                {priceList.length > 0
+                  ? priceList.map(p => (
+                      <option key={p.name} value={p.name}>
+                        {p.name} — {p.unit_price.toLocaleString('fr-MU', { maximumFractionDigits: 0 })} Rs
+                      </option>
+                    ))
+                  : PRICE_LIST_OPTIONS.map(p => (
+                      <option key={p} value={p}>{p}</option>
+                    ))
+                }
               </select>
             </div>
             <div>
@@ -524,14 +605,26 @@ const ModularBOQTemplatePage: React.FC = () => {
       );
     }
 
+    const computed = computeLine(line);
     return (
-      <div key={lineIndex} className="flex items-center gap-2 py-1 px-2 hover:bg-gray-50 rounded group">
+      <div key={lineIndex} className="flex items-center gap-2 py-1.5 px-2 hover:bg-gray-50 rounded group">
         <span className="font-mono text-xs text-gray-400 w-6">{lineIndex + 1}.</span>
-        <span className="flex-1 text-sm">{line.description}</span>
-        <span className="text-xs font-mono text-blue-600 hidden sm:block">{line.quantity_formula}</span>
-        <Badge variant="outline" className="text-xs hidden md:inline-flex">{line.unit}</Badge>
-        {line.price_list_name && (
-          <span className="text-xs text-gray-500 hidden lg:block max-w-[200px] truncate">{line.price_list_name}</span>
+        <span className="flex-1 text-sm min-w-0 truncate">{line.description}</span>
+        {computed ? (
+          <>
+            <span className="text-xs font-mono text-green-700 w-14 text-right shrink-0">{computed.qty % 1 === 0 ? computed.qty : computed.qty.toFixed(2)}</span>
+            <Badge variant="outline" className="text-xs shrink-0">{line.unit}</Badge>
+            <span className="text-xs font-mono text-gray-600 w-20 text-right shrink-0">{computed.unitCost.toLocaleString('fr-MU', { maximumFractionDigits: 0 })} Rs</span>
+            <span className="text-xs font-bold text-orange-700 w-24 text-right shrink-0">{computed.totalHT.toLocaleString('fr-MU', { maximumFractionDigits: 0 })} Rs</span>
+          </>
+        ) : (
+          <>
+            <span className="text-xs font-mono text-blue-600 hidden sm:block">{line.quantity_formula}</span>
+            <Badge variant="outline" className="text-xs hidden md:inline-flex">{line.unit}</Badge>
+            {line.price_list_name && (
+              <span className="text-xs text-gray-500 hidden lg:block max-w-[200px] truncate">{line.price_list_name}</span>
+            )}
+          </>
         )}
         <div className="flex gap-1 opacity-0 group-hover:opacity-100">
           <Button
@@ -740,6 +833,134 @@ const ModularBOQTemplatePage: React.FC = () => {
         <p className="text-center text-muted-foreground py-12">Chargement…</p>
       ) : (
         <>
+      {/* ── Simulator card ─────────────────────────────────────── */}
+      {typeDimensions.length > 0 && (
+        <Card className="border-green-200 bg-green-50">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2 text-green-800">
+              <Calculator className="h-4 w-4" />
+              Simulateur de calcul BOQ
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Dimension inputs */}
+            <div
+              className="grid gap-3"
+              style={{ gridTemplateColumns: `repeat(${Math.min(typeDimensions.length, 4)}, minmax(0, 1fr))` }}
+            >
+              {[...typeDimensions].sort((a, b) => a.display_order - b.display_order).map(dim => (
+                <div key={dim.slug} className="space-y-1">
+                  <Label className="text-xs text-green-700">
+                    {dim.label}{dim.unit ? ` (${dim.unit})` : ''}
+                  </Label>
+                  <Input
+                    type="number"
+                    min={dim.min_value}
+                    max={dim.max_value}
+                    step={dim.step}
+                    value={simValues[dim.slug] ?? dim.default_value ?? 0}
+                    onChange={e => {
+                      const v = parseFloat(e.target.value);
+                      setSimValues(prev => ({ ...prev, [dim.slug]: isNaN(v) ? 0 : v }));
+                    }}
+                    className="h-8 text-sm bg-white"
+                  />
+                </div>
+              ))}
+            </div>
+
+            {/* Computed variables */}
+            {simVarContext && typeVariables.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {[...typeVariables].sort((a, b) => a.display_order - b.display_order).map(v => (
+                  <div key={v.name} className="bg-white border border-green-200 rounded px-2 py-1 text-xs">
+                    <span className="font-mono text-green-700">{v.name}</span>
+                    <span className="text-gray-500 mx-1">=</span>
+                    <span className="font-bold text-green-900">
+                      {(() => {
+                        const val = simVarContext[v.name];
+                        return val === undefined ? '?' : (Number.isInteger(val) ? val : val.toFixed(2));
+                      })()}
+                      {v.unit ? <span className="ml-0.5 text-gray-500">{v.unit}</span> : null}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Full BOQ preview table */}
+            {simVarContext && (baseTemplate.length > 0 || optionsTemplate.length > 0) && (() => {
+              // Collect all lines with category heading
+              const allSections: Array<{ catName: string; isOption: boolean; lines: ModularBOQTemplateLine[] }> = [
+                ...[...baseTemplate].map(c => ({ catName: c.name, isOption: false, lines: c.lines })),
+                ...[...optionsTemplate].map(c => ({ catName: c.name, isOption: true, lines: c.lines })),
+              ];
+              let baseTotal = 0;
+              const rows: Array<{ desc: string; qty: number; unit: string; unitCost: number; totalHT: number; isOption: boolean; catName?: string }> = [];
+              for (const sec of allSections) {
+                let first = true;
+                for (const line of sec.lines) {
+                  const vals = computeLine(line);
+                  if (!vals) continue;
+                  rows.push({ desc: line.description, qty: vals.qty, unit: line.unit, unitCost: vals.unitCost, totalHT: vals.totalHT, isOption: sec.isOption, catName: first ? sec.catName : undefined });
+                  if (!sec.isOption) baseTotal += vals.totalHT;
+                  first = false;
+                }
+              }
+              if (rows.length === 0) return null;
+              const fmt = (n: number) => n.toLocaleString('fr-MU', { maximumFractionDigits: 0 });
+              return (
+                <div className="overflow-x-auto rounded-lg border border-green-200 bg-white">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-green-100 text-green-800">
+                        <th className="text-left px-3 py-2 font-medium">Description</th>
+                        <th className="text-right px-3 py-2 font-medium w-20">Qté</th>
+                        <th className="text-left px-3 py-2 font-medium w-16">Unité</th>
+                        <th className="text-right px-3 py-2 font-medium w-28">Coût HT</th>
+                        <th className="text-right px-3 py-2 font-medium w-28">Total HT</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((row, i) => (
+                        <React.Fragment key={i}>
+                          {row.catName && (
+                            <tr className="bg-gray-50">
+                              <td colSpan={5} className="px-3 py-1.5 text-xs font-semibold text-gray-600 uppercase tracking-wide">
+                                {row.catName}{row.isOption ? ' (Option)' : ''}
+                              </td>
+                            </tr>
+                          )}
+                          <tr className={row.isOption ? 'opacity-75' : ''}>
+                            <td className="px-3 py-1.5">{row.desc}</td>
+                            <td className="text-right px-3 py-1.5 font-mono text-green-700">{row.qty % 1 === 0 ? row.qty : row.qty.toFixed(2)}</td>
+                            <td className="px-3 py-1.5 text-gray-500">{row.unit}</td>
+                            <td className="text-right px-3 py-1.5 font-mono text-gray-600">{fmt(row.unitCost)} Rs</td>
+                            <td className="text-right px-3 py-1.5 font-mono font-medium text-orange-700">{fmt(row.totalHT)} Rs</td>
+                          </tr>
+                        </React.Fragment>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t-2 border-green-300 bg-green-50">
+                        <td colSpan={4} className="px-3 py-2 font-bold text-green-900">Total BOQ (Base HT)</td>
+                        <td className="text-right px-3 py-2 font-bold text-orange-700 text-base">{fmt(baseTotal)} Rs</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              );
+            })()}
+
+            {!simVarContext && (
+              <p className="text-xs text-green-700 italic">
+                Renseignez les dimensions ci-dessus pour voir le calcul BOQ.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {/* Base template */}
       <Card>
         <CardHeader className="pb-3">
