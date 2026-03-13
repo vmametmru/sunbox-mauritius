@@ -94,7 +94,6 @@ export default function ModularBOQVariablesPage() {
     api.getModelTypes(false).then((types: any) => {
       const t = (Array.isArray(types) ? types : []) as ModelType[];
       setCustomTypes(t);
-      if (t.length > 0) setSelectedSlug(t[0].slug);
     }).catch(() => {});
     loadVariables();
   }, []);
