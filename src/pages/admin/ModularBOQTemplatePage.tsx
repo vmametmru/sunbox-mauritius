@@ -37,6 +37,7 @@ import {
   evaluateModularVariables,
   ModularBOQTemplateCategory,
   ModularBOQTemplateLine,
+  ModularBOQTemplateSubcategory,
   type ModularVariable,
 } from '@/lib/modular-formulas';
 import { evaluateFormula } from '@/lib/pool-formulas';
@@ -214,6 +215,7 @@ const ModularBOQTemplatePage: React.FC = () => {
     type: 'base' | 'options';
     catIndex: number;
     lineIndex: number;
+    subIndex?: number;
   } | null>(null);
   const [editForm, setEditForm] = useState<Partial<ModularBOQTemplateLine>>({});
   const [formulaError, setFormulaError] = useState<string | null>(null);
@@ -221,6 +223,10 @@ const ModularBOQTemplatePage: React.FC = () => {
   // Inline rename state for categories
   const [renamingCat, setRenamingCat] = useState<{ type: 'base' | 'options'; catIndex: number } | null>(null);
   const [renameCatValue, setRenameCatValue] = useState('');
+
+  // Inline rename state for subcategories
+  const [renamingSubcat, setRenamingSubcat] = useState<{ type: 'base' | 'options'; catIndex: number; subIndex: number } | null>(null);
+  const [renameSubcatValue, setRenameSubcatValue] = useState('');
 
   // ── Simulator state ──
   const [simValues, setSimValues] = useState<Record<string, number>>({});
@@ -292,6 +298,26 @@ const ModularBOQTemplatePage: React.FC = () => {
     }).catch(() => {});
   }, []);
 
+  /* Navigation guard – beforeunload */
+  useEffect(() => {
+    if (!hasChanges) return;
+    const handler = (e: BeforeUnloadEvent) => { e.returnValue = ''; };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [hasChanges]);
+
+  /* Navigation guard – hashchange */
+  useEffect(() => {
+    if (!hasChanges) return;
+    const handler = (e: HashChangeEvent) => {
+      if (!window.confirm('Vous avez des modifications non sauvegardées dans le modèle BOQ. Quitter quand même ?')) {
+        history.replaceState(null, '', e.oldURL.replace(/^[^#]*/, ''));
+      }
+    };
+    window.addEventListener('hashchange', handler);
+    return () => window.removeEventListener('hashchange', handler);
+  }, [hasChanges]);
+
   /* Load custom types on mount */
   useEffect(() => {
     api.getModelTypes(false).then((types: any) => {
@@ -333,6 +359,7 @@ const ModularBOQTemplatePage: React.FC = () => {
     setEditingLine(null);
     setEditForm({});
     setRenamingCat(null);
+    setRenamingSubcat(null);
     try {
       const { base, options } = await loadModularTemplateFromDB(typeSlug);
       if (base && base.length > 0) {
@@ -385,6 +412,7 @@ const ModularBOQTemplatePage: React.FC = () => {
     setEditingLine(null);
     setEditForm({});
     setRenamingCat(null);
+    setRenamingSubcat(null);
     setHasChanges(true);
     toast({ title: 'Réinitialisé', description: 'Modèle remis à vide. Sauvegardez pour persister.' });
   };
@@ -441,8 +469,9 @@ const ModularBOQTemplatePage: React.FC = () => {
     catIndex: number,
     lineIndex: number,
     line: ModularBOQTemplateLine,
+    subIndex?: number,
   ) => {
-    setEditingLine({ type, catIndex, lineIndex });
+    setEditingLine({ type, catIndex, lineIndex, subIndex });
     setEditForm({ ...line });
     setFormulaError(null);
   };
@@ -464,23 +493,27 @@ const ModularBOQTemplatePage: React.FC = () => {
       }
     }
     setFormulaError(null);
-    const { type, catIndex, lineIndex } = editingLine;
+    const { type, catIndex, lineIndex, subIndex } = editingLine;
     const setter = type === 'base' ? setBaseTemplate : setOptionsTemplate;
     setter(prev => prev.map((cat, ci) => {
       if (ci !== catIndex) return cat;
+      const updatedLine = (line: ModularBOQTemplateLine) => ({
+        ...line,
+        description: editForm.description ?? line.description,
+        quantity_formula: editForm.quantity_formula ?? line.quantity_formula,
+        unit: editForm.unit ?? line.unit,
+        price_list_name: editForm.price_list_name ?? line.price_list_name,
+        margin_percent: editForm.margin_percent ?? line.margin_percent,
+        qty_editable: editForm.qty_editable ?? line.qty_editable ?? false,
+      });
+      if (subIndex === undefined) {
+        return { ...cat, lines: cat.lines.map((line, li) => li === lineIndex ? updatedLine(line) : line) };
+      }
       return {
         ...cat,
-        lines: cat.lines.map((line, li) => {
-          if (li !== lineIndex) return line;
-          return {
-            ...line,
-            description: editForm.description ?? line.description,
-            quantity_formula: editForm.quantity_formula ?? line.quantity_formula,
-            unit: editForm.unit ?? line.unit,
-            price_list_name: editForm.price_list_name ?? line.price_list_name,
-            margin_percent: editForm.margin_percent ?? line.margin_percent,
-          };
-        }),
+        subcategories: (cat.subcategories ?? []).map((sub, si) =>
+          si !== subIndex ? sub : { ...sub, lines: sub.lines.map((line, li) => li === lineIndex ? updatedLine(line) : line) }
+        ),
       };
     }));
     setHasChanges(true);
@@ -488,12 +521,21 @@ const ModularBOQTemplatePage: React.FC = () => {
     setEditForm({});
   };
 
-  const deleteLine = (type: 'base' | 'options', catIndex: number, lineIndex: number) => {
+  const deleteLine = (type: 'base' | 'options', catIndex: number, lineIndex: number, subIndex?: number) => {
     if (!confirm('Supprimer cette ligne du modèle ?')) return;
     const setter = type === 'base' ? setBaseTemplate : setOptionsTemplate;
-    setter(prev => prev.map((cat, ci) =>
-      ci !== catIndex ? cat : { ...cat, lines: cat.lines.filter((_, li) => li !== lineIndex) }
-    ));
+    setter(prev => prev.map((cat, ci) => {
+      if (ci !== catIndex) return cat;
+      if (subIndex === undefined) {
+        return { ...cat, lines: cat.lines.filter((_, li) => li !== lineIndex) };
+      }
+      return {
+        ...cat,
+        subcategories: (cat.subcategories ?? []).map((sub, si) =>
+          si !== subIndex ? sub : { ...sub, lines: sub.lines.filter((_, li) => li !== lineIndex) }
+        ),
+      };
+    }));
     setHasChanges(true);
   };
 
@@ -507,10 +549,112 @@ const ModularBOQTemplatePage: React.FC = () => {
       price_list_name: '',
       margin_percent: 10,
       display_order: 1,
+      qty_editable: false,
     };
     const setter = type === 'base' ? setBaseTemplate : setOptionsTemplate;
     setter(prev => prev.map((cat, ci) =>
       ci !== catIndex ? cat : { ...cat, lines: [...cat.lines, newLine] }
+    ));
+    setHasChanges(true);
+  };
+
+  /* ======================================================
+     SUBCATEGORY OPERATIONS
+  ====================================================== */
+  const addSubcategory = (type: 'base' | 'options', catIndex: number) => {
+    const setter = type === 'base' ? setBaseTemplate : setOptionsTemplate;
+    setter(prev => prev.map((cat, ci) => {
+      if (ci !== catIndex) return cat;
+      const existing = cat.subcategories ?? [];
+      const newSub: ModularBOQTemplateSubcategory = {
+        id: `sub_${Date.now()}`,
+        name: 'Nouvelle sous-catégorie',
+        is_option: type === 'options',
+        qty_editable: false,
+        display_order: existing.length + 1,
+        lines: [],
+      };
+      return { ...cat, subcategories: [...existing, newSub] };
+    }));
+    setHasChanges(true);
+  };
+
+  const deleteSubcategory = (type: 'base' | 'options', catIndex: number, subIndex: number) => {
+    if (!confirm('Supprimer cette sous-catégorie et toutes ses lignes ?')) return;
+    const setter = type === 'base' ? setBaseTemplate : setOptionsTemplate;
+    setter(prev => prev.map((cat, ci) =>
+      ci !== catIndex ? cat : { ...cat, subcategories: (cat.subcategories ?? []).filter((_, si) => si !== subIndex) }
+    ));
+    setHasChanges(true);
+  };
+
+  const startRenameSubcategory = (type: 'base' | 'options', catIndex: number, subIndex: number, name: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setRenamingSubcat({ type, catIndex, subIndex });
+    setRenameSubcatValue(name);
+  };
+
+  const applyRenameSubcategory = () => {
+    if (!renamingSubcat) return;
+    const { type, catIndex, subIndex } = renamingSubcat;
+    const setter = type === 'base' ? setBaseTemplate : setOptionsTemplate;
+    setter(prev => prev.map((cat, ci) =>
+      ci !== catIndex ? cat : {
+        ...cat,
+        subcategories: (cat.subcategories ?? []).map((sub, si) =>
+          si !== subIndex ? sub : { ...sub, name: renameSubcatValue }
+        ),
+      }
+    ));
+    setRenamingSubcat(null);
+    setHasChanges(true);
+  };
+
+  const addLineToSubcategory = (type: 'base' | 'options', catIndex: number, subIndex: number) => {
+    const newLine: ModularBOQTemplateLine = {
+      id: `line_${Date.now()}`,
+      description: 'Nouvelle ligne',
+      quantity_formula: '1',
+      unit: 'unité',
+      unit_cost_formula: '0',
+      price_list_name: '',
+      margin_percent: 10,
+      display_order: 1,
+      qty_editable: false,
+    };
+    const setter = type === 'base' ? setBaseTemplate : setOptionsTemplate;
+    setter(prev => prev.map((cat, ci) =>
+      ci !== catIndex ? cat : {
+        ...cat,
+        subcategories: (cat.subcategories ?? []).map((sub, si) =>
+          si !== subIndex ? sub : { ...sub, lines: [...sub.lines, newLine] }
+        ),
+      }
+    ));
+    setHasChanges(true);
+  };
+
+  const deleteLineFromSubcategory = (type: 'base' | 'options', catIndex: number, subIndex: number, lineIndex: number) => {
+    deleteLine(type, catIndex, lineIndex, subIndex);
+  };
+
+  const toggleCategoryQtyEditable = (type: 'base' | 'options', catIndex: number) => {
+    const setter = type === 'base' ? setBaseTemplate : setOptionsTemplate;
+    setter(prev => prev.map((cat, ci) =>
+      ci !== catIndex ? cat : { ...cat, qty_editable: !cat.qty_editable }
+    ));
+    setHasChanges(true);
+  };
+
+  const toggleSubcatQtyEditable = (type: 'base' | 'options', catIndex: number, subIndex: number) => {
+    const setter = type === 'base' ? setBaseTemplate : setOptionsTemplate;
+    setter(prev => prev.map((cat, ci) =>
+      ci !== catIndex ? cat : {
+        ...cat,
+        subcategories: (cat.subcategories ?? []).map((sub, si) =>
+          si !== subIndex ? sub : { ...sub, qty_editable: !sub.qty_editable }
+        ),
+      }
     ));
     setHasChanges(true);
   };
@@ -523,11 +667,13 @@ const ModularBOQTemplatePage: React.FC = () => {
     lineIndex: number,
     type: 'base' | 'options',
     catIndex: number,
+    subIndex?: number,
   ) => {
     const isEditing =
       editingLine?.type === type &&
       editingLine.catIndex === catIndex &&
-      editingLine.lineIndex === lineIndex;
+      editingLine.lineIndex === lineIndex &&
+      editingLine.subIndex === subIndex;
 
     if (isEditing) {
       return (
@@ -594,6 +740,20 @@ const ModularBOQTemplatePage: React.FC = () => {
               />
             </div>
           </div>
+          {type === 'options' && (
+            <div className="flex items-center gap-2 ml-10">
+              <input
+                type="checkbox"
+                id={`qty_editable_${catIndex}_${subIndex ?? 'x'}_${lineIndex}`}
+                checked={editForm.qty_editable ?? false}
+                onChange={e => setEditForm(prev => ({ ...prev, qty_editable: e.target.checked }))}
+                className="h-4 w-4"
+              />
+              <Label htmlFor={`qty_editable_${catIndex}_${subIndex ?? 'x'}_${lineIndex}`} className="text-xs cursor-pointer">
+                Qté Réglable
+              </Label>
+            </div>
+          )}
           <div className="flex gap-2 ml-10">
             <Button size="sm" onClick={applyEdit} className="h-7 px-3 bg-blue-600 hover:bg-blue-700 text-white">
               <Check className="h-3 w-3 mr-1" />OK
@@ -611,6 +771,9 @@ const ModularBOQTemplatePage: React.FC = () => {
       <div key={lineIndex} className="flex items-center gap-2 py-1.5 px-2 hover:bg-gray-50 rounded group">
         <span className="font-mono text-xs text-gray-400 w-6">{lineIndex + 1}.</span>
         <span className="flex-1 text-sm min-w-0 truncate">{line.description}</span>
+        {type === 'options' && line.qty_editable && (
+          <Badge className="text-xs bg-green-100 text-green-800 hover:bg-green-100 shrink-0">Qté ✓</Badge>
+        )}
         {computed ? (
           <>
             <span className="text-xs font-mono text-green-700 w-14 text-right shrink-0">{computed.qty % 1 === 0 ? computed.qty : computed.qty.toFixed(2)}</span>
@@ -633,7 +796,7 @@ const ModularBOQTemplatePage: React.FC = () => {
             variant="ghost"
             size="icon"
             className="h-6 w-6"
-            onClick={() => startEditLine(type, catIndex, lineIndex, line)}
+            onClick={() => startEditLine(type, catIndex, lineIndex, line, subIndex)}
           >
             <Edit className="h-3 w-3" />
           </Button>
@@ -641,7 +804,10 @@ const ModularBOQTemplatePage: React.FC = () => {
             variant="ghost"
             size="icon"
             className="h-6 w-6 text-red-500"
-            onClick={() => deleteLine(type, catIndex, lineIndex)}
+            onClick={() => subIndex !== undefined
+              ? deleteLineFromSubcategory(type, catIndex, subIndex, lineIndex)
+              : deleteLine(type, catIndex, lineIndex)
+            }
           >
             <Trash2 className="h-3 w-3" />
           </Button>
@@ -688,7 +854,15 @@ const ModularBOQTemplatePage: React.FC = () => {
               <span className="font-semibold flex-1">{cat.name}</span>
               <Badge variant="outline" className="text-xs">{cat.lines.length} lignes</Badge>
               {type === 'options' && (
-                <Badge className="text-xs bg-purple-100 text-purple-800 hover:bg-purple-100">Option</Badge>
+                <>
+                  <Badge className="text-xs bg-purple-100 text-purple-800 hover:bg-purple-100">Option</Badge>
+                  <Badge
+                    className={`text-xs cursor-pointer ${cat.qty_editable ? 'bg-green-100 text-green-800 hover:bg-green-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                    onClick={e => { e.stopPropagation(); toggleCategoryQtyEditable(type, catIndex); }}
+                  >
+                    Qté {cat.qty_editable ? '✓' : '—'}
+                  </Badge>
+                </>
               )}
               <div className="flex gap-1 ml-2" onClick={e => e.stopPropagation()}>
                 <Button
@@ -729,6 +903,93 @@ const ModularBOQTemplatePage: React.FC = () => {
               >
                 <Plus className="h-3 w-3 mr-1" />
                 Ajouter une ligne
+              </Button>
+            </div>
+
+            {(cat.subcategories ?? []).map((sub, si) => {
+              const isRenamingSub = renamingSubcat?.type === type && renamingSubcat.catIndex === catIndex && renamingSubcat.subIndex === si;
+              return (
+                <div key={si} className="ml-4 border-l-2 border-gray-200 pl-3 mt-3">
+                  <div className="flex items-center gap-2 py-1 group">
+                    {isRenamingSub ? (
+                      <div className="flex items-center gap-2 flex-1">
+                        <Input
+                          value={renameSubcatValue}
+                          onChange={e => setRenameSubcatValue(e.target.value)}
+                          className="h-7 text-sm flex-1"
+                          autoFocus
+                          onKeyDown={e => { if (e.key === 'Enter') applyRenameSubcategory(); else if (e.key === 'Escape') setRenamingSubcat(null); }}
+                        />
+                        <Button size="sm" onClick={applyRenameSubcategory} className="h-7 px-2 bg-green-600 hover:bg-green-700 text-white">
+                          <Check className="h-3 w-3" />
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => setRenamingSubcat(null)} className="h-7 px-2">
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <>
+                        <span className="font-medium text-sm flex-1">{sub.name}</span>
+                        <Badge variant="outline" className="text-xs">Sous-cat</Badge>
+                        {type === 'options' && (
+                          <Badge
+                            className={`text-xs cursor-pointer ${sub.qty_editable ? 'bg-green-100 text-green-800 hover:bg-green-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                            onClick={() => toggleSubcatQtyEditable(type, catIndex, si)}
+                          >
+                            Qté {sub.qty_editable ? '✓' : '—'}
+                          </Badge>
+                        )}
+                        <div className="flex gap-1 opacity-0 group-hover:opacity-100">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6"
+                            onClick={e => startRenameSubcategory(type, catIndex, si, sub.name, e)}
+                          >
+                            <Edit className="h-3 w-3" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 text-red-500"
+                            onClick={() => deleteSubcategory(type, catIndex, si)}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  <div className="space-y-1">
+                    {sub.lines.length === 0 && (
+                      <p className="text-xs text-muted-foreground italic ml-2">Aucune ligne</p>
+                    )}
+                    {sub.lines.map((line, li) => renderLine(line, li, type, catIndex, si))}
+                    <div className="pt-1">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => addLineToSubcategory(type, catIndex, si)}
+                      >
+                        <Plus className="h-3 w-3 mr-1" />
+                        Ajouter une ligne
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+
+            <div className="pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs gap-1"
+                onClick={() => addSubcategory(type, catIndex)}
+              >
+                <Plus className="h-3 w-3" />
+                Ajouter une sous-catégorie
               </Button>
             </div>
           </div>
@@ -893,10 +1154,19 @@ const ModularBOQTemplatePage: React.FC = () => {
             {/* Full BOQ preview table */}
             {simVarContext && (baseTemplate.length > 0 || optionsTemplate.length > 0) && (() => {
               // Collect all lines with category heading
-              const allSections: Array<{ catName: string; isOption: boolean; lines: ModularBOQTemplateLine[] }> = [
-                ...[...baseTemplate].map(c => ({ catName: c.name, isOption: false, lines: c.lines })),
-                ...[...optionsTemplate].map(c => ({ catName: c.name, isOption: true, lines: c.lines })),
-              ];
+              const allSections: Array<{ catName: string; isOption: boolean; lines: ModularBOQTemplateLine[] }> = [];
+              for (const c of baseTemplate) {
+                allSections.push({ catName: c.name, isOption: false, lines: c.lines });
+                for (const sub of c.subcategories ?? []) {
+                  allSections.push({ catName: sub.name, isOption: false, lines: sub.lines });
+                }
+              }
+              for (const c of optionsTemplate) {
+                allSections.push({ catName: c.name, isOption: true, lines: c.lines });
+                for (const sub of c.subcategories ?? []) {
+                  allSections.push({ catName: sub.name, isOption: true, lines: sub.lines });
+                }
+              }
               let baseTotal = 0;
               const rows: Array<{ desc: string; qty: number; unit: string; unitCost: number; costTotalHT: number; totalSaleHT: number; isOption: boolean; catName?: string }> = [];
               for (const sec of allSections) {
