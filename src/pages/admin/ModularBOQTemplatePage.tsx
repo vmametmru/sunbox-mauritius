@@ -638,27 +638,6 @@ const ModularBOQTemplatePage: React.FC = () => {
     deleteLine(type, catIndex, lineIndex, subIndex);
   };
 
-  const toggleCategoryQtyEditable = (type: 'base' | 'options', catIndex: number) => {
-    const setter = type === 'base' ? setBaseTemplate : setOptionsTemplate;
-    setter(prev => prev.map((cat, ci) =>
-      ci !== catIndex ? cat : { ...cat, qty_editable: !cat.qty_editable }
-    ));
-    setHasChanges(true);
-  };
-
-  const toggleSubcatQtyEditable = (type: 'base' | 'options', catIndex: number, subIndex: number) => {
-    const setter = type === 'base' ? setBaseTemplate : setOptionsTemplate;
-    setter(prev => prev.map((cat, ci) =>
-      ci !== catIndex ? cat : {
-        ...cat,
-        subcategories: (cat.subcategories ?? []).map((sub, si) =>
-          si !== subIndex ? sub : { ...sub, qty_editable: !sub.qty_editable }
-        ),
-      }
-    ));
-    setHasChanges(true);
-  };
-
   /* ======================================================
      RENDER HELPERS
   ====================================================== */
@@ -740,20 +719,6 @@ const ModularBOQTemplatePage: React.FC = () => {
               />
             </div>
           </div>
-          {type === 'options' && (
-            <div className="flex items-center gap-2 ml-10">
-              <input
-                type="checkbox"
-                id={`qty_editable_${catIndex}_${subIndex ?? 'x'}_${lineIndex}`}
-                checked={editForm.qty_editable ?? false}
-                onChange={e => setEditForm(prev => ({ ...prev, qty_editable: e.target.checked }))}
-                className="h-4 w-4"
-              />
-              <Label htmlFor={`qty_editable_${catIndex}_${subIndex ?? 'x'}_${lineIndex}`} className="text-xs cursor-pointer">
-                Qté Réglable
-              </Label>
-            </div>
-          )}
           <div className="flex gap-2 ml-10">
             <Button size="sm" onClick={applyEdit} className="h-7 px-3 bg-blue-600 hover:bg-blue-700 text-white">
               <Check className="h-3 w-3 mr-1" />OK
@@ -771,9 +736,6 @@ const ModularBOQTemplatePage: React.FC = () => {
       <div key={lineIndex} className="flex items-center gap-2 py-1.5 px-2 hover:bg-gray-50 rounded group">
         <span className="font-mono text-xs text-gray-400 w-6">{lineIndex + 1}.</span>
         <span className="flex-1 text-sm min-w-0 truncate">{line.description}</span>
-        {type === 'options' && line.qty_editable && (
-          <Badge className="text-xs bg-green-100 text-green-800 hover:bg-green-100 shrink-0">Qté ✓</Badge>
-        )}
         {computed ? (
           <>
             <span className="text-xs font-mono text-green-700 w-14 text-right shrink-0">{computed.qty % 1 === 0 ? computed.qty : computed.qty.toFixed(2)}</span>
@@ -856,12 +818,6 @@ const ModularBOQTemplatePage: React.FC = () => {
               {type === 'options' && (
                 <>
                   <Badge className="text-xs bg-purple-100 text-purple-800 hover:bg-purple-100">Option</Badge>
-                  <Badge
-                    className={`text-xs cursor-pointer ${cat.qty_editable ? 'bg-green-100 text-green-800 hover:bg-green-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-                    onClick={e => { e.stopPropagation(); toggleCategoryQtyEditable(type, catIndex); }}
-                  >
-                    Qté {cat.qty_editable ? '✓' : '—'}
-                  </Badge>
                 </>
               )}
               <div className="flex gap-1 ml-2" onClick={e => e.stopPropagation()}>
@@ -931,14 +887,6 @@ const ModularBOQTemplatePage: React.FC = () => {
                       <>
                         <span className="font-medium text-sm flex-1">{sub.name}</span>
                         <Badge variant="outline" className="text-xs">Sous-cat</Badge>
-                        {type === 'options' && (
-                          <Badge
-                            className={`text-xs cursor-pointer ${sub.qty_editable ? 'bg-green-100 text-green-800 hover:bg-green-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-                            onClick={() => toggleSubcatQtyEditable(type, catIndex, si)}
-                          >
-                            Qté {sub.qty_editable ? '✓' : '—'}
-                          </Badge>
-                        )}
                         <div className="flex gap-1 opacity-0 group-hover:opacity-100">
                           <Button
                             variant="ghost"

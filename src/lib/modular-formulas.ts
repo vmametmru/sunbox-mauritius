@@ -81,6 +81,7 @@ export interface ModularBOQTemplateLine {
   price_list_name: string;
   margin_percent: number;
   display_order: number;
+  qty_editable?: boolean;
 }
 
 export interface ModularBOQTemplateSubcategory {
