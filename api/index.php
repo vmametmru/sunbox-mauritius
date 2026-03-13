@@ -428,9 +428,19 @@ try {
                 }
             } catch (\Throwable $e) { /* ignore – table may already be populated */ }
 
-            // Add custom_dimensions JSON column to quotes and pro_quotes
-            $addCol('quotes',     'custom_dimensions', "JSON NULL DEFAULT NULL");
-            $addCol('pro_quotes', 'custom_dimensions', "JSON NULL DEFAULT NULL");
+            // Add custom_dimensions JSON column to quotes (always exists on Sunbox DB)
+            $addCol('quotes', 'custom_dimensions', "JSON NULL DEFAULT NULL");
+
+            // pro_quotes only exists on deployed pro-user sites, not on the main Sunbox DB.
+            // Guard with a table existence check to avoid SQLSTATE[42S02] on fresh installs.
+            $chkProQuotes = $db->prepare(
+                "SELECT COUNT(*) FROM information_schema.TABLES
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pro_quotes'"
+            );
+            $chkProQuotes->execute();
+            if ((bool)$chkProQuotes->fetchColumn()) {
+                $addCol('pro_quotes', 'custom_dimensions', "JSON NULL DEFAULT NULL");
+            }
 
             // ── Schema version table (always create / update) ─────────────────
             $db->exec("CREATE TABLE IF NOT EXISTS `db_schema_version` (
