@@ -30,8 +30,6 @@ import { api } from '@/lib/api';
 import type { ModelType, ModelTypeDimension } from '@/lib/api';
 import {
   clearSavedModularBOQTemplates,
-  getHardcodedModularBaseTemplate,
-  getHardcodedModularOptionsTemplate,
   loadModularTemplateFromDB,
   saveModularTemplateToDB,
   validateFormulaSyntax,
@@ -44,14 +42,6 @@ import {
    Autocomplete constants
 ====================================================== */
 const FORMULA_FUNCTIONS = ['CEIL', 'FLOOR', 'ROUND', 'ROUNDUP', 'ROUNDDOWN', 'IF'];
-
-const BASE_VARS = ['longueur', 'largeur', 'nombre_etages'];
-
-const COMMON_DERIVED_VARS = [
-  'surface_plancher_m2', 'surface_totale_m2', 'perimetre_m',
-  'hauteur_etage_m', 'hauteur_totale_m', 'surface_murs_m2',
-  'surface_toiture_m2', 'volume_m3', 'nb_portes', 'nb_fenetres',
-];
 
 const PRICE_LIST_OPTIONS = [
   "Main d'oeuvre Qualifiée (1 jour)",
