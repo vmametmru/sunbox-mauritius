@@ -679,7 +679,7 @@ export default function BOQPage() {
           description: line.description,
           quantity: 1,
           quantity_formula: line.quantity_formula || null,
-          unit: priceItem ? priceItem.unit : line.unit,
+          unit: line.unit,
           unit_cost_ht: priceItem ? priceItem.unit_price : 0,
           unit_cost_formula: null,
           price_list_id: priceItem ? priceItem.id : null,
@@ -1126,17 +1126,15 @@ export default function BOQPage() {
 
         {expandedCategories.includes(category.id) && (
           <CardContent className="pt-0">
-            {/* Parent category's own lines */}
+            {/* Parent category's own lines (shown whether or not subcategories exist) */}
             {!hasSubCategories && (
-              <>
-                <div className="mb-4">
-                  <Button size="sm" onClick={() => openNewLine(category.id)}>
-                    <Plus className="h-4 w-4 mr-1" /> Ajouter une ligne
-                  </Button>
-                </div>
-                {renderLinesTable(category.id)}
-              </>
+              <div className="mb-4">
+                <Button size="sm" onClick={() => openNewLine(category.id)}>
+                  <Plus className="h-4 w-4 mr-1" /> Ajouter une ligne
+                </Button>
+              </div>
             )}
+            {(!hasSubCategories || (categoryLines[category.id]?.length ?? 0) > 0) && renderLinesTable(category.id)}
 
             {/* Sub-categories */}
             {hasSubCategories && (
