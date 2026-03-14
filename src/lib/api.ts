@@ -264,6 +264,16 @@ export const api = {
   },
 
   /* =====================================================
+     GALLERY IMAGES (Public)
+  ===================================================== */
+  getGalleryImages(region?: string, proUserId?: number | null) {
+    const data: Record<string, any> = {};
+    if (region) data.region = region;
+    if (proUserId !== undefined && proUserId !== null) data.pro_user_id = proUserId;
+    return this.query('get_gallery_images', data);
+  },
+
+  /* =====================================================
      SUPPLIERS (Fournisseurs)
   ===================================================== */
   getSuppliers(activeOnly: boolean = true) {

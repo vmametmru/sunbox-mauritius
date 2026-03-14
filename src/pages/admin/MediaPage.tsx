@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
-import { Image, LayoutGrid, FileImage } from "lucide-react";
+import { Image, LayoutGrid, FileImage, Images } from "lucide-react";
 
 // Types
 interface ModelBrief {
@@ -52,6 +52,7 @@ function getMediaTypeLabel(mediaType: string): string {
     case 'plan': return 'Plan';
     case 'bandeau': return 'Bandeau';
     case 'category_image': return 'Catégorie';
+    case 'gallerie': return 'Galerie';
     default: return mediaType;
   }
 }
@@ -63,6 +64,7 @@ export default function MediaPage() {
   const bannerFileInputRef = React.useRef<HTMLInputElement>(null);
   const categoryFileInputRef = React.useRef<HTMLInputElement>(null);
   const modelFileInputRef = React.useRef<HTMLInputElement>(null);
+  const galleryFileInputRef = React.useRef<HTMLInputElement>(null);
 
   // Current tab
   const [activeTab, setActiveTab] = useState<string>("bandeau");
@@ -84,15 +86,25 @@ export default function MediaPage() {
   const [bannerImages, setBannerImages] = useState<ModelImageRow[]>([]);
   const [categoryImages, setCategoryImages] = useState<ModelImageRow[]>([]);
   const [modelImages, setModelImages] = useState<ModelImageRow[]>([]);
+  const [galleryImages, setGalleryImages] = useState<ModelImageRow[]>([]);
 
   // Loading states
   const [loadingBanner, setLoadingBanner] = useState(false);
   const [loadingCategory, setLoadingCategory] = useState(false);
   const [loadingModels, setLoadingModels] = useState(false);
+  const [loadingGallery, setLoadingGallery] = useState(false);
 
   // Model images filters
   const [filterModelId, setFilterModelId] = useState<string>("all");
   const [filterImageType, setFilterImageType] = useState<string>("all");
+
+  // Gallery upload & filter state
+  const [galleryFile, setGalleryFile] = useState<File | null>(null);
+  const [savingGallery, setSavingGallery] = useState(false);
+  const [galleryTitle, setGalleryTitle] = useState<string>("");
+  const [galleryDescription, setGalleryDescription] = useState<string>("");
+  const [galleryRegion, setGalleryRegion] = useState<string>("");
+  const [filterGalleryRegion, setFilterGalleryRegion] = useState<string>("all");
 
   const selectedModel = useMemo(() => models.find((m) => m.id === uploadModelId) || null, [models, uploadModelId]);
 
@@ -185,6 +197,31 @@ export default function MediaPage() {
     }
   }
 
+  async function loadGalleryImages() {
+    setLoadingGallery(true);
+    try {
+      let url = `/api/media.php?action=list_gallery_images`;
+      if (filterGalleryRegion !== "all") {
+        url += `&region=${encodeURIComponent(filterGalleryRegion)}`;
+      }
+      const r = await fetch(url, {
+        method: "GET",
+        credentials: "include",
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || j?.error) {
+        throw new Error(j?.error || `Erreur serveur: ${r.status}`);
+      }
+      const arr = j?.data?.items;
+      setGalleryImages(Array.isArray(arr) ? arr : []);
+    } catch (e: any) {
+      toast({ title: "Erreur", description: e?.message || "Erreur chargement galerie", variant: "destructive" });
+      setGalleryImages([]);
+    } finally {
+      setLoadingGallery(false);
+    }
+  }
+
   // ===============================
   // EFFECTS
   // ===============================
@@ -194,6 +231,7 @@ export default function MediaPage() {
     loadBannerImages();
     loadCategoryImages();
     loadModelImages();
+    loadGalleryImages();
   }, []);
 
   useEffect(() => {
@@ -204,6 +242,8 @@ export default function MediaPage() {
       loadCategoryImages();
     } else if (activeTab === "models") {
       loadModelImages();
+    } else if (activeTab === "gallerie") {
+      loadGalleryImages();
     }
   }, [activeTab]);
 
@@ -213,6 +253,13 @@ export default function MediaPage() {
       loadModelImages();
     }
   }, [filterModelId, filterImageType, activeTab]);
+
+  useEffect(() => {
+    // Reload gallery images when region filter changes
+    if (activeTab === "gallerie") {
+      loadGalleryImages();
+    }
+  }, [filterGalleryRegion, activeTab]);
 
   // ===============================
   // UPLOAD FUNCTIONS
@@ -312,6 +359,42 @@ export default function MediaPage() {
     }
   }
 
+  async function uploadGalleryImage(e: React.FormEvent) {
+    e.preventDefault();
+    if (!galleryFile || !galleryRegion) return;
+    setSavingGallery(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", galleryFile);
+      fd.append("media_type", "gallerie");
+      fd.append("region", galleryRegion);
+      if (galleryTitle.trim()) fd.append("title", galleryTitle.trim());
+      if (galleryDescription.trim()) fd.append("description", galleryDescription.trim());
+
+      const r = await fetch(`/api/media.php?action=model_upload&model_id=0`, {
+        method: "POST",
+        credentials: "include",
+        body: fd,
+      });
+
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j?.success) throw new Error(j?.error || "Upload failed");
+
+      setGalleryFile(null);
+      setGalleryTitle("");
+      setGalleryDescription("");
+      setGalleryRegion("");
+      if (galleryFileInputRef.current) galleryFileInputRef.current.value = '';
+
+      await loadGalleryImages();
+      toast({ title: "OK", description: "Image de galerie uploadée" });
+    } catch (e: any) {
+      toast({ title: "Erreur", description: e?.message || "Upload failed", variant: "destructive" });
+    } finally {
+      setSavingGallery(false);
+    }
+  }
+
   // ===============================
   // DELETE & SET PRIMARY
   // ===============================
@@ -405,11 +488,11 @@ export default function MediaPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold text-gray-900">Galerie Photos</h1>
-        <p className="text-gray-500 mt-1">Gérez les images du site : bandeaux, catégories d'options et modèles.</p>
+        <p className="text-gray-500 mt-1">Gérez les images du site : bandeaux, catégories d'options, modèles et galerie publique.</p>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-3 lg:w-auto lg:inline-flex">
+        <TabsList className="grid w-full grid-cols-4 lg:w-auto lg:inline-flex">
           <TabsTrigger value="bandeau" className="flex items-center gap-2">
             <Image className="h-4 w-4" />
             <span>Bandeau</span>
@@ -424,6 +507,11 @@ export default function MediaPage() {
             <FileImage className="h-4 w-4" />
             <span>Modèles</span>
             <Badge variant="secondary" className="ml-1">{modelImages.length}</Badge>
+          </TabsTrigger>
+          <TabsTrigger value="gallerie" className="flex items-center gap-2">
+            <Images className="h-4 w-4" />
+            <span>Galerie</span>
+            <Badge variant="secondary" className="ml-1">{galleryImages.length}</Badge>
           </TabsTrigger>
         </TabsList>
 
@@ -645,6 +733,133 @@ export default function MediaPage() {
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                   {modelImages.map((item) => renderImageCard(item, true, loadModelImages, true))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ===================== TAB: GALLERIE ===================== */}
+        <TabsContent value="gallerie" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Ajouter une photo à la galerie publique</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-gray-600 mb-4">
+                Ces images apparaissent dans la galerie publique du site, filtrables par région.
+              </p>
+              <form onSubmit={uploadGalleryImage}>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-end">
+                  <div>
+                    <label className="text-sm text-gray-600">Titre</label>
+                    <Input
+                      value={galleryTitle}
+                      onChange={(e) => setGalleryTitle(e.target.value)}
+                      placeholder="Titre de la photo"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm text-gray-600">Région *</label>
+                    <Select value={galleryRegion} onValueChange={setGalleryRegion}>
+                      <SelectTrigger><SelectValue placeholder="Choisir une région" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Nord">Nord</SelectItem>
+                        <SelectItem value="Sud">Sud</SelectItem>
+                        <SelectItem value="Est">Est</SelectItem>
+                        <SelectItem value="Ouest">Ouest</SelectItem>
+                        <SelectItem value="Centre">Centre</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <label className="text-sm text-gray-600">Fichier image *</label>
+                    <Input
+                      ref={galleryFileInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => setGalleryFile(e.target.files?.[0] || null)}
+                    />
+                  </div>
+                  <div className="md:col-span-2 lg:col-span-2">
+                    <label className="text-sm text-gray-600">Description</label>
+                    <Input
+                      value={galleryDescription}
+                      onChange={(e) => setGalleryDescription(e.target.value)}
+                      placeholder="Description (optionnel)"
+                    />
+                  </div>
+                  <div>
+                    <Button type="submit" disabled={savingGallery || !galleryFile || !galleryRegion} className="w-full bg-orange-500 hover:bg-orange-600">
+                      {savingGallery ? "Upload..." : "Uploader"}
+                    </Button>
+                  </div>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Photos de la galerie ({galleryImages.length})</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {/* Region filter */}
+              <div className="flex flex-wrap gap-4 mb-6">
+                <div>
+                  <label className="text-sm text-gray-600 block mb-1">Filtrer par région</label>
+                  <Select value={filterGalleryRegion} onValueChange={setFilterGalleryRegion}>
+                    <SelectTrigger className="w-48"><SelectValue placeholder="Toutes les régions" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Toutes les régions</SelectItem>
+                      <SelectItem value="Nord">Nord</SelectItem>
+                      <SelectItem value="Sud">Sud</SelectItem>
+                      <SelectItem value="Est">Est</SelectItem>
+                      <SelectItem value="Ouest">Ouest</SelectItem>
+                      <SelectItem value="Centre">Centre</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {loadingGallery ? (
+                <div className="text-center py-8 text-gray-500">Chargement...</div>
+              ) : galleryImages.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">Aucune photo dans la galerie.</div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {galleryImages.map((item) => {
+                    const img = item as any;
+                    return (
+                      <div key={item.id} className="border rounded-xl overflow-hidden bg-white shadow-sm hover:shadow-md transition-shadow">
+                        <div className="aspect-video bg-gray-100 relative">
+                          <img src={imgUrl(item.file_path)} alt={img.title || ''} className="w-full h-full object-cover" loading="lazy" />
+                          {img.region && (
+                            <div className="absolute top-2 left-2">
+                              <Badge className="bg-black/70 text-white">{img.region}</Badge>
+                            </div>
+                          )}
+                          <div className="absolute top-2 right-2">
+                            <Badge variant="secondary" className="capitalize">Galerie</Badge>
+                          </div>
+                        </div>
+                        <div className="p-3 space-y-2">
+                          {img.title && <p className="font-medium text-sm text-gray-800 truncate">{img.title}</p>}
+                          {img.description && <p className="text-xs text-gray-500 truncate">{img.description}</p>}
+                          <div className="flex flex-wrap gap-2 items-center">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-red-600 hover:bg-red-50"
+                              onClick={() => deleteImage(item.id, loadGalleryImages)}
+                            >
+                              Supprimer
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </CardContent>

@@ -11,7 +11,7 @@ define('PRO_DB_SCHEMA_VERSION', '1.8.0');
 
 // Sunbox main database schema version.
 // Increment when new tables or columns are added.
-define('SUNBOX_DB_SCHEMA_VERSION', '2.13.0');
+define('SUNBOX_DB_SCHEMA_VERSION', '2.14.0');
 
 $action = $_GET['action'] ?? '';
 $body   = getRequestBody();
@@ -469,6 +469,29 @@ try {
             // Add model_type_slug to modular_boq_templates
             $addCol('modular_boq_templates', 'model_type_slug', "VARCHAR(50) DEFAULT NULL AFTER `id`");
 
+            // ── v2.14.0 ── Gallery photos with region & pro-user ownership ───
+            // Expand media_type ENUM to include 'gallerie'
+            try {
+                $chkEnum = $db->prepare(
+                    "SELECT COLUMN_TYPE FROM information_schema.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'model_images' AND COLUMN_NAME = 'media_type'"
+                );
+                $chkEnum->execute();
+                $enumType = (string)$chkEnum->fetchColumn();
+                if (strpos($enumType, "'gallerie'") === false) {
+                    $db->exec("ALTER TABLE `model_images` MODIFY COLUMN `media_type`
+                        ENUM('photo','plan','bandeau','category_image','gallerie')
+                        CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'photo'");
+                    $messages[] = "ENUM étendu : model_images.media_type += 'gallerie'";
+                }
+            } catch (\Throwable $e) { $messages[] = "ENUM gallerie : " . $e->getMessage(); }
+
+            // Gallery metadata columns
+            $addCol('model_images', 'region',       "VARCHAR(20)  NULL DEFAULT NULL");
+            $addCol('model_images', 'title',        "VARCHAR(255) NULL DEFAULT NULL");
+            $addCol('model_images', 'description',  "TEXT          NULL DEFAULT NULL");
+            $addCol('model_images', 'pro_user_id',  "INT           NULL DEFAULT NULL");
+
             // ── Schema version table (always create / update) ─────────────────
             $db->exec("CREATE TABLE IF NOT EXISTS `db_schema_version` (
                 `id`         INT NOT NULL DEFAULT 1,
@@ -858,6 +881,45 @@ try {
                 return [
                     'id' => (int)$r['id'],
                     'url' => '/' . ltrim((string)$r['file_path'], '/'),
+                ];
+            }, $rows);
+            ok($data);
+            break;
+        }
+
+        // === GALLERY IMAGES (public)
+        case 'get_gallery_images': {
+            $region    = $body['region']      ?? null;
+            $proUserId = $body['pro_user_id'] ?? null;
+
+            $sql    = "SELECT id, file_path, region, title, description, pro_user_id, created_at
+                       FROM model_images WHERE media_type = 'gallerie'";
+            $params = [];
+
+            if ($region && in_array($region, ['Nord','Sud','Est','Ouest','Centre'], true)) {
+                $sql .= " AND region = ?";
+                $params[] = $region;
+            }
+            if ($proUserId !== null) {
+                $sql .= " AND pro_user_id = ?";
+                $params[] = (int)$proUserId;
+            } else {
+                $sql .= " AND (pro_user_id IS NULL OR pro_user_id = 0)";
+            }
+
+            $sql .= " ORDER BY id DESC";
+            $stmt = $db->prepare($sql);
+            $stmt->execute($params);
+            $rows = $stmt->fetchAll();
+            $data = array_map(function ($r) {
+                return [
+                    'id'          => (int)$r['id'],
+                    'url'         => '/' . ltrim((string)$r['file_path'], '/'),
+                    'region'      => $r['region'],
+                    'title'       => $r['title'],
+                    'description' => $r['description'],
+                    'pro_user_id' => $r['pro_user_id'] ? (int)$r['pro_user_id'] : null,
+                    'created_at'  => $r['created_at'],
                 ];
             }, $rows);
             ok($data);

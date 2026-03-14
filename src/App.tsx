@@ -17,6 +17,7 @@ import ConfigurePage from "./pages/ConfigurePage";
 import DetailsPage from "./pages/DetailsPage";
 import QuotePage from "./pages/QuotePage";
 import LegalPage from "./pages/LegalPage";
+import GalleryPage from "./pages/GalleryPage";
 import NotFound from "./pages/NotFound";
 import AdminLoginPage from "./pages/AdminLoginPage";
 import QuoteActionPage from "./pages/QuoteActionPage";
@@ -86,6 +87,7 @@ const App = () => (
               <Route path="/contact" element={<ContactPage />} />
               <Route path="/legal" element={<LegalPage />} />
               <Route path="/models" element={<ModelsPage />} />
+              <Route path="/gallery" element={<GalleryPage />} />
               <Route path="/configure" element={<ConfigurePage />} />
               <Route path="/details" element={<DetailsPage />} />
               <Route path="/quote" element={<QuotePage />} />

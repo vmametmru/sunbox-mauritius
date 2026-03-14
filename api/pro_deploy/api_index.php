@@ -1876,6 +1876,40 @@ try {
             break;
         }
 
+        // === GALLERY IMAGES (public, pro-site scoped)
+        case 'get_gallery_images': {
+            if (!SUNBOX_USER_ID) fail('SUNBOX_USER_ID non configuré.', 500);
+            $sdb    = getSunboxDB();
+            $region = $body['region'] ?? null;
+
+            $sql    = "SELECT id, file_path, region, title, description, pro_user_id, created_at
+                       FROM model_images WHERE media_type = 'gallerie' AND pro_user_id = ?";
+            $params = [(int)SUNBOX_USER_ID];
+
+            if ($region && in_array($region, ['Nord','Sud','Est','Ouest','Centre'], true)) {
+                $sql .= " AND region = ?";
+                $params[] = $region;
+            }
+
+            $sql .= " ORDER BY id DESC";
+            $stmt = $sdb->prepare($sql);
+            $stmt->execute($params);
+            $rows = $stmt->fetchAll();
+            $data = array_map(function ($r) {
+                return [
+                    'id'          => (int)$r['id'],
+                    'url'         => sunboxAbsUrl('/' . ltrim((string)$r['file_path'], '/')),
+                    'region'      => $r['region'],
+                    'title'       => $r['title'],
+                    'description' => $r['description'],
+                    'pro_user_id' => $r['pro_user_id'] ? (int)$r['pro_user_id'] : null,
+                    'created_at'  => $r['created_at'],
+                ];
+            }, $rows);
+            ok($data);
+            break;
+        }
+
         default:
             fail('Action inconnue.', 400);
     }
