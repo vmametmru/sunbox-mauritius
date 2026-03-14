@@ -16,7 +16,7 @@ declare(strict_types=1);
  */
 
 /** Deployed file version — must match PRO_FILE_VERSION in sunbox api/index.php. */
-define('PRO_FILE_VERSION', '2.9.7');
+define('PRO_FILE_VERSION', '2.9.8');
 
 /**
  * Parse a single .env file from disk, bypassing getenv() entirely.
