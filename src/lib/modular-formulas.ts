@@ -82,6 +82,8 @@ export interface ModularBOQTemplateLine {
   margin_percent: number;
   display_order: number;
   qty_editable?: boolean;
+  supplier_id?: number | null;
+  supplier_name?: string | null;
 }
 
 export interface ModularBOQTemplateSubcategory {

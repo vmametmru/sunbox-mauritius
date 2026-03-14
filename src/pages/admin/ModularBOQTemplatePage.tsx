@@ -194,8 +194,13 @@ const FormulaInput: React.FC<FormulaInputProps> = ({ value, onChange, extraVars 
 /* ======================================================
    COMPONENT
 ====================================================== */
+interface Supplier { id: number; name: string; }
+
 const ModularBOQTemplatePage: React.FC = () => {
   const { toast } = useToast();
+
+  /* ── Suppliers ── */
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
 
   /* ── Custom model types ── */
   const [customTypes, setCustomTypes]   = useState<ModelType[]>([]);
@@ -286,7 +291,7 @@ const ModularBOQTemplatePage: React.FC = () => {
     }
   }, [simVarContext, priceMap, resolvePrix]);
 
-  /* Load price list on mount */
+  /* Load price list and suppliers on mount */
   useEffect(() => {
     api.getModularBOQPriceList().then((data: any) => {
       if (Array.isArray(data)) {
@@ -295,6 +300,9 @@ const ModularBOQTemplatePage: React.FC = () => {
           unit_price: Number(item.unit_price ?? 0),
         })));
       }
+    }).catch(() => {});
+    api.getSuppliers(true).then((data: any) => {
+      if (Array.isArray(data)) setSuppliers(data);
     }).catch(() => {});
   }, []);
 
@@ -505,6 +513,10 @@ const ModularBOQTemplatePage: React.FC = () => {
         price_list_name: editForm.price_list_name ?? line.price_list_name,
         margin_percent: editForm.margin_percent ?? line.margin_percent,
         qty_editable: editForm.qty_editable ?? line.qty_editable ?? false,
+        supplier_id: 'supplier_id' in editForm ? editForm.supplier_id : line.supplier_id,
+        supplier_name: 'supplier_id' in editForm
+          ? (editForm.supplier_id != null ? (suppliers.find(s => s.id === editForm.supplier_id)?.name ?? null) : null)
+          : line.supplier_name,
       });
       if (subIndex === undefined) {
         return { ...cat, lines: cat.lines.map((line, li) => li === lineIndex ? updatedLine(line) : line) };
@@ -718,6 +730,22 @@ const ModularBOQTemplatePage: React.FC = () => {
                 className="h-8 text-sm"
               />
             </div>
+            <div>
+              <p className="text-xs text-gray-500 mb-1">Fournisseur</p>
+              <select
+                value={editForm.supplier_id != null ? String(editForm.supplier_id) : '_none'}
+                onChange={(e) => setEditForm(prev => ({
+                  ...prev,
+                  supplier_id: e.target.value === '_none' ? null : Number(e.target.value),
+                }))}
+                className="h-8 text-sm w-full rounded-md border border-input px-2 bg-white"
+              >
+                <option value="_none">— Aucun fournisseur —</option>
+                {suppliers.map(s => (
+                  <option key={s.id} value={String(s.id)}>{s.name}</option>
+                ))}
+              </select>
+            </div>
           </div>
           <div className="flex gap-2 ml-10">
             <Button size="sm" onClick={applyEdit} className="h-7 px-3 bg-blue-600 hover:bg-blue-700 text-white">
@@ -736,6 +764,9 @@ const ModularBOQTemplatePage: React.FC = () => {
       <div key={lineIndex} className="flex items-center gap-2 py-1.5 px-2 hover:bg-gray-50 rounded group">
         <span className="font-mono text-xs text-gray-400 w-6">{lineIndex + 1}.</span>
         <span className="flex-1 text-sm min-w-0 truncate">{line.description}</span>
+        {line.supplier_name && (
+          <Badge variant="outline" className="text-xs shrink-0 text-blue-700 border-blue-300 hidden md:inline-flex">{line.supplier_name}</Badge>
+        )}
         {computed ? (
           <>
             <span className="text-xs font-mono text-green-700 w-14 text-right shrink-0">{computed.qty % 1 === 0 ? computed.qty : computed.qty.toFixed(2)}</span>
