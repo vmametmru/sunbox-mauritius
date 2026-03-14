@@ -86,15 +86,86 @@ export const api = {
   },
 
   /* =====================================================
+     MODEL TYPES (admin-managed dynamic types)
+  ===================================================== */
+  getModelTypes(activeOnly: boolean = false) {
+    return this.query('get_model_types', { active_only: activeOnly });
+  },
+
+  createModelType(type: {
+    slug: string;
+    name: string;
+    description?: string;
+    icon_name?: string;
+    display_order?: number;
+    is_active?: boolean;
+  }) {
+    return this.query('create_model_type', type);
+  },
+
+  updateModelType(type: {
+    id: number;
+    name?: string;
+    description?: string;
+    icon_name?: string;
+    display_order?: number;
+    is_active?: boolean;
+  }) {
+    return this.query('update_model_type', type);
+  },
+
+  deleteModelType(id: number) {
+    return this.query('delete_model_type', { id });
+  },
+
+  /* =====================================================
+     MODEL TYPE DIMENSIONS (per-type configurable input dims)
+  ===================================================== */
+  getModelTypeDimensions(modelTypeSlug: string) {
+    return this.query('get_model_type_dimensions', { model_type_slug: modelTypeSlug });
+  },
+
+  createModelTypeDimension(dim: {
+    model_type_slug: string;
+    slug: string;
+    label: string;
+    unit?: string;
+    min_value?: number;
+    max_value?: number;
+    step?: number;
+    default_value?: number;
+    display_order?: number;
+  }) {
+    return this.query('create_model_type_dimension', dim);
+  },
+
+  updateModelTypeDimension(dim: {
+    id: number;
+    label?: string;
+    unit?: string;
+    min_value?: number;
+    max_value?: number;
+    step?: number;
+    default_value?: number;
+    display_order?: number;
+  }) {
+    return this.query('update_model_type_dimension', dim);
+  },
+
+  deleteModelTypeDimension(id: number) {
+    return this.query('delete_model_type_dimension', { id });
+  },
+
+  /* =====================================================
      MODELS (DB-DRIVEN ONLY)
   ===================================================== */
-  getModels(type?: 'container' | 'pool', activeOnly: boolean = true, includeBOQPrice: boolean = true) {
+  getModels(type?: string, activeOnly: boolean = true, includeBOQPrice: boolean = true) {
     return this.query('get_models', { type, active_only: activeOnly, include_boq_price: includeBOQPrice });
   },
 
   createModel(model: {
     name: string;
-    type: 'container' | 'pool';
+    type: string;
     description?: string;
     base_price: number;
     unforeseen_cost_percent?: number;
@@ -105,6 +176,9 @@ export const api = {
     container_40ft_count?: number;
     pool_shape?: string;
     has_overflow?: boolean;
+    modular_longueur?: number | null;
+    modular_largeur?: number | null;
+    modular_nb_etages?: number | null;
     image_url?: string;
     is_active?: boolean;
     display_order?: number;
@@ -115,7 +189,7 @@ export const api = {
   updateModel(model: {
     id: number;
     name?: string;
-    type?: 'container' | 'pool';
+    type?: string;
     description?: string;
     base_price?: number;
     unforeseen_cost_percent?: number;
@@ -126,6 +200,9 @@ export const api = {
     container_40ft_count?: number;
     pool_shape?: string;
     has_overflow?: boolean;
+    modular_longueur?: number | null;
+    modular_largeur?: number | null;
+    modular_nb_etages?: number | null;
     image_url?: string;
     is_active?: boolean;
     display_order?: number;
@@ -356,7 +433,7 @@ export const api = {
   createQuote(quote: {
     model_id: number;
     model_name: string;
-    model_type: 'container' | 'pool';
+    model_type: string;
     base_price: number;
     options_total: number;
     total_price: number;
@@ -366,7 +443,30 @@ export const api = {
     customer_address?: string;
     customer_message?: string;
     device_id?: string;
-    selected_options?: Array<{ option_id: number; option_name: string; option_price: number }>;
+    selected_options?: Array<{ option_id: number; option_name: string; option_price: number; quantity?: number }>;
+    // Pool dimensions
+    pool_shape?: string;
+    pool_longueur?: number | null;
+    pool_largeur?: number | null;
+    pool_profondeur?: number | null;
+    pool_longueur_la?: number | null;
+    pool_largeur_la?: number | null;
+    pool_profondeur_la?: number | null;
+    pool_longueur_lb?: number | null;
+    pool_largeur_lb?: number | null;
+    pool_profondeur_lb?: number | null;
+    pool_longueur_ta?: number | null;
+    pool_largeur_ta?: number | null;
+    pool_profondeur_ta?: number | null;
+    pool_longueur_tb?: number | null;
+    pool_largeur_tb?: number | null;
+    pool_profondeur_tb?: number | null;
+    // Custom type dimensions (backward compat legacy columns)
+    modular_longueur?: number | null;
+    modular_largeur?: number | null;
+    modular_nb_etages?: number | null;
+    // Generic custom dimensions (slug → value) for all admin-created types
+    custom_dimensions?: Record<string, number> | null;
   }) {
     return this.query('create_quote', quote);
   },
@@ -870,6 +970,118 @@ export const api = {
   },
 
   /* =====================================================
+     MODULAR BOQ VARIABLES
+  ===================================================== */
+  getModularBOQVariables(modelTypeSlug?: string) {
+    return this.query('get_modular_boq_variables', modelTypeSlug ? { model_type_slug: modelTypeSlug } : {});
+  },
+
+  createModularBOQVariable(variable: {
+    name: string;
+    label: string;
+    unit?: string;
+    formula: string;
+    display_order?: number;
+    model_type_slug?: string;
+  }) {
+    return this.query('create_modular_boq_variable', variable);
+  },
+
+  updateModularBOQVariable(variable: {
+    id: number;
+    name: string;
+    label: string;
+    unit?: string;
+    formula: string;
+    display_order?: number;
+    model_type_slug?: string;
+  }) {
+    return this.query('update_modular_boq_variable', variable);
+  },
+
+  deleteModularBOQVariable(id: number) {
+    return this.query('delete_modular_boq_variable', { id });
+  },
+
+  /* =====================================================
+     MODULAR BOQ PRICE LIST
+  ===================================================== */
+  getModularBOQPriceList() {
+    return this.query('get_modular_boq_price_list');
+  },
+
+  createModularBOQPriceListItem(item: {
+    name: string;
+    unit?: string;
+    unit_price?: number;
+    has_vat?: boolean;
+    supplier_id?: number | null;
+    display_order?: number;
+  }) {
+    return this.query('create_modular_boq_price_list_item', item);
+  },
+
+  updateModularBOQPriceListItem(item: {
+    id: number;
+    name: string;
+    unit?: string;
+    unit_price?: number;
+    has_vat?: boolean;
+    supplier_id?: number | null;
+    display_order?: number;
+  }) {
+    return this.query('update_modular_boq_price_list_item', item);
+  },
+
+  deleteModularBOQPriceListItem(id: number) {
+    return this.query('delete_modular_boq_price_list_item', { id });
+  },
+
+  /* =====================================================
+     MODULAR BOQ TEMPLATES
+  ===================================================== */
+  getModularBOQTemplates(modelTypeSlug?: string) {
+    return this.query('get_modular_boq_templates', modelTypeSlug ? { model_type_slug: modelTypeSlug } : {});
+  },
+
+  createModularBOQTemplate(template: {
+    name: string;
+    description?: string;
+    is_default?: boolean;
+    template_data?: any;
+    model_type_slug?: string;
+  }) {
+    return this.query('create_modular_boq_template', template);
+  },
+
+  updateModularBOQTemplate(template: {
+    id: number;
+    name?: string;
+    description?: string;
+    is_default?: boolean;
+    template_data?: any;
+    model_type_slug?: string;
+  }) {
+    return this.query('update_modular_boq_template', template);
+  },
+
+  deleteModularBOQTemplate(id: number) {
+    return this.query('delete_modular_boq_template', { id });
+  },
+
+  getModularBOQTemplateById(id: number) {
+    return this.query('get_modular_boq_template_by_id', { id });
+  },
+
+  getDefaultModularBOQTemplateFromDB(modelTypeSlug?: string) {
+    return this.query('get_default_modular_boq_template', modelTypeSlug ? { model_type_slug: modelTypeSlug } : {});
+  },
+
+  getModularBOQFull(modelId: number) {
+    return this.query('get_modular_boq_full', { model_id: modelId });
+  },
+
+  /* =====================================================
      DISCOUNTS
   ===================================================== */
   getDiscounts() {
@@ -1099,4 +1311,29 @@ export interface ProTheme {
   footer_text_color: string;
   created_at?: string;
   updated_at?: string;
+}
+
+/** Configurable dimension for a custom model type (e.g. Longueur, Hauteur). */
+export interface ModelTypeDimension {
+  id: number;
+  model_type_slug: string;
+  slug: string;
+  label: string;
+  unit: string;
+  min_value: number;
+  max_value: number;
+  step: number;
+  default_value: number;
+  display_order: number;
+}
+
+/** Admin-managed custom model type. */
+export interface ModelType {
+  id: number;
+  slug: string;
+  name: string;
+  description: string | null;
+  icon_name: string;
+  display_order: number;
+  is_active: boolean;
 }

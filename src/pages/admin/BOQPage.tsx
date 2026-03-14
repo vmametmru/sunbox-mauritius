@@ -13,6 +13,7 @@ import {
   Settings,
   Image as ImageIcon,
   Waves,
+  Home,
   DollarSign,
   TrendingUp,
   Receipt,
@@ -63,6 +64,7 @@ import {
   type PoolDimensions,
   type PoolShape,
 } from '@/lib/pool-formulas';
+import { loadModularTemplateFromDB, type ModularBOQTemplateLine } from '@/lib/modular-formulas';
 
 const DEFAULT_MARGIN_PERCENT = 30;
 
@@ -72,7 +74,7 @@ const DEFAULT_MARGIN_PERCENT = 30;
 interface Model {
   id: number;
   name: string;
-  type: 'container' | 'pool';
+  type: string;
   pool_shape?: 'Rectangulaire' | 'L' | 'T';
   base_price: number;
   unforeseen_cost_percent: number;
@@ -209,6 +211,7 @@ export default function BOQPage() {
 
   const selectedModel = models.find(m => Number(m.id) === Number(selectedModelId));
   const isPoolModel = selectedModel?.type === 'pool';
+  const isCustomModel = selectedModel !== undefined && selectedModel.type !== 'pool' && selectedModel.type !== 'container';
   const poolShape = selectedModel?.pool_shape || 'Rectangulaire';
 
   // Calculate pool variable values
@@ -628,6 +631,123 @@ export default function BOQPage() {
   };
 
   /* ======================================================
+     GENERATE CUSTOM BOQ FROM MODULAR TEMPLATE
+  ====================================================== */
+  const generateCustomBOQ = async () => {
+    if (!selectedModelId || !isCustomModel || !selectedModel) return;
+    const confirmMessage = categories.length > 0
+      ? "ATTENTION: Des catégories existent déjà pour ce modèle.\n\nGénérer le BOQ va AJOUTER de nouvelles catégories et lignes (cela créera des DOUBLONS si vous avez déjà généré).\n\nPour éviter les doublons, réinitialisez d'abord le BOQ.\n\nContinuer ?"
+      : "Générer le BOQ à partir du modèle personnalisé ?\nCela va créer toutes les catégories, sous-catégories et lignes.";
+    if (!confirm(confirmMessage)) return;
+    try {
+      setSaving(true);
+
+      // Load modular price list to resolve price_list_name → unit_cost_ht + price_list_id
+      let customPriceMap: Record<string, { id: number; unit_price: number; unit: string }> = {};
+      try {
+        const customPriceData = await api.getModularBOQPriceList();
+        if (Array.isArray(customPriceData)) {
+          for (const p of customPriceData) {
+            customPriceMap[String(p.name)] = { id: Number(p.id), unit_price: Number(p.unit_price ?? 0), unit: String(p.unit ?? 'unité') };
+          }
+        }
+      } catch (priceErr: any) {
+        console.warn('Impossible de charger la liste de prix modulaire :', priceErr?.message ?? priceErr);
+      }
+
+      const { base: baseTemplate, options: optionsTemplate } = await loadModularTemplateFromDB(selectedModel.type);
+      if (!baseTemplate && !optionsTemplate) {
+        toast({
+          title: 'Aucun modèle BOQ',
+          description: `Aucun modèle BOQ personnalisé trouvé pour le type "${selectedModel.type}". Créez-en un dans "Modèle BOQ Personnalisé".`,
+          variant: 'destructive',
+        });
+        setSaving(false);
+        return;
+      }
+      const allTemplates = [
+        ...(baseTemplate ?? []),
+        ...(optionsTemplate ?? []),
+      ];
+      let createdCategories = 0;
+      let createdLines = 0;
+
+      const createLineFromTemplate = async (categoryId: number, line: ModularBOQTemplateLine, displayOrder: number) => {
+        const priceItem = line.price_list_name ? customPriceMap[line.price_list_name] : undefined;
+        await api.createBOQLine({
+          category_id: categoryId,
+          description: line.description,
+          quantity: 1,
+          quantity_formula: line.quantity_formula || null,
+          unit: line.unit,
+          unit_cost_ht: priceItem ? priceItem.unit_price : 0,
+          unit_cost_formula: null,
+          price_list_id: priceItem ? priceItem.id : null,
+          supplier_id: line.supplier_id ?? null,
+          margin_percent: line.margin_percent ?? DEFAULT_MARGIN_PERCENT,
+          display_order: displayOrder,
+        });
+        createdLines++;
+      };
+
+      for (const cat of allTemplates) {
+        const catResult = await api.createBOQCategory({
+          model_id: selectedModelId,
+          name: cat.name,
+          is_option: cat.is_option,
+          qty_editable: cat.qty_editable ?? false,
+          display_order: cat.display_order,
+          parent_id: null,
+        });
+        const parentCatId = catResult.id;
+        createdCategories++;
+        for (const [i, line] of cat.lines.entries()) {
+          await createLineFromTemplate(parentCatId, line, i + 1);
+        }
+        for (const subCat of (cat.subcategories ?? [])) {
+          const subCatResult = await api.createBOQCategory({
+            model_id: selectedModelId,
+            name: subCat.name,
+            is_option: cat.is_option,
+            qty_editable: subCat.qty_editable ?? false,
+            display_order: subCat.display_order,
+            parent_id: parentCatId,
+          });
+          const subCatId = subCatResult.id;
+          createdCategories++;
+          for (const [i, line] of subCat.lines.entries()) {
+            await createLineFromTemplate(subCatId, line, i + 1);
+          }
+        }
+      }
+
+      toast({
+        title: 'Succès',
+        description: `BOQ généré : ${createdCategories} catégories et ${createdLines} lignes créées`,
+      });
+
+      // Reload all categories and their lines in parallel so values display immediately
+      const loadedCategories = await api.getBOQCategories(selectedModelId);
+      const lineResults = await Promise.all(
+        loadedCategories.map((cat: any) =>
+          api.getBOQLines(cat.id)
+            .then((lines: any) => ({ id: cat.id, lines: Array.isArray(lines) ? lines : [] }))
+            .catch(() => ({ id: cat.id, lines: [] as any[] }))
+        )
+      );
+      const linesData: Record<number, any[]> = {};
+      for (const r of lineResults) linesData[r.id] = r.lines;
+      setCategories(loadedCategories);
+      setCategoryLines(linesData);
+      setExpandedCategories(loadedCategories.map((c: any) => c.id));
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  /* ======================================================
      EXPAND/COLLAPSE
   ====================================================== */
   const toggleCategory = (categoryId: number) => {
@@ -1006,17 +1126,15 @@ export default function BOQPage() {
 
         {expandedCategories.includes(category.id) && (
           <CardContent className="pt-0">
-            {/* Parent category's own lines */}
+            {/* Parent category's own lines (shown whether or not subcategories exist) */}
             {!hasSubCategories && (
-              <>
-                <div className="mb-4">
-                  <Button size="sm" onClick={() => openNewLine(category.id)}>
-                    <Plus className="h-4 w-4 mr-1" /> Ajouter une ligne
-                  </Button>
-                </div>
-                {renderLinesTable(category.id)}
-              </>
+              <div className="mb-4">
+                <Button size="sm" onClick={() => openNewLine(category.id)}>
+                  <Plus className="h-4 w-4 mr-1" /> Ajouter une ligne
+                </Button>
+              </div>
             )}
+            {(!hasSubCategories || (categoryLines[category.id]?.length ?? 0) > 0) && renderLinesTable(category.id)}
 
             {/* Sub-categories */}
             {hasSubCategories && (
@@ -1165,7 +1283,7 @@ export default function BOQPage() {
             <SelectContent>
               {models.map(m => (
                 <SelectItem key={m.id} value={String(m.id)}>
-                  {m.type === 'pool' ? '🏊 ' : '📦 '}{m.name}
+                  {m.type === 'pool' ? '🏊 ' : m.type === 'container' ? '📦 ' : '🏠 '}{m.name}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -1175,6 +1293,13 @@ export default function BOQPage() {
             <Badge className="bg-blue-100 text-blue-800 border-blue-300">
               <Waves className="h-3 w-3 mr-1" />
               Modèle Piscine
+            </Badge>
+          )}
+
+          {isCustomModel && (
+            <Badge className="bg-orange-100 text-orange-800 border-orange-300">
+              <Home className="h-3 w-3 mr-1" />
+              Modèle Personnalisé
             </Badge>
           )}
 
@@ -1193,6 +1318,16 @@ export default function BOQPage() {
               className="bg-blue-500 hover:bg-blue-600"
             >
               <Waves className="h-4 w-4 mr-2" /> {categories.length > 0 ? 'Régénérer BOQ Piscine' : 'Générer BOQ Piscine'}
+            </Button>
+          )}
+
+          {isCustomModel && (
+            <Button
+              onClick={generateCustomBOQ}
+              disabled={saving}
+              className="bg-orange-500 hover:bg-orange-600"
+            >
+              <Home className="h-4 w-4 mr-2" /> {categories.length > 0 ? 'Régénérer BOQ Personnalisé' : 'Générer BOQ Personnalisé'}
             </Button>
           )}
 
@@ -1690,6 +1825,15 @@ export default function BOQPage() {
                   className="bg-blue-500 hover:bg-blue-600"
                 >
                   <Waves className="h-4 w-4 mr-2" /> {saving ? 'Génération...' : 'Générer BOQ Piscine'}
+                </Button>
+              )}
+              {isCustomModel && (
+                <Button
+                  onClick={generateCustomBOQ}
+                  disabled={saving}
+                  className="bg-orange-500 hover:bg-orange-600"
+                >
+                  <Home className="h-4 w-4 mr-2" /> {saving ? 'Génération...' : 'Générer BOQ Personnalisé'}
                 </Button>
               )}
             </div>

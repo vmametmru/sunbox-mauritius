@@ -272,11 +272,11 @@ function parseAtom(s: ParserState): number {
     }
 
     // Variable lookup
-    if (name in s.context) return s.context[name];
+    if (name in s.context) return Number(s.context[name]);
     // Case-insensitive lookup
     const lower = name.toLowerCase();
     for (const key of Object.keys(s.context)) {
-      if (key.toLowerCase() === lower) return s.context[key];
+      if (key.toLowerCase() === lower) return Number(s.context[key]);
     }
     throw new Error(`Unknown variable: ${name}`);
   }

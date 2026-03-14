@@ -26,10 +26,20 @@ interface ActiveDiscount {
   model_ids?: number[];
 }
 
+interface ModelType {
+  id: number;
+  slug: string;
+  name: string;
+  description: string | null;
+  icon_name: string;
+  display_order: number;
+  is_active: boolean;
+}
+
 interface Model {
   id: number;
   name: string;
-  type: 'container' | 'pool';
+  type: string;
   description: string;
   base_price: number;
   calculated_base_price?: number; // BOQ-calculated price if available
@@ -49,7 +59,8 @@ interface Model {
 export default function ModelsPage() {
   const [models, setModels] = useState<Model[]>([]);
   const [allActiveDiscounts, setAllActiveDiscounts] = useState<ActiveDiscount[]>([]);
-  const [filterType, setFilterType] = useState<'all' | 'container' | 'pool'>('all');
+  const [filterType, setFilterType] = useState<string>('all');
+  const [customTypes, setCustomTypes] = useState<ModelType[]>([]);
   const [modalImage, setModalImage] = useState<string | null>(null);
   const [catalogMode, setCatalogMode] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
@@ -87,6 +98,10 @@ export default function ModelsPage() {
   };
 
   useEffect(() => {
+    // Read ?type= from URL to pre-select a filter
+    const urlType = new URLSearchParams(window.location.search).get('type');
+    if (urlType) setFilterType(urlType);
+
     api.getModels(undefined, true).then((data) => {
       // Pro site returns { models: [...], catalog_mode: bool, _error?: string, ... }
       // Sunbox site returns a plain array
@@ -113,6 +128,10 @@ export default function ModelsPage() {
     // Fetch all active discounts as fallback (in case server hasn't embedded them in get_models)
     api.getActiveDiscounts().then((data) => {
       setAllActiveDiscounts(Array.isArray(data) ? data : []);
+    }).catch(() => {});
+    // Load custom model types for dynamic filter buttons
+    api.getModelTypes(true).then((data) => {
+      setCustomTypes(Array.isArray(data) ? data : []);
     }).catch(() => {});
   }, []);
 
@@ -211,9 +230,9 @@ export default function ModelsPage() {
   return (
     <PublicLayout>
       <div className="max-w-6xl mx-auto px-4 py-12">
-        <h1 className="text-3xl font-bold mb-6 text-center">Nos Modèles</h1>
+        <h1 className="text-3xl font-bold mb-6 text-center">Nos Solutions</h1>
 
-        <div className="flex justify-center gap-4 mb-4">
+        <div className="flex flex-wrap justify-center gap-3 mb-4">
           <Button variant={filterType === 'all' ? 'default' : 'outline'} onClick={() => setFilterType('all')}>
             Tous
           </Button>
@@ -223,6 +242,15 @@ export default function ModelsPage() {
           <Button variant={filterType === 'pool' ? 'default' : 'outline'} onClick={() => setFilterType('pool')}>
             Piscines
           </Button>
+          {customTypes.map(ct => (
+            <Button
+              key={ct.slug}
+              variant={filterType === ct.slug ? 'default' : 'outline'}
+              onClick={() => setFilterType(ct.slug)}
+            >
+              {ct.name}
+            </Button>
+          ))}
         </div>
 
         {/* Price range filter */}
@@ -269,7 +297,8 @@ export default function ModelsPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filtered.map((model) => {
             const modelDiscounts = getModelDiscounts(model);
-            const discountedPrice = model.type !== 'pool'
+            const isBOQModel = model.type === 'pool' || (model.type !== 'container');
+            const discountedPrice = !isBOQModel
               ? getDiscountedBasePriceTTC(model, modelDiscounts)
               : null;
             const originalPriceTTC = getDisplayPriceTTC(model);
@@ -305,7 +334,11 @@ export default function ModelsPage() {
               <div className="p-4 space-y-1">
                 <h2 className="text-xl font-bold">{model.name}</h2>
                 <p className="text-gray-600 text-sm">
-                  {model.type === 'pool' ? 'Piscine en blocs BAB et béton armé' : `${model.surface_m2} m²`}
+                  {model.type === 'pool'
+                    ? 'Piscine en blocs BAB et béton armé'
+                    : model.type === 'container'
+                    ? `${model.surface_m2} m²`
+                    : `${customTypes.find(ct => ct.slug === model.type)?.name ?? model.type}${model.surface_m2 ? ` — ${model.surface_m2} m²` : ''}`}
                 </p>
 
                 {/* Discount validity line — shown above the price */}
@@ -316,7 +349,7 @@ export default function ModelsPage() {
                 )}
 
                 {/* Price line */}
-                {model.type === 'pool' ? (
+                {isBOQModel ? (
                   <p className="text-orange-600 font-semibold">Cliquez sur configurer</p>
                 ) : discountedPrice !== null ? (
                   <>

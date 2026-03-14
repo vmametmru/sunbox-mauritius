@@ -6,12 +6,12 @@ handleCORS();
 
 // Pro site deployment versions — increment these when templates or DB schema change.
 // PRO_FILE_VERSION must match define('PRO_FILE_VERSION', ...) in api/pro_deploy/api_config.php
-define('PRO_FILE_VERSION',      '2.9.3');
+define('PRO_FILE_VERSION',      '2.9.8');
 define('PRO_DB_SCHEMA_VERSION', '1.8.0');
 
 // Sunbox main database schema version.
 // Increment when new tables or columns are added.
-define('SUNBOX_DB_SCHEMA_VERSION', '2.9.0');
+define('SUNBOX_DB_SCHEMA_VERSION', '2.13.0');
 
 $action = $_GET['action'] ?? '';
 $body   = getRequestBody();
@@ -22,6 +22,33 @@ function fail(string $msg, int $code = 400): void {
 
 function ok($data = null): void {
     successResponse($data);
+}
+
+/**
+ * Get the list of valid model types: fixed types + all slugs from model_types table.
+ */
+function getValidModelTypes(PDO $db): array {
+    $custom = [];
+    try {
+        $custom = $db->query("SELECT slug FROM model_types WHERE is_active = 1")->fetchAll(PDO::FETCH_COLUMN);
+    } catch (\Throwable $e) {
+        // model_types table may not exist yet (pre-migration)
+    }
+    return array_unique(array_merge(['container', 'pool'], $custom));
+}
+/**
+ * Map model_type to a quote reference prefix.
+ * Sunbox portal:  WCQ (container) | WPQ (pool) | WXQ (any custom type, X = first char of slug)
+ * Pro sites:      PCQ             | PPQ         | PXQ
+ */
+function getQuotePrefix(string $modelType, bool $isFreeQuote = false, bool $isPro = false): string {
+    if ($isFreeQuote) return 'WFQ';
+    $base = $isPro ? 'P' : 'W';
+    return match($modelType) {
+        'container' => $base . 'CQ',
+        'pool'      => $base . 'PQ',
+        default     => $base . strtoupper(substr($modelType, 0, 1)) . 'Q',
+    };
 }
 
 try {
@@ -228,6 +255,220 @@ try {
             // ── v2.9.0 ── Header images per pro user (stored in main Sunbox DB) ─
             $addCol('professional_profiles', 'header_images_json', "TEXT NULL DEFAULT NULL");
 
+            // ── v2.10.0 ── Modular Home BOQ system ───────────────────────────
+            // Create modular_boq_variables table
+            $createTable('modular_boq_variables', "
+                CREATE TABLE `modular_boq_variables` (
+                    `id`            INT AUTO_INCREMENT PRIMARY KEY,
+                    `name`          VARCHAR(100) NOT NULL UNIQUE,
+                    `label`         VARCHAR(255) NOT NULL,
+                    `unit`          VARCHAR(50)  DEFAULT '',
+                    `formula`       TEXT         NOT NULL,
+                    `display_order` INT          DEFAULT 0,
+                    `created_at`    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at`    TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ");
+            // Seed default variables only if table was just created (empty)
+            $modVarCount = (int)$db->query("SELECT COUNT(*) FROM modular_boq_variables")->fetchColumn();
+            if ($modVarCount === 0) {
+                $db->exec("INSERT IGNORE INTO modular_boq_variables (name, label, unit, formula, display_order) VALUES
+                    ('surface_plancher_m2', 'Surface Plancher M2',    'm²', 'longueur * largeur',                            1),
+                    ('surface_totale_m2',   'Surface Totale M2',      'm²', 'surface_plancher_m2 * nombre_etages',           2),
+                    ('perimetre_m',         'Périmètre M',            'm',  '(longueur + largeur) * 2',                      3),
+                    ('hauteur_etage_m',     'Hauteur Étage M',        'm',  '2.6',                                           4),
+                    ('hauteur_totale_m',    'Hauteur Totale M',       'm',  'hauteur_etage_m * nombre_etages',               5),
+                    ('surface_murs_m2',     'Surface Murs M2',        'm²', 'perimetre_m * hauteur_totale_m',                6),
+                    ('surface_toiture_m2',  'Surface Toiture M2',     'm²', 'surface_plancher_m2 * 1.15',                   7),
+                    ('volume_m3',           'Volume M3',              'm³', 'surface_plancher_m2 * hauteur_totale_m',        8),
+                    ('nb_portes',           'Nb Portes (estimation)', 'unité', 'ROUND(perimetre_m / 8)',                     9),
+                    ('nb_fenetres',         'Nb Fenêtres (estimation)','unité','ROUND(surface_murs_m2 / 6)',               10)
+                ");
+                $messages[] = "Variables BOQ Modulaire créées (10 entrées).";
+            }
+
+            // Create modular_boq_price_list table
+            $createTable('modular_boq_price_list', "
+                CREATE TABLE `modular_boq_price_list` (
+                    `id`            INT AUTO_INCREMENT PRIMARY KEY,
+                    `name`          VARCHAR(255)  NOT NULL,
+                    `unit`          VARCHAR(100)  NOT NULL DEFAULT 'unité',
+                    `unit_price`    DECIMAL(12,2) NOT NULL DEFAULT 0,
+                    `has_vat`       BOOLEAN       DEFAULT TRUE,
+                    `supplier_id`   INT           NULL,
+                    `display_order` INT           DEFAULT 0,
+                    `created_at`    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at`    TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    FOREIGN KEY (`supplier_id`) REFERENCES `suppliers`(`id`) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ");
+            // Seed default price list if empty
+            $modPriceCount = (int)$db->query("SELECT COUNT(*) FROM modular_boq_price_list")->fetchColumn();
+            if ($modPriceCount === 0) {
+                $db->exec("INSERT IGNORE INTO modular_boq_price_list (name, unit, unit_price, has_vat, display_order) VALUES
+                    ('Main d''oeuvre Qualifiée (1 jour)',   'jour',    3000.00, 0,  1),
+                    ('Main d''oeuvre Non Qualifiée (1 jour)','jour',   2000.00, 0,  2),
+                    ('Transport Matériaux',                 'unité',   4500.00, 0,  3),
+                    ('Location Grue (1 jour)',              'jour',   20000.00, 0,  4),
+                    ('Poutre IPE 200 (6m)',                 'unité',   8500.00, 1,  5),
+                    ('Poutre HEA 160 (6m)',                 'unité',   7500.00, 1,  6),
+                    ('Béton Toupie (fondations)',           'm³',      5500.00, 1,  7),
+                    ('Fer Y16 (barre de 9m)',               'barre',   1200.00, 1,  8),
+                    ('Fer Y12 (barre de 9m)',               'barre',    850.00, 1,  9),
+                    ('Crusherrun',                          'tonne',   1200.00, 1, 10),
+                    ('Ciment (sac de 25kg)',                'sac',      280.00, 1, 11),
+                    ('Panneau Sandwich 75mm (m²)',          'm²',      1800.00, 1, 12),
+                    ('Bloc BAB',                            'unité',     35.00, 1, 13),
+                    ('Bac Acier (m²)',                      'm²',       950.00, 1, 14),
+                    ('Membrane Étanchéité (m²)',            'm²',       350.00, 1, 15),
+                    ('Carrelage Sol (m²)',                  'm²',       800.00, 1, 16),
+                    ('Porte Extérieure PVC 90x210cm',       'unité',   8500.00, 1, 17),
+                    ('Fenêtre PVC Double Vitrage 100x120cm','unité',   7500.00, 1, 18),
+                    ('Tableau Électrique (forfait)',         'forfait', 8000.00, 1, 19),
+                    ('Câbles 2.5mm² (mètre)',               'mètre',     45.00, 1, 20),
+                    ('Electricien (1 jour)',                'jour',    3000.00, 0, 21),
+                    ('Plombier (1 jour)',                   'jour',    3000.00, 0, 22),
+                    ('Peinture Intérieure (L)',             'litre',    350.00, 1, 23),
+                    ('Peinture Extérieure (L)',             'litre',    450.00, 1, 24)
+                ");
+                $messages[] = "Base de prix BOQ Modulaire créée (24 entrées).";
+            }
+
+            // Create modular_boq_templates table
+            $createTable('modular_boq_templates', "
+                CREATE TABLE `modular_boq_templates` (
+                    `id`            INT AUTO_INCREMENT PRIMARY KEY,
+                    `name`          VARCHAR(255) NOT NULL,
+                    `description`   TEXT         NULL,
+                    `is_default`    BOOLEAN      DEFAULT FALSE,
+                    `template_data` LONGTEXT     NULL,
+                    `created_at`    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at`    TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ");
+
+            // Update models.type ENUM to include 'modular' (idempotent)
+            $modelsTypeCheck = $db->prepare(
+                "SELECT COLUMN_TYPE FROM information_schema.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'models' AND COLUMN_NAME = 'type'"
+            );
+            $modelsTypeCheck->execute();
+            $modelsTypeEnum = (string)($modelsTypeCheck->fetchColumn() ?? '');
+            if (strpos($modelsTypeEnum, "'modular'") === false) {
+                $db->exec("ALTER TABLE `models` MODIFY COLUMN `type` ENUM('container','pool','modular') NOT NULL");
+                $messages[] = "Colonne modifiée : models.type (ENUM étendu avec 'modular')";
+            }
+
+            // Add modular dimension columns to models table
+            $addCol('models', 'modular_longueur',  "DECIMAL(8,2) NULL DEFAULT NULL");
+            $addCol('models', 'modular_largeur',   "DECIMAL(8,2) NULL DEFAULT NULL");
+            $addCol('models', 'modular_nb_etages', "INT          NULL DEFAULT 1");
+
+            // Add modular dimension columns to quotes table
+            $addCol('quotes', 'modular_longueur',  "DECIMAL(8,2) DEFAULT NULL");
+            $addCol('quotes', 'modular_largeur',   "DECIMAL(8,2) DEFAULT NULL");
+            $addCol('quotes', 'modular_nb_etages', "INT          DEFAULT NULL");
+
+            // ── v2.11.0 ── Dynamic model types (admin-managed) ───────────────
+            // Create model_types table so admins can create arbitrary solution types
+            $createTable('model_types', "
+                CREATE TABLE `model_types` (
+                    `id`            INT AUTO_INCREMENT PRIMARY KEY,
+                    `slug`          VARCHAR(50)  NOT NULL UNIQUE,
+                    `name`          VARCHAR(255) NOT NULL,
+                    `description`   TEXT         NULL,
+                    `icon_name`     VARCHAR(100) DEFAULT 'Box',
+                    `display_order` INT          DEFAULT 0,
+                    `is_active`     TINYINT(1)   DEFAULT 1,
+                    `created_at`    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at`    TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ");
+
+            // Migrate models.type from ENUM to VARCHAR(50) so any slug can be stored
+            $modelsTypeCheck2 = $db->prepare(
+                "SELECT DATA_TYPE FROM information_schema.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'models' AND COLUMN_NAME = 'type'"
+            );
+            $modelsTypeCheck2->execute();
+            $modelsDataType = (string)($modelsTypeCheck2->fetchColumn() ?? '');
+            if (strtolower($modelsDataType) === 'enum') {
+                $db->exec("ALTER TABLE `models` MODIFY COLUMN `type` VARCHAR(50) NOT NULL DEFAULT 'container'");
+                $messages[] = "Colonne modifiée : models.type (ENUM → VARCHAR(50) pour types dynamiques)";
+            }
+
+            // ── v2.12.0 ── Per-type configurable dimensions ──────────────────────────
+            $createTable('model_type_dimensions', "
+                CREATE TABLE `model_type_dimensions` (
+                    `id`              INT AUTO_INCREMENT PRIMARY KEY,
+                    `model_type_slug`  VARCHAR(50)   NOT NULL,
+                    `slug`            VARCHAR(50)   NOT NULL,
+                    `label`           VARCHAR(100)  NOT NULL,
+                    `unit`            VARCHAR(20)   DEFAULT 'm',
+                    `min_value`       DECIMAL(10,4) DEFAULT 0,
+                    `max_value`       DECIMAL(10,4) DEFAULT 1000,
+                    `step`            DECIMAL(10,4) DEFAULT 0.5,
+                    `default_value`   DECIMAL(10,4) DEFAULT 1,
+                    `display_order`   INT           DEFAULT 0,
+                    UNIQUE KEY `uq_model_type_dim` (`model_type_slug`, `slug`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ");
+
+            // Seed default 3 dimensions for legacy 'modular' type (backward compat)
+            try {
+                $dimCount = (int)$db->query("SELECT COUNT(*) FROM `model_type_dimensions` WHERE `model_type_slug` = 'modular'")->fetchColumn();
+                if ($dimCount === 0) {
+                    $db->exec("INSERT INTO `model_type_dimensions`
+                        (`model_type_slug`,`slug`,`label`,`unit`,`min_value`,`max_value`,`step`,`default_value`,`display_order`)
+                        VALUES
+                        ('modular','longueur','Longueur','m',3,50,0.5,10,1),
+                        ('modular','largeur','Largeur','m',3,30,0.5,8,2),
+                        ('modular','nombre_etages','Nombre d''étages','',1,5,1,1,3)");
+                    $messages[] = "Dimensions par défaut ajoutées pour le type 'modular'";
+                }
+            } catch (\Throwable $e) { /* ignore – table may already be populated */ }
+
+            // Add custom_dimensions JSON column to quotes (always exists on Sunbox DB)
+            $addCol('quotes', 'custom_dimensions', "JSON NULL DEFAULT NULL");
+
+            // pro_quotes only exists on deployed pro-user sites, not on the main Sunbox DB.
+            // Guard with a table existence check to avoid SQLSTATE[42S02] on fresh installs.
+            $chkProQuotes = $db->prepare(
+                "SELECT COUNT(*) FROM information_schema.TABLES
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pro_quotes'"
+            );
+            $chkProQuotes->execute();
+            if ((bool)$chkProQuotes->fetchColumn()) {
+                $addCol('pro_quotes', 'custom_dimensions', "JSON NULL DEFAULT NULL");
+            }
+
+            // ── v2.13.0 ── Per-type BOQ variables and templates ──────────────────
+            // Add model_type_slug to modular_boq_variables
+            $addCol('modular_boq_variables', 'model_type_slug', "VARCHAR(50) DEFAULT NULL AFTER `id`");
+            // Replace the global unique-on-name constraint with a per-(type,name) composite one
+            $dropUniqueStmt = $db->prepare(
+                "SELECT COUNT(*) FROM information_schema.STATISTICS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'modular_boq_variables'
+                 AND INDEX_NAME = 'name' AND NON_UNIQUE = 0"
+            );
+            $dropUniqueStmt->execute();
+            if ((bool)$dropUniqueStmt->fetchColumn()) {
+                try { $db->exec("ALTER TABLE `modular_boq_variables` DROP INDEX `name`"); } catch (\Throwable $e) {}
+                $messages[] = "Index supprimé : modular_boq_variables.name (unique global → unique par type)";
+            }
+            $addCompUniqueStmt = $db->prepare(
+                "SELECT COUNT(*) FROM information_schema.STATISTICS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'modular_boq_variables'
+                 AND INDEX_NAME = 'uq_type_var_name'"
+            );
+            $addCompUniqueStmt->execute();
+            if (!(bool)$addCompUniqueStmt->fetchColumn()) {
+                try { $db->exec("ALTER TABLE `modular_boq_variables` ADD UNIQUE KEY `uq_type_var_name` (`model_type_slug`, `name`)"); } catch (\Throwable $e) {}
+                $messages[] = "Index ajouté : modular_boq_variables.uq_type_var_name (model_type_slug, name)";
+            }
+            // Add model_type_slug to modular_boq_templates
+            $addCol('modular_boq_templates', 'model_type_slug', "VARCHAR(50) DEFAULT NULL AFTER `id`");
+
             // ── Schema version table (always create / update) ─────────────────
             $db->exec("CREATE TABLE IF NOT EXISTS `db_schema_version` (
                 `id`         INT NOT NULL DEFAULT 1,
@@ -347,11 +588,13 @@ try {
                 if ($includeBOQPrice) {
                     $boqStmt = $db->prepare("
                         SELECT 
-                            COALESCE(SUM(ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS boq_base_price_ht,
-                            COALESCE(SUM(ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht), 2)), 0) AS boq_cost_ht
+                            COALESCE(SUM(ROUND(bl.quantity * COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS boq_base_price_ht,
+                            COALESCE(SUM(ROUND(bl.quantity * COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht), 2)), 0) AS boq_cost_ht
                         FROM boq_categories bc
+                        LEFT JOIN models m_p ON m_p.id = bc.model_id
                         LEFT JOIN boq_lines bl ON bc.id = bl.category_id
-                        LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
+                        LEFT JOIN pool_boq_price_list ppl ON bl.price_list_id = ppl.id AND m_p.type IN ('pool', 'container')
+                        LEFT JOIN modular_boq_price_list mpl ON bl.price_list_id = mpl.id AND m_p.type NOT IN ('pool', 'container')
                         WHERE bc.model_id = ? AND bc.is_option = FALSE
                     ");
                     $boqStmt->execute([$m['id']]);
@@ -403,6 +646,9 @@ try {
 
         case 'create_model': {
             validateRequired($body, ['name', 'type', 'base_price']);
+            if (!in_array($body['type'], getValidModelTypes($db))) {
+                fail('Type de modèle invalide');
+            }
             $stmt = $db->prepare("
                 INSERT INTO models (
                     name, type, description, base_price, unforeseen_cost_percent,
@@ -438,6 +684,9 @@ try {
 
         case 'update_model': {
             validateRequired($body, ['id']);
+            if (isset($body['type']) && !in_array($body['type'], getValidModelTypes($db))) {
+                fail('Type de modèle invalide');
+            }
             $allowed = [
                 'name','type','description','base_price','unforeseen_cost_percent','surface_m2',
                 'bedrooms','bathrooms','container_20ft_count','container_40ft_count',
@@ -689,11 +938,13 @@ try {
             $stmt = $db->prepare("
                 SELECT bc.*, 
                     mi.file_path AS image_path,
-                    COALESCE(SUM(ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht), 2)), 0) AS total_cost_ht,
-                    COALESCE(SUM(ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS total_sale_price_ht
+                    COALESCE(SUM(ROUND(bl.quantity * COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht), 2)), 0) AS total_cost_ht,
+                    COALESCE(SUM(ROUND(bl.quantity * COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS total_sale_price_ht
                 FROM boq_categories bc
+                LEFT JOIN models m ON m.id = bc.model_id
                 LEFT JOIN boq_lines bl ON bc.id = bl.category_id
-                LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
+                LEFT JOIN pool_boq_price_list ppl ON bl.price_list_id = ppl.id AND m.type IN ('pool', 'container')
+                LEFT JOIN modular_boq_price_list mpl ON bl.price_list_id = mpl.id AND m.type NOT IN ('pool', 'container')
                 LEFT JOIN model_images mi ON bc.image_id = mi.id
                 WHERE bc.model_id = ?
                 GROUP BY bc.id
@@ -772,12 +1023,17 @@ try {
             if ($categoryId <= 0) fail("category_id manquant");
             
             $stmt = $db->prepare("
-                SELECT bl.*, s.name AS supplier_name, pl.name AS price_list_name, pl.unit_price AS price_list_unit_price,
-                    ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht), 2) AS total_cost_ht,
-                    ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2) AS sale_price_ht
+                SELECT bl.*, s.name AS supplier_name,
+                    COALESCE(ppl.name, mpl.name) AS price_list_name,
+                    COALESCE(ppl.unit_price, mpl.unit_price) AS price_list_unit_price,
+                    ROUND(bl.quantity * COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht), 2) AS total_cost_ht,
+                    ROUND(bl.quantity * COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2) AS sale_price_ht
                 FROM boq_lines bl
+                LEFT JOIN boq_categories bc_join ON bl.category_id = bc_join.id
+                LEFT JOIN models m_join ON bc_join.model_id = m_join.id
                 LEFT JOIN suppliers s ON bl.supplier_id = s.id
-                LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
+                LEFT JOIN pool_boq_price_list ppl ON bl.price_list_id = ppl.id AND m_join.type IN ('pool', 'container')
+                LEFT JOIN modular_boq_price_list mpl ON bl.price_list_id = mpl.id AND m_join.type NOT IN ('pool', 'container')
                 WHERE bl.category_id = ?
                 ORDER BY bl.display_order ASC, bl.id ASC
             ");
@@ -995,11 +1251,13 @@ try {
             // Get base price from non-option BOQ categories
             $stmt = $db->prepare("
                 SELECT 
-                    COALESCE(SUM(ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS base_price_ht,
-                    COALESCE(SUM(ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht), 2)), 0) AS total_cost_ht
+                    COALESCE(SUM(ROUND(bl.quantity * COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS base_price_ht,
+                    COALESCE(SUM(ROUND(bl.quantity * COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht), 2)), 0) AS total_cost_ht
                 FROM boq_categories bc
+                LEFT JOIN models m ON m.id = bc.model_id
                 LEFT JOIN boq_lines bl ON bc.id = bl.category_id
-                LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
+                LEFT JOIN pool_boq_price_list ppl ON bl.price_list_id = ppl.id AND m.type IN ('pool', 'container')
+                LEFT JOIN modular_boq_price_list mpl ON bl.price_list_id = mpl.id AND m.type NOT IN ('pool', 'container')
                 WHERE bc.model_id = ? AND bc.is_option = FALSE
             ");
             $stmt->execute([$modelId]);
@@ -1028,10 +1286,12 @@ try {
             $stmt = $db->prepare("
                 SELECT bc.id, bc.name, bc.parent_id, bc.display_order, bc.qty_editable,
                        mi.file_path as image_path,
-                       COALESCE(SUM(ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS own_price_ht
+                       COALESCE(SUM(ROUND(bl.quantity * COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS own_price_ht
                 FROM boq_categories bc
+                LEFT JOIN models m ON m.id = bc.model_id
                 LEFT JOIN boq_lines bl ON bc.id = bl.category_id
-                LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
+                LEFT JOIN pool_boq_price_list ppl ON bl.price_list_id = ppl.id AND m.type IN ('pool', 'container')
+                LEFT JOIN modular_boq_price_list mpl ON bl.price_list_id = mpl.id AND m.type NOT IN ('pool', 'container')
                 LEFT JOIN model_images mi ON bc.image_id = mi.id
                 WHERE bc.model_id = ? AND bc.is_option = TRUE
                 GROUP BY bc.id
@@ -1201,8 +1461,7 @@ try {
             validateRequired($body, ['model_id', 'model_name', 'model_type', 'base_price', 'total_price', 'customer_name', 'customer_email', 'customer_phone']);
             
             // Validate model_type
-            $validTypes = ['container', 'pool'];
-            if (!in_array($body['model_type'], $validTypes)) {
+            if (!in_array($body['model_type'], getValidModelTypes($db))) {
                 fail('Type de modèle invalide');
             }
             
@@ -1214,7 +1473,7 @@ try {
                 // The xxxxxx is a combined sequential counter shared between both types
                 $yearMonth = date('Ym');
                 $modelType = $body['model_type'];
-                $prefix = ($modelType === 'container') ? 'WCQ' : 'WPQ';
+                $prefix = getQuotePrefix($modelType);
                 $maxIdStmt = $db->query("SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM quotes");
                 $nextId = (int)$maxIdStmt->fetchColumn();
                 $reference = sprintf('%s-%s-%06d', $prefix, $yearMonth, $nextId);
@@ -1286,9 +1545,12 @@ try {
                             pool_longueur_la, pool_largeur_la, pool_profondeur_la,
                             pool_longueur_lb, pool_largeur_lb, pool_profondeur_lb,
                             pool_longueur_ta, pool_largeur_ta, pool_profondeur_ta,
-                            pool_longueur_tb, pool_largeur_tb, pool_profondeur_tb
+                            pool_longueur_tb, pool_largeur_tb, pool_profondeur_tb,
+                            modular_longueur, modular_largeur, modular_nb_etages,
+                            custom_dimensions
                                                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?,
-                                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                                  ?, ?, ?, ?)
                     ");
                     $stmt->execute([
                         $reference,
@@ -1311,9 +1573,12 @@ try {
                         $nullFloat('pool_longueur_lb'), $nullFloat('pool_largeur_lb'), $nullFloat('pool_profondeur_lb'),
                         $nullFloat('pool_longueur_ta'), $nullFloat('pool_largeur_ta'), $nullFloat('pool_profondeur_ta'),
                         $nullFloat('pool_longueur_tb'), $nullFloat('pool_largeur_tb'), $nullFloat('pool_profondeur_tb'),
+                        $nullFloat('modular_longueur'), $nullFloat('modular_largeur'),
+                        isset($body['modular_nb_etages']) ? (int)$body['modular_nb_etages'] : null,
+                        isset($body['custom_dimensions']) ? json_encode($body['custom_dimensions']) : null,
                     ]);
                     $inserted = true;
-                } catch (PDOException $dimEx) { /* pool dimension columns not yet added – fall through */ }
+                } catch (PDOException $dimEx) { /* dimension columns not yet added – fall through */ }
 
                 if (!$inserted) {
                     $stmt = $db->prepare("
@@ -1443,13 +1708,15 @@ try {
             $lStmt = $db->prepare("
                 SELECT bc.name AS category_name,
                        bl.description, bl.quantity, bl.unit, bl.margin_percent,
-                       COALESCE(pl.unit_price, bl.unit_cost_ht) AS unit_price,
-                       ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht), 2) AS total_price,
+                       COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht) AS unit_price,
+                       ROUND(bl.quantity * COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht), 2) AS total_price,
                        COALESCE(s.name, 'Fournisseur non défini') AS supplier_name,
                        bc.display_order AS cat_order, bl.display_order AS line_order
                 FROM boq_categories bc
+                LEFT JOIN models m_pr ON m_pr.id = bc.model_id
                 LEFT JOIN boq_lines bl ON bl.category_id = bc.id
-                LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
+                LEFT JOIN pool_boq_price_list ppl ON bl.price_list_id = ppl.id AND m_pr.type IN ('pool', 'container')
+                LEFT JOIN modular_boq_price_list mpl ON bl.price_list_id = mpl.id AND m_pr.type NOT IN ('pool', 'container')
                 LEFT JOIN suppliers s ON bl.supplier_id = s.id
                 WHERE bc.model_id = ? AND bc.is_option = FALSE AND bl.id IS NOT NULL
                 ORDER BY COALESCE(s.name,'Fournisseur non défini'), bc.display_order, bl.display_order
@@ -1461,14 +1728,16 @@ try {
             $optLinesStmt = $db->prepare("
                 SELECT bc.name AS category_name,
                        bl.description, bl.quantity, bl.unit, bl.margin_percent,
-                       COALESCE(pl.unit_price, bl.unit_cost_ht) AS unit_price,
-                       ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht), 2) AS total_price,
+                       COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht) AS unit_price,
+                       ROUND(bl.quantity * COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht), 2) AS total_price,
                        COALESCE(s.name, 'Fournisseur non défini') AS supplier_name,
                        bc.display_order AS cat_order, bl.display_order AS line_order
                 FROM quote_options qo
                 JOIN boq_categories bc ON bc.model_id = ? AND bc.is_option = TRUE AND bc.name = qo.option_name
+                LEFT JOIN models m_pr2 ON m_pr2.id = bc.model_id
                 LEFT JOIN boq_lines bl ON bl.category_id = bc.id
-                LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
+                LEFT JOIN pool_boq_price_list ppl ON bl.price_list_id = ppl.id AND m_pr2.type IN ('pool', 'container')
+                LEFT JOIN modular_boq_price_list mpl ON bl.price_list_id = mpl.id AND m_pr2.type NOT IN ('pool', 'container')
                 LEFT JOIN suppliers s ON bl.supplier_id = s.id
                 WHERE qo.quote_id = ? AND bl.id IS NOT NULL
                 ORDER BY COALESCE(s.name,'Fournisseur non défini'), bc.display_order, bl.display_order
@@ -1630,8 +1899,7 @@ try {
             $modelType = $body['model_type'] ?? 'container'; // Default to container for free quotes
             
             // Validate model_type
-            $validTypes = ['container', 'pool'];
-            if (!in_array($modelType, $validTypes)) {
+            if (!in_array($modelType, getValidModelTypes($db))) {
                 fail('Type de modèle invalide');
             }
             
@@ -1640,7 +1908,7 @@ try {
             try {
                 // Generate reference number
                 $yearMonth = date('Ym');
-                $prefix = $isFreeQuote ? 'WFQ' : (($modelType === 'container') ? 'WCQ' : 'WPQ');
+                $prefix = getQuotePrefix($modelType, (bool)$isFreeQuote);
                 $maxIdStmt = $db->query("SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM quotes");
                 $nextId = (int)$maxIdStmt->fetchColumn();
                 $reference = sprintf('%s-%s-%06d', $prefix, $yearMonth, $nextId);
@@ -2018,7 +2286,7 @@ try {
                 $yearMonth = date('Ym');
                 $isFreeQuote = $sourceQuote['is_free_quote'] ?? false;
                 $modelType = $sourceQuote['model_type'];
-                $prefix = $isFreeQuote ? 'WFQ' : (($modelType === 'container') ? 'WCQ' : 'WPQ');
+                $prefix = getQuotePrefix($modelType, (bool)$isFreeQuote);
                 $maxIdStmt = $db->query("SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM quotes");
                 $nextId = (int)$maxIdStmt->fetchColumn();
                 $reference = sprintf('%s-%s-%06d', $prefix, $yearMonth, $nextId);
@@ -2266,11 +2534,14 @@ try {
 
                 $boqLineStmt = $db->prepare("
                     SELECT bl.description, bl.quantity, bl.unit,
-                           COALESCE(pl.unit_price, bl.unit_cost_ht) AS unit_cost_ht,
+                           COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht) AS unit_cost_ht,
                            bl.margin_percent,
-                           ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2) AS sale_price_ht
+                           ROUND(bl.quantity * COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2) AS sale_price_ht
                     FROM boq_lines bl
-                    LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
+                    LEFT JOIN boq_categories bc_q ON bl.category_id = bc_q.id
+                    LEFT JOIN models m_q ON bc_q.model_id = m_q.id
+                    LEFT JOIN pool_boq_price_list ppl ON bl.price_list_id = ppl.id AND m_q.type IN ('pool', 'container')
+                    LEFT JOIN modular_boq_price_list mpl ON bl.price_list_id = mpl.id AND m_q.type NOT IN ('pool', 'container')
                     WHERE bl.category_id = ?
                     ORDER BY bl.display_order ASC, bl.id ASC
                 ");
@@ -3025,6 +3296,432 @@ try {
                 $row['template_data'] = json_decode($row['template_data'], true);
             }
             ok($row ?: null);
+            break;
+        }
+
+        // ============================================
+        // === MODEL TYPES (admin-managed dynamic types)
+        // ============================================
+        case 'get_model_types': {
+            $activeOnly = $body['active_only'] ?? false;
+            $sql = "SELECT * FROM model_types";
+            if ($activeOnly) $sql .= " WHERE is_active = 1";
+            $sql .= " ORDER BY display_order ASC, name ASC";
+            $rows = $db->query($sql)->fetchAll();
+            foreach ($rows as &$r) {
+                $r['is_active'] = (bool)$r['is_active'];
+                $r['display_order'] = (int)$r['display_order'];
+            }
+            ok($rows);
+            break;
+        }
+
+        case 'create_model_type': {
+            requireAdmin();
+            validateRequired($body, ['name', 'slug']);
+            // Validate slug: only lowercase alphanumeric and hyphens
+            $slug = preg_replace('/[^a-z0-9\-]/', '', strtolower(trim($body['slug'])));
+            if (empty($slug)) fail('Slug invalide (caractères autorisés: a-z 0-9 -)');
+            if (in_array($slug, ['container', 'pool'])) fail('Ce slug est réservé');
+            $stmt = $db->prepare("
+                INSERT INTO model_types (slug, name, description, icon_name, display_order, is_active)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ");
+            $stmt->execute([
+                $slug,
+                trim($body['name']),
+                $body['description'] ?? null,
+                $body['icon_name']   ?? 'Box',
+                (int)($body['display_order'] ?? 0),
+                isset($body['is_active']) ? (int)(bool)$body['is_active'] : 1,
+            ]);
+            ok(['id' => (int)$db->lastInsertId(), 'slug' => $slug]);
+            break;
+        }
+
+        case 'update_model_type': {
+            requireAdmin();
+            validateRequired($body, ['id']);
+            $sets   = [];
+            $params = [];
+            if (isset($body['name']))          { $sets[] = 'name = ?';          $params[] = trim($body['name']); }
+            if (isset($body['description']))   { $sets[] = 'description = ?';   $params[] = $body['description']; }
+            if (isset($body['icon_name']))     { $sets[] = 'icon_name = ?';     $params[] = $body['icon_name']; }
+            if (isset($body['display_order'])) { $sets[] = 'display_order = ?'; $params[] = (int)$body['display_order']; }
+            if (isset($body['is_active']))     { $sets[] = 'is_active = ?';     $params[] = (int)(bool)$body['is_active']; }
+            if (empty($sets)) { ok(); break; }
+            $params[] = (int)$body['id'];
+            $db->prepare("UPDATE model_types SET " . implode(', ', $sets) . " WHERE id = ?")->execute($params);
+            ok();
+            break;
+        }
+
+        case 'delete_model_type': {
+            requireAdmin();
+            validateRequired($body, ['id']);
+            // Check for models using this type first
+            $typeStmt = $db->prepare("SELECT slug FROM model_types WHERE id = ?");
+            $typeStmt->execute([(int)$body['id']]);
+            $typeRow = $typeStmt->fetch();
+            if ($typeRow) {
+                $usageStmt = $db->prepare("SELECT COUNT(*) FROM models WHERE type = ?");
+                $usageStmt->execute([$typeRow['slug']]);
+                if ((int)$usageStmt->fetchColumn() > 0) {
+                    fail("Ce type est utilisé par des modèles existants. Supprimez ou reclassifiez ces modèles d'abord.");
+                }
+            }
+            $db->prepare("DELETE FROM model_types WHERE id = ?")->execute([(int)$body['id']]);
+            ok();
+            break;
+        }
+
+        // ============================================
+// === MODEL TYPE DIMENSIONS (per-type configurable dimensions)
+        // ============================================
+        case 'get_model_type_dimensions': {
+            $slug = sanitize($body['model_type_slug'] ?? '');
+            if (!$slug) fail('model_type_slug requis');
+            $stmt = $db->prepare("SELECT * FROM model_type_dimensions WHERE model_type_slug = ? ORDER BY display_order ASC");
+            $stmt->execute([$slug]);
+            ok($stmt->fetchAll(PDO::FETCH_ASSOC));
+            break;
+        }
+
+        case 'create_model_type_dimension': {
+            validateRequired($body, ['model_type_slug', 'slug', 'label']);
+            $typeSlug = sanitize($body['model_type_slug']);
+            $dimSlug  = preg_replace('/[^a-z0-9_]/', '_', strtolower(sanitize($body['slug'])));
+            $stmt = $db->prepare("
+                INSERT INTO model_type_dimensions
+                    (model_type_slug, slug, label, unit, min_value, max_value, step, default_value, display_order)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ");
+            $stmt->execute([
+                $typeSlug, $dimSlug, sanitize($body['label']),
+                sanitize($body['unit'] ?? 'm'),
+                (float)($body['min_value'] ?? 0),
+                (float)($body['max_value'] ?? 1000),
+                (float)($body['step'] ?? 0.5),
+                (float)($body['default_value'] ?? 1),
+                (int)($body['display_order'] ?? 0),
+            ]);
+            ok(['id' => (int)$db->lastInsertId()]);
+            break;
+        }
+
+        case 'update_model_type_dimension': {
+            validateRequired($body, ['id']);
+            $fields = []; $params = [];
+            foreach (['label','unit','min_value','max_value','step','default_value','display_order'] as $f) {
+                if (!array_key_exists($f, $body)) continue;
+                $fields[] = "$f = ?";
+                if (in_array($f, ['min_value','max_value','step','default_value'])) $params[] = (float)$body[$f];
+                elseif ($f === 'display_order') $params[] = (int)$body[$f];
+                else $params[] = sanitize($body[$f]);
+            }
+            if (!$fields) fail('Nothing to update');
+            $params[] = (int)$body['id'];
+            $db->prepare("UPDATE model_type_dimensions SET ".implode(', ', $fields)." WHERE id = ?")->execute($params);
+            ok();
+            break;
+        }
+
+        case 'delete_model_type_dimension': {
+            validateRequired($body, ['id']);
+            $db->prepare("DELETE FROM model_type_dimensions WHERE id = ?")->execute([(int)$body['id']]);
+            ok();
+            break;
+        }
+
+        // === MODULAR BOQ VARIABLES
+        // ============================================
+        case 'get_modular_boq_variables': {
+            $typeSlug = isset($body['model_type_slug']) ? sanitize($body['model_type_slug']) : null;
+            if ($typeSlug !== null && $typeSlug !== '') {
+                $stmt = $db->prepare("SELECT * FROM modular_boq_variables WHERE model_type_slug = ? ORDER BY display_order ASC");
+                $stmt->execute([$typeSlug]);
+            } else {
+                $stmt = $db->query("SELECT * FROM modular_boq_variables ORDER BY display_order ASC");
+            }
+            ok($stmt->fetchAll());
+            break;
+        }
+
+        case 'create_modular_boq_variable': {
+            validateRequired($body, ['name', 'label', 'formula']);
+            $varTypeSlug = isset($body['model_type_slug']) ? sanitize($body['model_type_slug']) : null;
+            $stmt = $db->prepare("
+                INSERT INTO modular_boq_variables (model_type_slug, name, label, unit, formula, display_order)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ");
+            $stmt->execute([
+                $varTypeSlug ?: null,
+                $body['name'],
+                $body['label'],
+                $body['unit'] ?? '',
+                $body['formula'],
+                (int)($body['display_order'] ?? 0),
+            ]);
+            ok(['id' => (int)$db->lastInsertId()]);
+            break;
+        }
+
+        case 'update_modular_boq_variable': {
+            validateRequired($body, ['id', 'name', 'label', 'formula']);
+            $varTypeSlug = isset($body['model_type_slug']) ? sanitize($body['model_type_slug']) : null;
+            $stmt = $db->prepare("
+                UPDATE modular_boq_variables SET
+                    model_type_slug = ?,
+                    name          = ?,
+                    label         = ?,
+                    unit          = ?,
+                    formula       = ?,
+                    display_order = ?
+                WHERE id = ?
+            ");
+            $stmt->execute([
+                $varTypeSlug ?: null,
+                $body['name'],
+                $body['label'],
+                $body['unit'] ?? '',
+                $body['formula'],
+                (int)($body['display_order'] ?? 0),
+                (int)$body['id'],
+            ]);
+            ok();
+            break;
+        }
+
+        case 'delete_modular_boq_variable': {
+            validateRequired($body, ['id']);
+            $stmt = $db->prepare("DELETE FROM modular_boq_variables WHERE id = ?");
+            $stmt->execute([(int)$body['id']]);
+            ok();
+            break;
+        }
+
+        // ============================================
+        // === MODULAR BOQ PRICE LIST
+        // ============================================
+        case 'get_modular_boq_price_list': {
+            $stmt = $db->query("
+                SELECT ml.*, s.name AS supplier_name
+                FROM modular_boq_price_list ml
+                LEFT JOIN suppliers s ON ml.supplier_id = s.id
+                ORDER BY ml.display_order ASC, ml.name ASC
+            ");
+            $rows = $stmt->fetchAll();
+            foreach ($rows as &$r) {
+                $r['unit_price'] = (float)$r['unit_price'];
+                $r['has_vat']    = (bool)$r['has_vat'];
+            }
+            ok($rows);
+            break;
+        }
+
+        case 'create_modular_boq_price_list_item': {
+            validateRequired($body, ['name']);
+            $stmt = $db->prepare("
+                INSERT INTO modular_boq_price_list (name, unit, unit_price, has_vat, supplier_id, display_order)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ");
+            $stmt->execute([
+                $body['name'],
+                $body['unit']          ?? 'unité',
+                (float)($body['unit_price'] ?? 0),
+                isset($body['has_vat']) ? (int)(bool)$body['has_vat'] : 1,
+                isset($body['supplier_id']) ? (int)$body['supplier_id'] : null,
+                (int)($body['display_order'] ?? 0),
+            ]);
+            ok(['id' => (int)$db->lastInsertId()]);
+            break;
+        }
+
+        case 'update_modular_boq_price_list_item': {
+            validateRequired($body, ['id', 'name']);
+            $stmt = $db->prepare("
+                UPDATE modular_boq_price_list SET
+                    name          = ?,
+                    unit          = ?,
+                    unit_price    = ?,
+                    has_vat       = ?,
+                    supplier_id   = ?,
+                    display_order = ?
+                WHERE id = ?
+            ");
+            $stmt->execute([
+                $body['name'],
+                $body['unit']          ?? 'unité',
+                (float)($body['unit_price'] ?? 0),
+                isset($body['has_vat']) ? (int)(bool)$body['has_vat'] : 1,
+                isset($body['supplier_id']) ? (int)$body['supplier_id'] : null,
+                (int)($body['display_order'] ?? 0),
+                (int)$body['id'],
+            ]);
+            ok();
+            break;
+        }
+
+        case 'delete_modular_boq_price_list_item': {
+            validateRequired($body, ['id']);
+            $stmt = $db->prepare("DELETE FROM modular_boq_price_list WHERE id = ?");
+            $stmt->execute([(int)$body['id']]);
+            ok();
+            break;
+        }
+
+        // ============================================
+        // === MODULAR BOQ TEMPLATES
+        // ============================================
+        case 'get_modular_boq_templates': {
+            $tplTypeSlug = isset($body['model_type_slug']) ? sanitize($body['model_type_slug']) : null;
+            if ($tplTypeSlug !== null && $tplTypeSlug !== '') {
+                $stmt = $db->prepare("SELECT * FROM modular_boq_templates WHERE model_type_slug = ? ORDER BY is_default DESC, name ASC");
+                $stmt->execute([$tplTypeSlug]);
+            } else {
+                $stmt = $db->query("SELECT * FROM modular_boq_templates ORDER BY is_default DESC, name ASC");
+            }
+            $rows = $stmt->fetchAll();
+            foreach ($rows as &$r) {
+                $r['is_default'] = (bool)$r['is_default'];
+                if (isset($r['template_data']) && is_string($r['template_data'])) {
+                    $r['template_data'] = json_decode($r['template_data'], true);
+                }
+            }
+            ok($rows);
+            break;
+        }
+
+        case 'create_modular_boq_template': {
+            validateRequired($body, ['name']);
+            $tplTypeSlug = isset($body['model_type_slug']) ? sanitize($body['model_type_slug']) : null;
+            $templateData = null;
+            if (isset($body['template_data'])) {
+                $templateData = is_string($body['template_data'])
+                    ? $body['template_data']
+                    : json_encode($body['template_data']);
+            }
+            $stmt = $db->prepare("
+                INSERT INTO modular_boq_templates (model_type_slug, name, description, is_default, template_data)
+                VALUES (?, ?, ?, ?, ?)
+            ");
+            $stmt->execute([
+                $tplTypeSlug ?: null,
+                $body['name'],
+                $body['description'] ?? null,
+                isset($body['is_default']) ? (int)(bool)$body['is_default'] : 0,
+                $templateData,
+            ]);
+            ok(['id' => (int)$db->lastInsertId()]);
+            break;
+        }
+
+        case 'update_modular_boq_template': {
+            validateRequired($body, ['id']);
+            $sets   = [];
+            $params = [];
+            if (array_key_exists('model_type_slug', $body)) { $sets[] = 'model_type_slug = ?'; $params[] = $body['model_type_slug'] ? sanitize($body['model_type_slug']) : null; }
+            if (isset($body['name']))        { $sets[] = 'name = ?';        $params[] = $body['name']; }
+            if (isset($body['description'])) { $sets[] = 'description = ?'; $params[] = $body['description']; }
+            if (isset($body['is_default']))  { $sets[] = 'is_default = ?';  $params[] = (int)(bool)$body['is_default']; }
+            if (isset($body['template_data'])) {
+                $sets[]   = 'template_data = ?';
+                $params[] = is_string($body['template_data'])
+                    ? $body['template_data']
+                    : json_encode($body['template_data']);
+            }
+            if (empty($sets)) { ok(); break; }
+            $params[] = (int)$body['id'];
+            $sql = "UPDATE modular_boq_templates SET " . implode(', ', $sets) . " WHERE id = ?";
+            $stmt = $db->prepare($sql);
+            $stmt->execute($params);
+            ok();
+            break;
+        }
+
+        case 'delete_modular_boq_template': {
+            validateRequired($body, ['id']);
+            $stmt = $db->prepare("DELETE FROM modular_boq_templates WHERE id = ?");
+            $stmt->execute([(int)$body['id']]);
+            ok();
+            break;
+        }
+
+        case 'get_modular_boq_template_by_id': {
+            validateRequired($body, ['id']);
+            $stmt = $db->prepare("SELECT * FROM modular_boq_templates WHERE id = ?");
+            $stmt->execute([(int)$body['id']]);
+            $row = $stmt->fetch();
+            if ($row && isset($row['template_data']) && is_string($row['template_data'])) {
+                $row['template_data'] = json_decode($row['template_data'], true);
+            }
+            ok($row ?: null);
+            break;
+        }
+
+        case 'get_default_modular_boq_template': {
+            $tplTypeSlug = isset($body['model_type_slug']) ? sanitize($body['model_type_slug']) : null;
+            if ($tplTypeSlug !== null && $tplTypeSlug !== '') {
+                $stmt = $db->prepare("SELECT * FROM modular_boq_templates WHERE model_type_slug = ? AND is_default = 1 LIMIT 1");
+                $stmt->execute([$tplTypeSlug]);
+            } else {
+                $stmt = $db->prepare("SELECT * FROM modular_boq_templates WHERE is_default = 1 LIMIT 1");
+                $stmt->execute();
+            }
+            $row = $stmt->fetch();
+            if ($row && isset($row['template_data']) && is_string($row['template_data'])) {
+                $row['template_data'] = json_decode($row['template_data'], true);
+            }
+            ok($row ?: null);
+            break;
+        }
+
+        // === get_modular_boq_full — returns all categories+lines for a modular model
+        case 'get_modular_boq_full': {
+            $modelId = (int)($body['model_id'] ?? 0);
+            if ($modelId <= 0) fail("model_id manquant");
+
+            $stmt = $db->prepare("
+                SELECT bc.id, bc.name, bc.is_option, bc.qty_editable, bc.display_order, bc.parent_id
+                FROM boq_categories bc
+                WHERE bc.model_id = ?
+                ORDER BY bc.display_order ASC, bc.name ASC
+            ");
+            $stmt->execute([$modelId]);
+            $categories = $stmt->fetchAll();
+
+            $lineStmt = $db->prepare("
+                SELECT bl.id, bl.description, bl.quantity, bl.quantity_formula,
+                       bl.unit, bl.unit_cost_ht, bl.unit_cost_formula,
+                       bl.price_list_id, bl.margin_percent, bl.display_order,
+                       mp.unit_price AS price_list_unit_price
+                FROM boq_lines bl
+                LEFT JOIN modular_boq_price_list mp ON bl.price_list_id = mp.id
+                WHERE bl.category_id = ?
+                ORDER BY bl.display_order ASC, bl.id ASC
+            ");
+
+            foreach ($categories as &$cat) {
+                $cat['id']           = (int)$cat['id'];
+                $cat['is_option']    = (bool)$cat['is_option'];
+                $cat['qty_editable'] = (bool)($cat['qty_editable'] ?? false);
+                $cat['parent_id']    = $cat['parent_id'] ? (int)$cat['parent_id'] : null;
+                $cat['display_order'] = (int)$cat['display_order'];
+                $lineStmt->execute([$cat['id']]);
+                $lines = $lineStmt->fetchAll();
+                foreach ($lines as &$ln) {
+                    $ln['id']                  = (int)$ln['id'];
+                    $ln['quantity']            = (float)$ln['quantity'];
+                    $ln['unit_cost_ht']        = (float)$ln['unit_cost_ht'];
+                    $ln['margin_percent']      = (float)$ln['margin_percent'];
+                    $ln['display_order']       = (int)$ln['display_order'];
+                    $ln['price_list_id']       = $ln['price_list_id'] ? (int)$ln['price_list_id'] : null;
+                    $ln['price_list_unit_price'] = $ln['price_list_unit_price'] !== null ? (float)$ln['price_list_unit_price'] : null;
+                }
+                $cat['lines'] = $lines;
+            }
+
+            ok($categories);
             break;
         }
 
@@ -3822,6 +4519,11 @@ try {
                 $addCol('pro_quotes', 'pool_longueur_tb',   "DECIMAL(8,2) DEFAULT NULL AFTER `pool_profondeur_ta`");
                 $addCol('pro_quotes', 'pool_largeur_tb',    "DECIMAL(8,2) DEFAULT NULL AFTER `pool_longueur_tb`");
                 $addCol('pro_quotes', 'pool_profondeur_tb', "DECIMAL(8,2) DEFAULT NULL AFTER `pool_largeur_tb`");
+
+                // ── Modular dimension columns (v1.9.0 / PRO_FILE_VERSION 2.9.4) ─
+                $addCol('pro_quotes', 'modular_longueur',  "DECIMAL(8,2) DEFAULT NULL");
+                $addCol('pro_quotes', 'modular_largeur',   "DECIMAL(8,2) DEFAULT NULL");
+                $addCol('pro_quotes', 'modular_nb_etages', "INT          DEFAULT NULL");
 
                 // ── Quote options (v1.4.0) ─────────────────────────────────────
                 $proPdo->exec("CREATE TABLE IF NOT EXISTS `pro_quote_options` (

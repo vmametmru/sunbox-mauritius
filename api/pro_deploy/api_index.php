@@ -77,10 +77,12 @@ try {
             $stmt = $sdb->prepare("
                 SELECT bc.id, bc.name, bc.parent_id, bc.display_order, bc.qty_editable,
                        mi.file_path as image_path,
-                       COALESCE(SUM(ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS own_price_ht
+                       COALESCE(SUM(ROUND(bl.quantity * COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS own_price_ht
                 FROM boq_categories bc
+                LEFT JOIN models m ON m.id = bc.model_id
                 LEFT JOIN boq_lines bl ON bc.id = bl.category_id
-                LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
+                LEFT JOIN pool_boq_price_list ppl ON bl.price_list_id = ppl.id AND m.type IN ('pool', 'container')
+                LEFT JOIN modular_boq_price_list mpl ON bl.price_list_id = mpl.id AND m.type NOT IN ('pool', 'container')
                 LEFT JOIN model_images mi ON bc.image_id = mi.id
                 WHERE bc.model_id = ? AND bc.is_option = TRUE
                 GROUP BY bc.id
@@ -236,11 +238,13 @@ try {
             $unforeseen = (float)($mRow['unforeseen_cost_percent'] ?? 10);
             $stmt = $sdb->prepare("
                 SELECT
-                    COALESCE(SUM(ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS base_price_ht,
-                    COALESCE(SUM(ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht), 2)), 0) AS total_cost_ht
+                    COALESCE(SUM(ROUND(bl.quantity * COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS base_price_ht,
+                    COALESCE(SUM(ROUND(bl.quantity * COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht), 2)), 0) AS total_cost_ht
                 FROM boq_categories bc
+                LEFT JOIN models m ON m.id = bc.model_id
                 LEFT JOIN boq_lines bl ON bc.id = bl.category_id
-                LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
+                LEFT JOIN pool_boq_price_list ppl ON bl.price_list_id = ppl.id AND m.type IN ('pool', 'container')
+                LEFT JOIN modular_boq_price_list mpl ON bl.price_list_id = mpl.id AND m.type NOT IN ('pool', 'container')
                 WHERE bc.model_id = ? AND bc.is_option = FALSE
             ");
             $stmt->execute([$modelId]);
@@ -274,6 +278,101 @@ try {
                 ORDER BY pl.display_order ASC
             ");
             ok($stmt->fetchAll());
+            break;
+        }
+
+        // ── MODEL TYPES (reads from Sunbox DB) ───────────────────────────────
+        case 'get_model_types': {
+            $sdb  = getSunboxDB();
+            $rows = $sdb->query("SELECT * FROM model_types WHERE is_active = 1 ORDER BY display_order ASC, name ASC")->fetchAll();
+            foreach ($rows as &$r) {
+                $r['is_active']     = (bool)$r['is_active'];
+                $r['display_order'] = (int)$r['display_order'];
+            }
+            ok($rows);
+            break;
+        }
+
+        case 'get_model_type_dimensions': {
+            $sdb  = getSunboxDB();
+            $slug = sanitize($body['model_type_slug'] ?? '');
+            if (!$slug) fail('model_type_slug requis');
+            $stmt = $sdb->prepare("SELECT * FROM model_type_dimensions WHERE model_type_slug = ? ORDER BY display_order ASC");
+            $stmt->execute([$slug]);
+            ok($stmt->fetchAll(PDO::FETCH_ASSOC));
+            break;
+        }
+
+        // ── MODULAR BOQ (reads from Sunbox DB) ────────────────────────────────
+        case 'get_modular_boq_variables': {
+            $sdb  = getSunboxDB();
+            $stmt = $sdb->query("SELECT * FROM modular_boq_variables ORDER BY display_order ASC");
+            ok($stmt->fetchAll());
+            break;
+        }
+
+        case 'get_modular_boq_price_list': {
+            $sdb  = getSunboxDB();
+            $stmt = $sdb->query("
+                SELECT mp.*, s.name AS supplier_name
+                FROM modular_boq_price_list mp
+                LEFT JOIN suppliers s ON mp.supplier_id = s.id
+                ORDER BY mp.display_order ASC
+            ");
+            $rows = $stmt->fetchAll();
+            foreach ($rows as &$r) {
+                $r['unit_price'] = (float)$r['unit_price'];
+                $r['has_vat']    = (bool)$r['has_vat'];
+            }
+            ok($rows);
+            break;
+        }
+
+        case 'get_modular_boq_full': {
+            $sdb     = getSunboxDB();
+            $modelId = (int)($body['model_id'] ?? 0);
+            if ($modelId <= 0) fail("model_id manquant");
+
+            $stmt = $sdb->prepare("
+                SELECT bc.id, bc.name, bc.is_option, bc.qty_editable, bc.display_order, bc.parent_id
+                FROM boq_categories bc
+                WHERE bc.model_id = ?
+                ORDER BY bc.display_order ASC, bc.name ASC
+            ");
+            $stmt->execute([$modelId]);
+            $categories = $stmt->fetchAll();
+
+            $lineStmt = $sdb->prepare("
+                SELECT bl.id, bl.description, bl.quantity, bl.quantity_formula,
+                       bl.unit, bl.unit_cost_ht, bl.unit_cost_formula,
+                       bl.price_list_id, bl.margin_percent, bl.display_order,
+                       mp.unit_price AS price_list_unit_price
+                FROM boq_lines bl
+                LEFT JOIN modular_boq_price_list mp ON bl.price_list_id = mp.id
+                WHERE bl.category_id = ?
+                ORDER BY bl.display_order ASC, bl.id ASC
+            ");
+
+            foreach ($categories as &$cat) {
+                $cat['id']           = (int)$cat['id'];
+                $cat['is_option']    = (bool)$cat['is_option'];
+                $cat['qty_editable'] = (bool)($cat['qty_editable'] ?? false);
+                $cat['parent_id']    = $cat['parent_id'] ? (int)$cat['parent_id'] : null;
+                $cat['display_order'] = (int)$cat['display_order'];
+                $lineStmt->execute([$cat['id']]);
+                $lines = $lineStmt->fetchAll();
+                foreach ($lines as &$ln) {
+                    $ln['id']                    = (int)$ln['id'];
+                    $ln['quantity']              = (float)$ln['quantity'];
+                    $ln['unit_cost_ht']          = (float)$ln['unit_cost_ht'];
+                    $ln['margin_percent']        = (float)$ln['margin_percent'];
+                    $ln['display_order']         = (int)$ln['display_order'];
+                    $ln['price_list_id']         = $ln['price_list_id'] ? (int)$ln['price_list_id'] : null;
+                    $ln['price_list_unit_price'] = $ln['price_list_unit_price'] !== null ? (float)$ln['price_list_unit_price'] : null;
+                }
+                $cat['lines'] = $lines;
+            }
+            ok($categories);
             break;
         }
 
@@ -529,7 +628,7 @@ try {
                     $topStmt->execute([$modelId]);
                     $topCats = $topStmt->fetchAll();
                     $subStmt = $sdb->prepare("SELECT bc.id, bc.name FROM boq_categories bc WHERE bc.model_id = ? AND bc.is_option = FALSE AND bc.parent_id = ? ORDER BY bc.display_order ASC, bc.name ASC");
-                    $lineStmt = $sdb->prepare("SELECT bl.description, bl.quantity, bl.unit, COALESCE(pl.unit_price, bl.unit_cost_ht) AS unit_cost_ht, bl.margin_percent, ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2) AS sale_price_ht FROM boq_lines bl LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id WHERE bl.category_id = ? ORDER BY bl.display_order ASC, bl.id ASC");
+                    $lineStmt = $sdb->prepare("SELECT bl.description, bl.quantity, bl.unit, COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht) AS unit_cost_ht, bl.margin_percent, ROUND(bl.quantity * COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2) AS sale_price_ht FROM boq_lines bl LEFT JOIN boq_categories bc_q ON bl.category_id = bc_q.id LEFT JOIN models m_q ON bc_q.model_id = m_q.id LEFT JOIN pool_boq_price_list ppl ON bl.price_list_id = ppl.id AND m_q.type IN ('pool', 'container') LEFT JOIN modular_boq_price_list mpl ON bl.price_list_id = mpl.id AND m_q.type NOT IN ('pool', 'container') WHERE bl.category_id = ? ORDER BY bl.display_order ASC, bl.id ASC");
                     foreach ($topCats as $topCat) {
                         $topId = (int)$topCat['id'];
                         $subStmt->execute([$modelId, $topId]);
@@ -712,7 +811,7 @@ try {
             try {
                 $yearMonth  = date('Ym');
                 $modelType  = $body['model_type'];
-                $refPrefix  = ($modelType === 'container') ? 'PCQ' : 'PPQ';
+                $refPrefix  = ($modelType === 'container') ? 'PCQ' : (($modelType === 'pool') ? 'PPQ' : 'P' . strtoupper(substr($modelType, 0, 1)) . 'Q');
                 $maxNext    = (int)$db->query("SELECT COALESCE(MAX(id),0)+1 FROM pro_quotes")->fetchColumn();
                 $reference  = sprintf('%s-%s-%06d', $refPrefix, $yearMonth, $maxNext);
                 $validUntil = date('Y-m-d', strtotime('+30 days'));
@@ -752,9 +851,12 @@ try {
                              pool_longueur_la, pool_largeur_la, pool_profondeur_la,
                              pool_longueur_lb, pool_largeur_lb, pool_profondeur_lb,
                              pool_longueur_ta, pool_largeur_ta, pool_profondeur_ta,
-                             pool_longueur_tb, pool_largeur_tb, pool_profondeur_tb)
+                             pool_longueur_tb, pool_largeur_tb, pool_profondeur_tb,
+                             modular_longueur, modular_largeur, modular_nb_etages,
+                             custom_dimensions)
                         VALUES (?,?,?,?,?, ?,?,?,?,?, ?,?,?,'open',?,
-                                ?, ?,?,?, ?,?,?, ?,?,?, ?,?,?, ?,?,?)
+                                ?, ?,?,?, ?,?,?, ?,?,?, ?,?,?, ?,?,?,
+                                ?,?,?,?)
                     ")->execute([
                         $reference,
                         $contactId,
@@ -774,9 +876,12 @@ try {
                         $nullFloat('pool_longueur_lb'), $nullFloat('pool_largeur_lb'), $nullFloat('pool_profondeur_lb'),
                         $nullFloat('pool_longueur_ta'), $nullFloat('pool_largeur_ta'), $nullFloat('pool_profondeur_ta'),
                         $nullFloat('pool_longueur_tb'), $nullFloat('pool_largeur_tb'), $nullFloat('pool_profondeur_tb'),
+                        $nullFloat('modular_longueur'), $nullFloat('modular_largeur'),
+                        isset($body['modular_nb_etages']) ? (int)$body['modular_nb_etages'] : null,
+                        isset($body['custom_dimensions']) ? json_encode($body['custom_dimensions']) : null,
                     ]);
                     $proInserted = true;
-                } catch (PDOException $dimEx) { /* pool dimension columns not yet added – fall through */ }
+                } catch (PDOException $dimEx) { /* dimension columns not yet added – fall through */ }
 
                 if (!$proInserted) {
                     $db->prepare("
@@ -971,13 +1076,15 @@ try {
             $boqSqlTpl = "
                 SELECT bc.name AS category_name,
                        bl.description, bl.quantity, bl.unit, bl.margin_percent,
-                       COALESCE(pl.unit_price, bl.unit_cost_ht) AS unit_price,
-                       ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht), 2) AS total_price,
+                       COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht) AS unit_price,
+                       ROUND(bl.quantity * COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht), 2) AS total_price,
                        %s AS supplier_name,
                        bc.display_order AS cat_order, bl.display_order AS line_order
                 FROM boq_categories bc
+                LEFT JOIN models m_pr ON m_pr.id = bc.model_id
                 LEFT JOIN boq_lines bl ON bl.category_id = bc.id
-                LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
+                LEFT JOIN pool_boq_price_list ppl ON bl.price_list_id = ppl.id AND m_pr.type IN ('pool', 'container')
+                LEFT JOIN modular_boq_price_list mpl ON bl.price_list_id = mpl.id AND m_pr.type NOT IN ('pool', 'container')
                 LEFT JOIN suppliers s ON bl.supplier_id = s.id
                 WHERE bc.model_id = ? AND bc.is_option = %s AND bl.id IS NOT NULL
                 ORDER BY COALESCE(s.name,'Fournisseur non défini'), bc.display_order, bl.display_order
@@ -1017,13 +1124,15 @@ try {
                     $optTpl = "
                         SELECT bc.name AS category_name,
                                bl.description, bl.quantity, bl.unit, bl.margin_percent,
-                               COALESCE(pl.unit_price, bl.unit_cost_ht) AS unit_price,
-                               ROUND(bl.quantity * COALESCE(pl.unit_price, bl.unit_cost_ht), 2) AS total_price,
+                               COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht) AS unit_price,
+                               ROUND(bl.quantity * COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht), 2) AS total_price,
                                %s AS supplier_name,
                                bc.display_order AS cat_order, bl.display_order AS line_order
                         FROM boq_categories bc
+                        LEFT JOIN models m_pr3 ON m_pr3.id = bc.model_id
                         LEFT JOIN boq_lines bl ON bl.category_id = bc.id
-                        LEFT JOIN pool_boq_price_list pl ON bl.price_list_id = pl.id
+                        LEFT JOIN pool_boq_price_list ppl ON bl.price_list_id = ppl.id AND m_pr3.type IN ('pool', 'container')
+                        LEFT JOIN modular_boq_price_list mpl ON bl.price_list_id = mpl.id AND m_pr3.type NOT IN ('pool', 'container')
                         LEFT JOIN suppliers s ON bl.supplier_id = s.id
                         WHERE bc.model_id = ? AND bc.is_option = TRUE AND bc.name IN ($ph) AND bl.id IS NOT NULL
                         ORDER BY COALESCE(s.name,'Fournisseur non défini'), bc.display_order, bl.display_order

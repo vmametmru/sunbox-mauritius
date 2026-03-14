@@ -27,7 +27,7 @@ const HEADER_HEIGHT_MAP: Record<string, string> = {
 /* ── Shared nav links ── */
 const NAV_LINKS = [
   { to: '/',       label: 'Accueil' },
-  { to: '/models', label: 'Modèles' },
+  { to: '/models', label: 'Nos Solutions' },
   { to: '/about',  label: 'À propos' },
   { to: '/contact', label: 'Contact' },
   { to: '/legal',  label: 'Mentions légales' },
@@ -221,7 +221,7 @@ export default function PublicLayout({ children }: { children: ReactNode }) {
         {/* Navigation */}
         <nav className="flex gap-6 text-sm font-medium">
           <Link to="/" className="hover:text-orange-500 transition-colors">Accueil</Link>
-          <Link to="/models" className="hover:text-orange-500 transition-colors">Modèles</Link>
+          <Link to="/models" className="hover:text-orange-500 transition-colors">Nos Solutions</Link>
           <Link to="/about" className="hover:text-orange-500 transition-colors">À propos</Link>
           <Link to="/contact" className="hover:text-orange-500 transition-colors">Contact</Link>
           <Link to="/legal" className="hover:text-orange-500 transition-colors">Mentions légales</Link>
