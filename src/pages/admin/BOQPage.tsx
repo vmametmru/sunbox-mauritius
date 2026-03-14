@@ -641,6 +641,20 @@ export default function BOQPage() {
     if (!confirm(confirmMessage)) return;
     try {
       setSaving(true);
+
+      // Load modular price list to resolve price_list_name → unit_cost_ht + price_list_id
+      let customPriceMap: Record<string, { id: number; unit_price: number; unit: string }> = {};
+      try {
+        const customPriceData = await api.getModularBOQPriceList();
+        if (Array.isArray(customPriceData)) {
+          for (const p of customPriceData) {
+            customPriceMap[String(p.name)] = { id: Number(p.id), unit_price: Number(p.unit_price ?? 0), unit: String(p.unit ?? 'unité') };
+          }
+        }
+      } catch (priceErr: any) {
+        console.warn('Impossible de charger la liste de prix modulaire :', priceErr?.message ?? priceErr);
+      }
+
       const { base: baseTemplate, options: optionsTemplate } = await loadModularTemplateFromDB(selectedModel.type);
       if (!baseTemplate && !optionsTemplate) {
         toast({
@@ -657,6 +671,25 @@ export default function BOQPage() {
       ];
       let createdCategories = 0;
       let createdLines = 0;
+
+      const createLineFromTemplate = async (categoryId: number, line: ModularBOQTemplateLine, displayOrder: number) => {
+        const priceItem = line.price_list_name ? customPriceMap[line.price_list_name] : undefined;
+        await api.createBOQLine({
+          category_id: categoryId,
+          description: line.description,
+          quantity: 1,
+          quantity_formula: line.quantity_formula || null,
+          unit: priceItem ? priceItem.unit : line.unit,
+          unit_cost_ht: priceItem ? priceItem.unit_price : 0,
+          unit_cost_formula: null,
+          price_list_id: priceItem ? priceItem.id : null,
+          supplier_id: line.supplier_id ?? null,
+          margin_percent: line.margin_percent ?? DEFAULT_MARGIN_PERCENT,
+          display_order: displayOrder,
+        });
+        createdLines++;
+      };
+
       for (const cat of allTemplates) {
         const catResult = await api.createBOQCategory({
           model_id: selectedModelId,
@@ -669,20 +702,7 @@ export default function BOQPage() {
         const parentCatId = catResult.id;
         createdCategories++;
         for (const [i, line] of cat.lines.entries()) {
-          await api.createBOQLine({
-            category_id: parentCatId,
-            description: line.description,
-            quantity: 1,
-            quantity_formula: line.quantity_formula || null,
-            unit: line.unit,
-            unit_cost_ht: 0,
-            unit_cost_formula: null,
-            price_list_id: null,
-            supplier_id: line.supplier_id ?? null,
-            margin_percent: line.margin_percent ?? DEFAULT_MARGIN_PERCENT,
-            display_order: i + 1,
-          });
-          createdLines++;
+          await createLineFromTemplate(parentCatId, line, i + 1);
         }
         for (const subCat of (cat.subcategories ?? [])) {
           const subCatResult = await api.createBOQCategory({
@@ -696,38 +716,27 @@ export default function BOQPage() {
           const subCatId = subCatResult.id;
           createdCategories++;
           for (const [i, line] of subCat.lines.entries()) {
-            await api.createBOQLine({
-              category_id: subCatId,
-              description: line.description,
-              quantity: 1,
-              quantity_formula: line.quantity_formula || null,
-              unit: line.unit,
-              unit_cost_ht: 0,
-              unit_cost_formula: null,
-              price_list_id: null,
-              supplier_id: line.supplier_id ?? null,
-              margin_percent: line.margin_percent ?? DEFAULT_MARGIN_PERCENT,
-              display_order: i + 1,
-            });
-            createdLines++;
+            await createLineFromTemplate(subCatId, line, i + 1);
           }
         }
       }
+
       toast({
         title: 'Succès',
         description: `BOQ généré : ${createdCategories} catégories et ${createdLines} lignes créées`,
       });
+
+      // Reload all categories and their lines in parallel so values display immediately
       const loadedCategories = await api.getBOQCategories(selectedModelId);
-      const subCats = loadedCategories.filter((c: any) => c.parent_id);
+      const lineResults = await Promise.all(
+        loadedCategories.map((cat: any) =>
+          api.getBOQLines(cat.id)
+            .then((lines: any) => ({ id: cat.id, lines: Array.isArray(lines) ? lines : [] }))
+            .catch(() => ({ id: cat.id, lines: [] as any[] }))
+        )
+      );
       const linesData: Record<number, any[]> = {};
-      for (const subCat of subCats) {
-        try {
-          const lines = await api.getBOQLines(subCat.id);
-          linesData[subCat.id] = Array.isArray(lines) ? lines : [];
-        } catch {
-          linesData[subCat.id] = [];
-        }
-      }
+      for (const r of lineResults) linesData[r.id] = r.lines;
       setCategories(loadedCategories);
       setCategoryLines(linesData);
       setExpandedCategories(loadedCategories.map((c: any) => c.id));
