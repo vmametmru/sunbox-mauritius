@@ -189,7 +189,7 @@ try {
     case 'list_by_media_type': {
       $mediaType = $_GET['media_type'] ?? '';
 
-      if (!in_array($mediaType, ['photo', 'plan', 'bandeau', 'category_image'], true)) {
+      if (!in_array($mediaType, ['photo', 'plan', 'bandeau', 'category_image', 'gallerie'], true)) {
         fail("media_type invalide.");
       }
 
@@ -244,17 +244,17 @@ try {
       $modelId   = (int)($_GET['model_id'] ?? 0);
       $mediaType = $_POST['media_type'] ?? 'photo';
 
-      if (!in_array($mediaType, ['photo','plan','bandeau','category_image'], true)) {
+      if (!in_array($mediaType, ['photo','plan','bandeau','category_image','gallerie'], true)) {
         $mediaType = 'photo';
       }
 
       // category_image and bandeau don't need model_id
-      if (!in_array($mediaType, ['bandeau', 'category_image'], true) && $modelId <= 0) {
+      if (!in_array($mediaType, ['bandeau', 'category_image', 'gallerie'], true) && $modelId <= 0) {
         fail("model_id requis.");
       }
 
-      // category_image and bandeau have model_id = 0
-      if (in_array($mediaType, ['bandeau', 'category_image'], true)) {
+      // category_image, bandeau and gallerie have model_id = 0
+      if (in_array($mediaType, ['bandeau', 'category_image', 'gallerie'], true)) {
         $modelId = 0;
       }
 
@@ -266,15 +266,29 @@ try {
       $countStmt->execute([$modelId]);
       $count = (int)$countStmt->fetchColumn();
 
+      // Gallery metadata (region, title, description, pro_user_id)
+      $region      = $_POST['region']      ?? null;
+      $title       = $_POST['title']       ?? null;
+      $description = $_POST['description'] ?? null;
+      $proUserId   = isset($_POST['pro_user_id']) ? (int)$_POST['pro_user_id'] : null;
+
+      if ($region && !in_array($region, ['Nord','Sud','Est','Ouest','Centre'], true)) {
+        $region = null;
+      }
+
       $stmt = $db->prepare("
-        INSERT INTO model_images (model_id, file_path, is_primary, media_type)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO model_images (model_id, file_path, is_primary, media_type, region, title, description, pro_user_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ");
       $stmt->execute([
         $modelId,
         $up['relative'],
         $mediaType === 'photo' && $count === 0 ? 1 : 0,
-        $mediaType
+        $mediaType,
+        $region,
+        $title,
+        $description,
+        $proUserId
       ]);
 
       $insertedId = $db->lastInsertId();
@@ -357,6 +371,31 @@ try {
       $up = uploadOne('uploads/free-quotes', $ALLOWED_MIME, $MAX_BYTES);
 
       ok(['file' => $up, 'url' => $up['url']]);
+      break;
+    }
+
+    /* ---------- LIST GALLERY IMAGES ---------- */
+    case 'list_gallery_images': {
+      $region    = $_GET['region']      ?? null;
+      $proUserId = isset($_GET['pro_user_id']) ? (int)$_GET['pro_user_id'] : null;
+
+      $sql    = "SELECT * FROM model_images WHERE media_type = 'gallerie'";
+      $params = [];
+
+      if ($region && in_array($region, ['Nord','Sud','Est','Ouest','Centre'], true)) {
+        $sql .= " AND region = ?";
+        $params[] = $region;
+      }
+      if ($proUserId !== null) {
+        $sql .= " AND pro_user_id = ?";
+        $params[] = $proUserId;
+      }
+
+      $sql .= " ORDER BY id DESC";
+      $stmt = $db->prepare($sql);
+      $stmt->execute($params);
+
+      ok(['items' => $stmt->fetchAll()]);
       break;
     }
 
