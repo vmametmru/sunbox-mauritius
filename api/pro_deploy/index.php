@@ -211,7 +211,18 @@ foreach (['/vite.svg', '/favicon.ico', '/favicon.png'] as $staticAsset) {
 }
 
 // ── Inject pro config variables before </head> ────────────────────────────────
-$apiBaseUrl  = $proAppUrl . '/api';
+// When a custom domain is configured the site is accessed via that domain but
+// APP_URL still points to the Sunbox subdirectory (e.g. sunbox-mauritius.com/pros/mokosting).
+// Injecting APP_URL as the API base would make every fetch() call cross-origin,
+// triggering CORS errors ("Failed to fetch").  Instead, derive the API URL from
+// the actual HTTP_HOST so it is always same-origin with the browser.
+$_customDomain = trim($proEnv['DOMAIN'] ?? '');
+if ($_customDomain && !empty($_SERVER['HTTP_HOST'])) {
+    $_proto     = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+    $apiBaseUrl = $_proto . '://' . $_SERVER['HTTP_HOST'] . '/api';
+} else {
+    $apiBaseUrl = $proAppUrl . '/api';
+}
 $inject = '<script>'
     . 'window.__PRO_SITE__=true;'
     . 'window.__API_BASE_URL__='     . json_encode($apiBaseUrl,   JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE) . ';'

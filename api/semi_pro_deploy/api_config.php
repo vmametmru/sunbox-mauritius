@@ -18,7 +18,7 @@ declare(strict_types=1);
  */
 
 /** Deployed file version — must match SEMI_PRO_FILE_VERSION in sunbox api/index.php. */
-define('SEMI_PRO_FILE_VERSION', '1.0.0');
+define('SEMI_PRO_FILE_VERSION', '1.0.1');
 
 /**
  * Parse a single .env file from disk, bypassing getenv() entirely.
@@ -296,6 +296,19 @@ function handleCORS(): void
     if ($host) {
         $allowed[] = 'https://' . $host;
         $allowed[] = 'https://www.' . $host;
+    }
+    // Also allow the custom domain configured for this semi-pro site.
+    // The API URL injected by index.php uses the HTTP_HOST so requests are same-origin;
+    // this is kept here as a defence-in-depth safety net.
+    $customDomain = trim((string)env('DOMAIN', ''));
+    if ($customDomain) {
+        if (strpos($customDomain, 'www.') === 0) {
+            $allowed[] = 'https://' . $customDomain;
+            $allowed[] = 'https://' . substr($customDomain, 4);
+        } else {
+            $allowed[] = 'https://' . $customDomain;
+            $allowed[] = 'https://www.' . $customDomain;
+        }
     }
     $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
     if ($origin && in_array($origin, $allowed, true)) {
