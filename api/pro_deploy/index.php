@@ -69,27 +69,37 @@ if ($proUserId > 0) {
                  PDO::ATTR_EMULATE_PREPARES   => false]
             );
 
-            // Fetch logo_url and login_bg_url from DB (authoritative, no redeploy needed)
-            $_stmtBrand = $_pdo->prepare(
-                "SELECT logo_url, login_bg_url FROM professional_profiles WHERE user_id = ? LIMIT 1"
-            );
-            $_stmtBrand->execute([$proUserId]);
-            $_brand = $_stmtBrand->fetch();
-            if ($_brand) {
-                if (!empty($_brand['logo_url'])) {
-                    $_dbLogoUrl = (string)$_brand['logo_url'];
-                    // Make absolute if relative path
-                    if (strpos($_dbLogoUrl, 'http') !== 0 && strlen($_dbLogoUrl) > 0) {
-                        $_dbLogoUrl = rtrim($sunboxBase, '/') . '/' . ltrim($_dbLogoUrl, '/');
+            // Fetch logo_url and login_bg_url from DB (authoritative, no redeploy needed).
+            // Wrapped in its own try/catch so a missing column (schema not yet migrated)
+            // doesn't prevent theme and header-image loading below.
+            try {
+                $_stmtBrand = $_pdo->prepare(
+                    "SELECT logo_url, login_bg_url FROM professional_profiles WHERE user_id = ? LIMIT 1"
+                );
+                $_stmtBrand->execute([$proUserId]);
+                $_brand = $_stmtBrand->fetch();
+                if ($_brand) {
+                    if (!empty($_brand['logo_url'])) {
+                        $_dbLogoUrl = (string)$_brand['logo_url'];
+                        // Make absolute if relative path
+                        if (strpos($_dbLogoUrl, 'http') !== 0 && strlen($_dbLogoUrl) > 0) {
+                            $_dbLogoUrl = rtrim($sunboxBase, '/') . '/' . ltrim($_dbLogoUrl, '/');
+                        }
+                        $logoUrl = $_dbLogoUrl;
                     }
-                    $logoUrl = $_dbLogoUrl;
+                    if (!empty($_brand['login_bg_url'])) {
+                        $_dbLoginBg = (string)$_brand['login_bg_url'];
+                        if (strpos($_dbLoginBg, 'http') !== 0 && strlen($_dbLoginBg) > 0) {
+                            $_dbLoginBg = rtrim($sunboxBase, '/') . '/' . ltrim($_dbLoginBg, '/');
+                        }
+                        $loginBgUrl = $_dbLoginBg;
+                    }
                 }
-                if (!empty($_brand['login_bg_url'])) {
-                    $_dbLoginBg = (string)$_brand['login_bg_url'];
-                    if (strpos($_dbLoginBg, 'http') !== 0 && strlen($_dbLoginBg) > 0) {
-                        $_dbLoginBg = rtrim($sunboxBase, '/') . '/' . ltrim($_dbLoginBg, '/');
-                    }
-                    $loginBgUrl = $_dbLoginBg;
+            } catch (\Throwable $_brandEx) {
+                // Could be a missing column (schema migration pending) or a connection issue.
+                // Fall back to .env values for logo/background.
+                if (($proEnv['API_DEBUG'] ?? '') === 'true') {
+                    error_log('[index.php] Brand fetch failed (will use .env fallback): ' . $_brandEx->getMessage());
                 }
             }
 

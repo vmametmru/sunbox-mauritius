@@ -59,6 +59,32 @@ function getQuotePrefix(string $modelType, bool $isFreeQuote = false, bool $isPr
 try {
     $db = getDB();
 
+    // ── Auto-apply pending schema changes ─────────────────────────────────────
+    // Runs silently on every request. Uses information_schema to skip columns that
+    // already exist, so this is idempotent and negligible overhead.
+    // This ensures new columns are available immediately after a code deploy,
+    // without requiring the admin to manually trigger 'update_db_schema'.
+    try {
+        // NOTE: $t, $c, $d are hardcoded literal strings in every call site below —
+        // never interpolated from user input — so there is no injection risk here.
+        $autoCol = function(string $t, string $c, string $d) use ($db): void {
+            $s = $db->prepare(
+                "SELECT COUNT(*) FROM information_schema.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?"
+            );
+            $s->execute([$t, $c]);
+            if (!(bool)$s->fetchColumn()) {
+                $db->exec("ALTER TABLE `{$t}` ADD COLUMN `{$c}` {$d}");
+            }
+        };
+        // v2.18.0
+        $autoCol('professional_profiles', 'login_bg_url', 'VARCHAR(500) NULL DEFAULT NULL');
+    } catch (\Throwable $_autoEx) {
+        // Non-blocking — log only; do not abort the request
+        error_log('[api] auto-migrate warning: ' . $_autoEx->getMessage());
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     switch ($action) {
         // === DASHBOARD STATS
         case 'get_dashboard_stats': {
