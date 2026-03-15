@@ -7,9 +7,14 @@ export default function RequirePro() {
   const [isPro, setIsPro] = useState(false);
   const location = useLocation();
 
+  const isSemiProSite = typeof window !== 'undefined' && !!(window as any).__SEMI_PRO_SITE__;
+
   useEffect(() => {
     (async () => {
       try {
+        // Both pro and semi-pro sites deploy their auth as /api/pro_auth.php.
+        // The deployed file for semi-pro (api_semi_pro_auth.php) also returns is_pro: true
+        // on success, so RequirePro works identically for both.
         const r = await fetch(`${API_BASE_URL}/pro_auth.php?action=me`, {
           method: 'GET',
           credentials: 'include',
@@ -28,6 +33,11 @@ export default function RequirePro() {
 
   if (!isPro) {
     return <Navigate to="/pro-login" replace state={{ from: location }} />;
+  }
+
+  // On semi-pro site, also expose the flag on the window for child components
+  if (isSemiProSite) {
+    (window as any).__IS_SEMI_PRO_AUTHENTICATED__ = true;
   }
 
   return <Outlet />;

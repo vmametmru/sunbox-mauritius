@@ -1,5 +1,6 @@
 // ✅ src/App.tsx
 
+import React from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -68,21 +69,32 @@ import ProAdminDiscountsPage from "./pages/admin/DiscountsPage";
 import ProAdminEmailPage from "./pages/admin/EmailSettingsPage";
 import ProAdminPaymentsPage from "./pages/admin/PaymentsPage";
 import ProAdminSitePage from "./pages/admin/SiteSettingsPage";
+import { Navigate } from "react-router-dom";
 
 const queryClient = new QueryClient();
 
+/**
+ * On the semi-pro shared site (window.__SEMI_PRO_SITE__ = true) the public
+ * marketing pages are not available — the landing page IS the login page.
+ * This helper returns a redirect to /pro-login for public routes on that site.
+ */
+const isSemiProSite = typeof window !== 'undefined' && !!(window as any).__SEMI_PRO_SITE__;
+function pub(element: React.ReactElement): React.ReactElement {
+  return isSemiProSite ? <Navigate to="/pro-login" replace /> : element;
+}
+
 const router = createHashRouter([
-  /* Public */
-  { path: "/",                         element: <HomePage /> },
-  { path: "/about",                    element: <AboutPage /> },
-  { path: "/contact",                  element: <ContactPage /> },
-  { path: "/legal",                    element: <LegalPage /> },
-  { path: "/models",                   element: <ModelsPage /> },
-  { path: "/gallery",                  element: <GalleryPage /> },
-  { path: "/configure",                element: <ConfigurePage /> },
-  { path: "/details",                  element: <DetailsPage /> },
-  { path: "/quote",                    element: <QuotePage /> },
-  { path: "/quote-action/:quoteId",    element: <QuoteActionPage /> },
+  /* Public — redirected to /pro-login on semi-pro site */
+  { path: "/",                         element: pub(<HomePage />) },
+  { path: "/about",                    element: pub(<AboutPage />) },
+  { path: "/contact",                  element: pub(<ContactPage />) },
+  { path: "/legal",                    element: pub(<LegalPage />) },
+  { path: "/models",                   element: pub(<ModelsPage />) },
+  { path: "/gallery",                  element: pub(<GalleryPage />) },
+  { path: "/configure",                element: pub(<ConfigurePage />) },
+  { path: "/details",                  element: pub(<DetailsPage />) },
+  { path: "/quote",                    element: pub(<QuotePage />) },
+  { path: "/quote-action/:quoteId",    element: pub(<QuoteActionPage />) },
   { path: "/admin-login",              element: <AdminLoginPage /> },
 
   /* Admin */
