@@ -1014,10 +1014,10 @@ export const api = {
   },
 
   /* =====================================================
-     MODULAR BOQ PRICE LIST
+     MODULAR BOQ PRICE LIST (redirected to unified pricelist)
   ===================================================== */
   getModularBOQPriceList() {
-    return this.query('get_modular_boq_price_list');
+    return this.query('get_pool_boq_price_list');
   },
 
   createModularBOQPriceListItem(item: {
@@ -1028,7 +1028,7 @@ export const api = {
     supplier_id?: number | null;
     display_order?: number;
   }) {
-    return this.query('create_modular_boq_price_list_item', item);
+    return this.query('create_pool_boq_price_list_item', item);
   },
 
   updateModularBOQPriceListItem(item: {
@@ -1040,11 +1040,11 @@ export const api = {
     supplier_id?: number | null;
     display_order?: number;
   }) {
-    return this.query('update_modular_boq_price_list_item', item);
+    return this.query('update_pool_boq_price_list_item', item);
   },
 
   deleteModularBOQPriceListItem(id: number) {
-    return this.query('delete_modular_boq_price_list_item', { id });
+    return this.query('delete_pool_boq_price_list_item', { id });
   },
 
   /* =====================================================

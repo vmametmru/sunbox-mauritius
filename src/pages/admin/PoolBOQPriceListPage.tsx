@@ -204,9 +204,9 @@ export default function PoolBOQPriceListPage() {
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Base de Prix Piscine</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Pricelist</h1>
           <p className="text-muted-foreground">
-            Gérez les prix unitaires des matériaux et services pour les BOQ piscines
+            Gérez les prix unitaires des matériaux et services pour tous les BOQ
           </p>
         </div>
         <Button onClick={openNew} className="bg-orange-500 hover:bg-orange-600">
