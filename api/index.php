@@ -11,7 +11,7 @@ define('PRO_DB_SCHEMA_VERSION', '1.8.0');
 
 // Semi-pro shared site deployment version.
 // SEMI_PRO_FILE_VERSION must match define('SEMI_PRO_FILE_VERSION', ...) in api/semi_pro_deploy/api_config.php
-define('SEMI_PRO_FILE_VERSION',      '1.0.4');
+define('SEMI_PRO_FILE_VERSION',      '1.0.5');
 define('SEMI_PRO_DB_SCHEMA_VERSION', '1.0.0');
 
 // Sunbox main database schema version.

@@ -23,6 +23,18 @@ $body   = getRequestBody();
 function semi_ok(array $data = []): void  { successResponse($data); }
 function semi_fail(string $msg, int $code = 401): void { errorResponse($msg, $code); }
 
+/**
+ * Returns true when a semi-pro user's profile_active value allows access.
+ * profile_active comes from a LEFT JOIN so it is NULL when no row exists yet.
+ * - NULL  → allow (no profile row; not explicitly deactivated)
+ * - 1     → allow (active)
+ * - 0     → deny  (explicitly deactivated by admin)
+ */
+function semiProProfileAllowed($profileActive): bool
+{
+    return $profileActive === null || (bool)$profileActive;
+}
+
 try {
     switch ($action) {
 
@@ -48,7 +60,7 @@ try {
                 semi_fail('Email ou mot de passe incorrect.', 401);
             }
 
-            if (!$user['user_active'] || !$user['profile_active']) {
+            if (!$user['user_active'] || !semiProProfileAllowed($user['profile_active'])) {
                 semi_fail('Ce compte est désactivé.', 403);
             }
 
@@ -100,7 +112,9 @@ try {
                 $stmt->execute([(int)$_SESSION['semi_pro_user_id']]);
                 $user = $stmt->fetch();
 
-                if ($user && $user['user_active'] && $user['profile_active']) {
+                // profile_active is NULL when no professional_profiles row exists (LEFT JOIN).
+                // Allow login in that case; only reject when the row exists and is_active = 0.
+                if ($user && $user['user_active'] && semiProProfileAllowed($user['profile_active'])) {
                     semi_ok([
                         'is_pro'       => true,
                         'is_semi_pro'  => true,

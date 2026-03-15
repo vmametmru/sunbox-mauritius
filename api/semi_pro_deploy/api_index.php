@@ -214,6 +214,75 @@ try {
             break;
         }
 
+        // ── PROFILE ──────────────────────────────────────────────────────────
+        case 'get_pro_profile': {
+            requireSemiPro();
+            $uid = getSemiProUserId();
+            $sdb = getSunboxDB();
+            $stmt = $sdb->prepare("
+                SELECT u.name, u.email, pp.company_name, pp.address, pp.vat_number, pp.brn_number,
+                       pp.phone, pp.logo_url, pp.sunbox_margin_percent, pp.is_active
+                FROM users u
+                LEFT JOIN professional_profiles pp ON pp.user_id = u.id
+                WHERE u.id = ? AND u.role = 'semi_professional'
+                LIMIT 1
+            ");
+            $stmt->execute([$uid]);
+            $row = $stmt->fetch();
+            if (!$row) fail('Utilisateur introuvable.', 404);
+            ok([
+                'id'                    => $uid,
+                'name'                  => (string)($row['name'] ?? ''),
+                'email'                 => (string)($row['email'] ?? ''),
+                'company_name'          => (string)($row['company_name'] ?? ''),
+                'address'               => (string)($row['address'] ?? ''),
+                'vat_number'            => (string)($row['vat_number'] ?? ''),
+                'brn_number'            => (string)($row['brn_number'] ?? ''),
+                'phone'                 => (string)($row['phone'] ?? ''),
+                'logo_url'              => sunboxAbsUrl($row['logo_url'] ?? ''),
+                'sunbox_margin_percent' => (float)($row['sunbox_margin_percent'] ?? 0),
+                'credits'               => 0,
+                'transactions'          => [],
+            ]);
+            break;
+        }
+
+        case 'update_pro_profile': {
+            requireSemiPro();
+            $uid = getSemiProUserId();
+            $sdb = getSunboxDB();
+            $sets = []; $params = [];
+            if (array_key_exists('company_name', $body)) { $sets[] = 'company_name = ?'; $params[] = sanitize((string)$body['company_name']); }
+            if (array_key_exists('address', $body))      { $sets[] = 'address = ?';      $params[] = sanitize((string)$body['address']); }
+            if (array_key_exists('vat_number', $body))   { $sets[] = 'vat_number = ?';   $params[] = sanitize((string)$body['vat_number']); }
+            if (array_key_exists('brn_number', $body))   { $sets[] = 'brn_number = ?';   $params[] = sanitize((string)$body['brn_number']); }
+            if (array_key_exists('phone', $body))        { $sets[] = 'phone = ?';        $params[] = sanitize((string)$body['phone']); }
+            if (!empty($sets)) {
+                // Try UPDATE first; if no row exists (rowCount = 0), INSERT a new profile row.
+                $sets[] = 'updated_at = NOW()';
+                $params[] = $uid;
+                $stmt = $sdb->prepare("UPDATE professional_profiles SET " . implode(', ', $sets) . " WHERE user_id = ?");
+                $stmt->execute($params);
+                if ($stmt->rowCount() === 0) {
+                    // No profile row yet — create one so the data is persisted.
+                    $sdb->prepare("
+                        INSERT INTO professional_profiles (user_id, company_name, address, vat_number, brn_number, phone, api_token, is_active)
+                        VALUES (?, ?, ?, ?, ?, ?, '', 1)
+                        ON DUPLICATE KEY UPDATE updated_at = NOW()
+                    ")->execute([
+                        $uid,
+                        sanitize((string)($body['company_name'] ?? '')),
+                        sanitize((string)($body['address'] ?? '')),
+                        sanitize((string)($body['vat_number'] ?? '')),
+                        sanitize((string)($body['brn_number'] ?? '')),
+                        sanitize((string)($body['phone'] ?? '')),
+                    ]);
+                }
+            }
+            ok();
+            break;
+        }
+
         // ── SETTINGS ──────────────────────────────────────────────────────────
         case 'get_settings': {
             requireSemiPro();
