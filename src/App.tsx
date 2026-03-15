@@ -82,6 +82,10 @@ const isSemiProSite = typeof window !== 'undefined' && !!(window as any).__SEMI_
 function pub(element: React.ReactElement): React.ReactElement {
   return isSemiProSite ? <Navigate to="/pro-login" replace /> : element;
 }
+/** Routes not available to semi-pro users — redirect to the dashboard. */
+function noSemiPro(element: React.ReactElement): React.ReactElement {
+  return isSemiProSite ? <Navigate to="/pro" replace /> : element;
+}
 
 const router = createHashRouter([
   /* Public — redirected to /pro-login on semi-pro site */
@@ -147,7 +151,7 @@ const router = createHashRouter([
         { path: "quotes",           element: <ProQuotesPage /> },
         { path: "reports",          element: <PurchaseReportsPage /> },
         { path: "reports/:id",      element: <PurchaseReportDetailPage /> },
-        { path: "model-request",    element: <ProModelRequestPage /> },
+        { path: "model-request",    element: noSemiPro(<ProModelRequestPage />) },
         { path: "models",           element: <ProModelsOverridePage /> },
         { path: "settings",         element: <ProSettingsPage /> },
         { path: "contacts",         element: <ProAdminContactsPage /> },
