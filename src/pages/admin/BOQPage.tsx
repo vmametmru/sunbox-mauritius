@@ -52,6 +52,8 @@ import {
 } from '@/components/ui/table';
 import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
+import { useNavigationGuard } from '@/hooks/use-navigation-guard';
+import { UnsavedChangesDialog } from '@/components/UnsavedChangesDialog';
 import { useSiteSettings, calculateTTC } from '@/hooks/use-site-settings';
 import {
   evaluatePoolVariables,
@@ -184,7 +186,11 @@ export default function BOQPage() {
   // Inline supplier editing (pending changes, saved with explicit button)
   const [pendingSupplierChanges, setPendingSupplierChanges] = useState<Record<number, number | null>>({});
   const [savingPending, setSavingPending] = useState(false);
-  
+
+  /* Navigation guard – show confirmation modal when there are pending supplier changes */
+  const { showDialog: showNavDialog, confirmNavigation, cancelNavigation } =
+    useNavigationGuard(Object.keys(pendingSupplierChanges).length > 0);
+
   // Clone modal
   const [cloneSourceModelId, setCloneSourceModelId] = useState<number | null>(null);
   const [isCloneDialogOpen, setIsCloneDialogOpen] = useState(false);
@@ -2407,6 +2413,12 @@ export default function BOQPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <UnsavedChangesDialog
+        open={showNavDialog}
+        onConfirm={confirmNavigation}
+        onCancel={cancelNavigation}
+      />
     </div>
   );
 }

@@ -20,6 +20,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
+import { useNavigationGuard } from '@/hooks/use-navigation-guard';
+import { UnsavedChangesDialog } from '@/components/UnsavedChangesDialog';
 import {
   clearSavedPoolBOQTemplates,
   getHardcodedBaseTemplateByShape,
@@ -253,6 +255,10 @@ const PoolBOQTemplatePage: React.FC = () => {
   // Inline rename state for subcategories
   const [renamingSub, setRenamingSub] = useState<{ type: 'base' | 'options'; catIndex: number; subIndex: number } | null>(null);
   const [renameSubValue, setRenameSubValue] = useState('');
+
+  /* Navigation guard – beforeunload + hashchange modal */
+  const { showDialog: showNavDialog, confirmNavigation, cancelNavigation } =
+    useNavigationGuard(hasChanges);
 
   useEffect(() => {
     loadTemplates(activeShape);
@@ -1118,6 +1124,12 @@ const PoolBOQTemplatePage: React.FC = () => {
           </div>
         </>
       )}
+
+      <UnsavedChangesDialog
+        open={showNavDialog}
+        onConfirm={confirmNavigation}
+        onCancel={cancelNavigation}
+      />
     </div>
   );
 };

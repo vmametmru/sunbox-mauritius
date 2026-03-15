@@ -27,6 +27,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
+import { useNavigationGuard } from '@/hooks/use-navigation-guard';
+import { UnsavedChangesDialog } from '@/components/UnsavedChangesDialog';
 import { api } from '@/lib/api';
 import type { ModelType, ModelTypeDimension } from '@/lib/api';
 import {
@@ -306,25 +308,9 @@ const ModularBOQTemplatePage: React.FC = () => {
     }).catch(() => {});
   }, []);
 
-  /* Navigation guard – beforeunload */
-  useEffect(() => {
-    if (!hasChanges) return;
-    const handler = (e: BeforeUnloadEvent) => { e.returnValue = ''; };
-    window.addEventListener('beforeunload', handler);
-    return () => window.removeEventListener('beforeunload', handler);
-  }, [hasChanges]);
-
-  /* Navigation guard – hashchange */
-  useEffect(() => {
-    if (!hasChanges) return;
-    const handler = (e: HashChangeEvent) => {
-      if (!window.confirm('Vous avez des modifications non sauvegardées dans le modèle BOQ. Quitter quand même ?')) {
-        history.replaceState(null, '', e.oldURL.replace(/^[^#]*/, ''));
-      }
-    };
-    window.addEventListener('hashchange', handler);
-    return () => window.removeEventListener('hashchange', handler);
-  }, [hasChanges]);
+  /* Navigation guard – beforeunload + React Router blocker (modal-based) */
+  const { showDialog: showNavDialog, confirmNavigation, cancelNavigation } =
+    useNavigationGuard(hasChanges);
 
   /* Load custom types on mount */
   useEffect(() => {
@@ -1271,6 +1257,12 @@ const ModularBOQTemplatePage: React.FC = () => {
       </Card>
         </>
       )}
+
+      <UnsavedChangesDialog
+        open={showNavDialog}
+        onConfirm={confirmNavigation}
+        onCancel={cancelNavigation}
+      />
     </div>
   );
 };
