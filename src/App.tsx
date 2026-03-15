@@ -4,7 +4,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { HashRouter, Routes, Route } from "react-router-dom";
+import { createHashRouter, RouterProvider } from "react-router-dom";
 import { ThemeProvider } from "@/components/theme-provider";
 import { QuoteProvider } from "@/contexts/QuoteContext";
 
@@ -71,6 +71,87 @@ import ProAdminSitePage from "./pages/admin/SiteSettingsPage";
 
 const queryClient = new QueryClient();
 
+const router = createHashRouter([
+  /* Public */
+  { path: "/",                         element: <HomePage /> },
+  { path: "/about",                    element: <AboutPage /> },
+  { path: "/contact",                  element: <ContactPage /> },
+  { path: "/legal",                    element: <LegalPage /> },
+  { path: "/models",                   element: <ModelsPage /> },
+  { path: "/gallery",                  element: <GalleryPage /> },
+  { path: "/configure",                element: <ConfigurePage /> },
+  { path: "/details",                  element: <DetailsPage /> },
+  { path: "/quote",                    element: <QuotePage /> },
+  { path: "/quote-action/:quoteId",    element: <QuoteActionPage /> },
+  { path: "/admin-login",              element: <AdminLoginPage /> },
+
+  /* Admin */
+  {
+    element: <RequireAdmin />,
+    children: [{
+      path: "/admin",
+      element: <AdminLayout />,
+      children: [
+        { index: true,                          element: <DashboardPage /> },
+        { path: "quotes",                       element: <QuotesPage /> },
+        { path: "quotes/new",                   element: <CreateQuotePage /> },
+        { path: "quotes/:id",                   element: <QuoteDetailPage /> },
+        { path: "reports",                      element: <PurchaseReportsPage /> },
+        { path: "reports/:id",                  element: <PurchaseReportDetailPage /> },
+        { path: "contacts",                     element: <ContactsPage /> },
+        { path: "models",                       element: <AdminModelsPage /> },
+        { path: "media",                        element: <MediaPage /> },
+        { path: "boq",                          element: <BOQPage /> },
+        { path: "pool-variables",               element: <PoolBOQVariablesPage /> },
+        { path: "pricelist",                    element: <PoolBOQPriceListPage /> },
+        { path: "pool-template",                element: <PoolBOQTemplatePage /> },
+        { path: "modular-variables",            element: <ModularBOQVariablesPage /> },
+        { path: "modular-template",             element: <ModularBOQTemplatePage /> },
+        { path: "model-types",                  element: <ModelTypesPage /> },
+        { path: "suppliers",                    element: <SuppliersPage /> },
+        { path: "email",                        element: <EmailSettingsPage /> },
+        { path: "payments",                     element: <PaymentsPage /> },
+        { path: "site",                         element: <SiteSettingsPage /> },
+        { path: "dev-ideas",                    element: <DevIdeasPage /> },
+        { path: "discounts",                    element: <DiscountsPage /> },
+        { path: "users",                        element: <UsersPage /> },
+        { path: "themes",                       element: <ThemesPage /> },
+        { path: "deploy",                       element: <DeployUpdatePage /> },
+        { path: "debug",                        element: <DebugPage /> },
+        { path: "model-requests",               element: <AdminModelRequestsPage /> },
+      ],
+    }],
+  },
+
+  /* Professional Portal */
+  { path: "/pro-login", element: <ProLoginPage /> },
+  {
+    element: <RequirePro />,
+    children: [{
+      path: "/pro",
+      element: <ProLayout />,
+      children: [
+        { index: true,              element: <ProDashboardPage /> },
+        { path: "quotes",           element: <ProQuotesPage /> },
+        { path: "reports",          element: <PurchaseReportsPage /> },
+        { path: "reports/:id",      element: <PurchaseReportDetailPage /> },
+        { path: "model-request",    element: <ProModelRequestPage /> },
+        { path: "models",           element: <ProModelsOverridePage /> },
+        { path: "settings",         element: <ProSettingsPage /> },
+        { path: "contacts",         element: <ProAdminContactsPage /> },
+        { path: "discounts",        element: <ProAdminDiscountsPage /> },
+        { path: "email",            element: <ProAdminEmailPage /> },
+        { path: "payments",         element: <ProAdminPaymentsPage /> },
+        { path: "site",             element: <ProAdminSitePage /> },
+        { path: "debug",            element: <ProDebugPage /> },
+      ],
+    }],
+  },
+
+  /* Fallback */
+  { path: "*", element: <NotFound /> },
+]);
+
 const App = () => (
   <ThemeProvider defaultTheme="light">
     <QueryClientProvider client={queryClient}>
@@ -78,79 +159,7 @@ const App = () => (
         <TooltipProvider>
           <Toaster />
           <Sonner />
-          <HashRouter>
-            <Routes>
-              {/* Public */}
-              <Route path="/" element={<HomePage />} />
-              <Route path="/about" element={<AboutPage />} />
-              <Route path="/contact" element={<ContactPage />} />
-              <Route path="/legal" element={<LegalPage />} />
-              <Route path="/models" element={<ModelsPage />} />
-              <Route path="/gallery" element={<GalleryPage />} />
-              <Route path="/configure" element={<ConfigurePage />} />
-              <Route path="/details" element={<DetailsPage />} />
-              <Route path="/quote" element={<QuotePage />} />
-              <Route path="/quote-action/:quoteId" element={<QuoteActionPage />} />
-              <Route path="/admin-login" element={<AdminLoginPage />} />
-
-              {/* Admin */}
-              <Route element={<RequireAdmin />}>
-                <Route path="/admin" element={<AdminLayout />}>
-                  <Route index element={<DashboardPage />} />
-                  <Route path="quotes" element={<QuotesPage />} />
-                  <Route path="quotes/new" element={<CreateQuotePage />} />
-                  <Route path="quotes/:id" element={<QuoteDetailPage />} />
-                  <Route path="reports" element={<PurchaseReportsPage />} />
-                  <Route path="reports/:id" element={<PurchaseReportDetailPage />} />
-                  <Route path="contacts" element={<ContactsPage />} />
-                  <Route path="models" element={<AdminModelsPage />} />
-                  <Route path="media" element={<MediaPage />} />
-                  <Route path="boq" element={<BOQPage />} />
-                  <Route path="pool-variables" element={<PoolBOQVariablesPage />} />
-                  <Route path="pricelist" element={<PoolBOQPriceListPage />} />
-                  <Route path="pool-template" element={<PoolBOQTemplatePage />} />
-                  <Route path="modular-variables" element={<ModularBOQVariablesPage />} />
-                  <Route path="modular-template" element={<ModularBOQTemplatePage />} />
-                  <Route path="model-types" element={<ModelTypesPage />} />
-                  <Route path="suppliers" element={<SuppliersPage />} />
-                  <Route path="email" element={<EmailSettingsPage />} />
-                  <Route path="payments" element={<PaymentsPage />} />
-                  <Route path="site" element={<SiteSettingsPage />} />
-                  <Route path="dev-ideas" element={<DevIdeasPage />} />
-                  <Route path="discounts" element={<DiscountsPage />} />
-                  <Route path="users"    element={<UsersPage />} />
-                  <Route path="themes"   element={<ThemesPage />} />
-                  <Route path="deploy"   element={<DeployUpdatePage />} />
-                  <Route path="debug"    element={<DebugPage />} />
-                  <Route path="model-requests" element={<AdminModelRequestsPage />} />
-                </Route>
-              </Route>
-
-              {/* Professional Portal */}
-              <Route path="/pro-login" element={<ProLoginPage />} />
-              <Route element={<RequirePro />}>
-                <Route path="/pro" element={<ProLayout />}>
-                  <Route index element={<ProDashboardPage />} />
-                  <Route path="quotes" element={<ProQuotesPage />} />
-                  <Route path="reports" element={<PurchaseReportsPage />} />
-                  <Route path="reports/:id" element={<PurchaseReportDetailPage />} />
-                  <Route path="model-request" element={<ProModelRequestPage />} />
-                  <Route path="models" element={<ProModelsOverridePage />} />
-                  <Route path="settings" element={<ProSettingsPage />} />
-                  {/* Pro site admin pages (only shown in deployed pro site via ProLayout grouped nav) */}
-                  <Route path="contacts" element={<ProAdminContactsPage />} />
-                  <Route path="discounts" element={<ProAdminDiscountsPage />} />
-                  <Route path="email" element={<ProAdminEmailPage />} />
-                  <Route path="payments" element={<ProAdminPaymentsPage />} />
-                  <Route path="site" element={<ProAdminSitePage />} />
-                  <Route path="debug" element={<ProDebugPage />} />
-                </Route>
-              </Route>
-
-              {/* Fallback */}
-              <Route path="*" element={<NotFound />} />
-            </Routes>
-          </HashRouter>
+          <RouterProvider router={router} />
         </TooltipProvider>
       </QuoteProvider>
     </QueryClientProvider>
