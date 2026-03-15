@@ -72,6 +72,19 @@ interface SemiProUser {
   is_active?: boolean;
 }
 
+interface SemiProSiteConfig {
+  deployed: boolean;
+  slug: string;
+  db_name: string;
+  company_name: string;
+  logo_url: string;
+  domain: string;
+  login_bg_url: string;
+  current_version: string | null;
+  latest_version: string;
+  files_up_to_date: boolean;
+}
+
 interface VersionStatus {
   checking: boolean;
   files_up_to_date: boolean;
@@ -179,9 +192,14 @@ export default function UsersPage() {
   const [semiProSiteSlug, setSemiProSiteSlug] = useState('semi-pro');
   const [semiProSiteDbName, setSemiProSiteDbName] = useState('');
   const [semiProSiteCompanyName, setSemiProSiteCompanyName] = useState('Semi-Pro ERP');
+  const [semiProSiteLogo, setSemiProSiteLogo] = useState('');
+  const [semiProSiteDomain, setSemiProSiteDomain] = useState('');
+  const [semiProSiteLoginBg, setSemiProSiteLoginBg] = useState('');
   const [deployingSemiProSite, setDeployingSemiProSite] = useState(false);
   const [initializingSemiProDb, setInitializingSemiProDb] = useState(false);
-  const [semiProSiteStatus, setSemiProSiteStatus] = useState<{ deployed: boolean; files_up_to_date: boolean; current_version: string | null; latest_version: string } | null>(null);
+  const [updatingSemiProSite, setUpdatingSemiProSite] = useState(false);
+  const [updatingSemiProDb, setUpdatingSemiProDb] = useState(false);
+  const [semiProSiteConfig, setSemiProSiteConfig] = useState<SemiProSiteConfig | null>(null);
 
   const API_BASE = 'https://sunbox-mauritius.com/api';
 
@@ -213,6 +231,7 @@ export default function UsersPage() {
   useEffect(() => {
     loadUsers();
     loadSemiProUsers();
+    loadSemiProSiteConfig();
     api.getModels(undefined, true).then((data: any) => {
       const list = Array.isArray(data) ? data : (data?.models ?? []);
       setAllModels(list.map((m: any) => ({ id: Number(m.id), name: m.name, type: m.type })));
@@ -260,12 +279,123 @@ export default function UsersPage() {
     }
   };
 
-  const checkSemiProSiteVersion = async () => {
-    if (!semiProSiteSlug) return;
+  const loadSemiProSiteConfig = async (slug?: string) => {
     try {
-      const data = await api.getSemiProSiteVersion(semiProSiteSlug);
-      setSemiProSiteStatus(data as any);
-    } catch {}
+      const data = await api.getSemiProSiteConfig(slug ?? semiProSiteSlug) as SemiProSiteConfig;
+      setSemiProSiteConfig(data);
+      if (data.deployed) {
+        // Restore persisted config into form fields
+        if (data.slug)         setSemiProSiteSlug(data.slug);
+        if (data.db_name)      setSemiProSiteDbName(data.db_name);
+        if (data.company_name) setSemiProSiteCompanyName(data.company_name);
+        setSemiProSiteLogo(data.logo_url ?? '');
+        setSemiProSiteDomain(data.domain ?? '');
+        setSemiProSiteLoginBg(data.login_bg_url ?? '');
+      }
+    } catch {
+      // Silently ignore — site may not be deployed yet
+    }
+  };
+
+  const deploySemiProSite = async () => {
+    if (!semiProSiteSlug || !semiProSiteDbName) {
+      toast({ title: 'Erreur', description: 'Slug et nom de la base de données sont requis.', variant: 'destructive' });
+      return;
+    }
+    try {
+      setDeployingSemiProSite(true);
+      const result = await api.deploySemiProSite({
+        slug: semiProSiteSlug,
+        company_name: semiProSiteCompanyName,
+        db_name: semiProSiteDbName,
+        logo_url: semiProSiteLogo,
+        domain: semiProSiteDomain,
+        login_bg_url: semiProSiteLoginBg,
+      });
+      const r = result as any;
+      if (r.deployed) {
+        toast({ title: 'Déployé !', description: `Site semi-pro déployé à: ${r.site_url}` });
+        loadSemiProSiteConfig(semiProSiteSlug);
+      } else {
+        toast({ title: 'Erreur déploiement', description: (r.errors || []).join('\n') || 'Erreur inconnue.', variant: 'destructive' });
+      }
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setDeployingSemiProSite(false);
+    }
+  };
+
+  const initSemiProDb = async () => {
+    if (!semiProSiteDbName) {
+      toast({ title: 'Erreur', description: 'Nom de la base de données requis.', variant: 'destructive' });
+      return;
+    }
+    try {
+      setInitializingSemiProDb(true);
+      const result = await api.initSemiProDb(semiProSiteDbName);
+      const r = result as any;
+      if (r.initialized) {
+        toast({ title: 'Succès', description: 'Base de données semi-pro initialisée.' });
+        loadSemiProSiteConfig(semiProSiteSlug);
+      } else {
+        toast({ title: 'Erreur', description: (r.errors || []).join('\n') || 'Erreur inconnue.', variant: 'destructive' });
+      }
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setInitializingSemiProDb(false);
+    }
+  };
+
+  const updateSemiProSite = async () => {
+    if (!semiProSiteSlug || !semiProSiteDbName) {
+      toast({ title: 'Erreur', description: 'Slug et nom de la base de données sont requis.', variant: 'destructive' });
+      return;
+    }
+    try {
+      setUpdatingSemiProSite(true);
+      const result = await api.updateSemiProSite({
+        slug: semiProSiteSlug,
+        company_name: semiProSiteCompanyName,
+        db_name: semiProSiteDbName,
+        logo_url: semiProSiteLogo,
+        domain: semiProSiteDomain,
+        login_bg_url: semiProSiteLoginBg,
+      });
+      const r = result as any;
+      if (r.updated) {
+        toast({ title: 'Mis à jour !', description: 'Fichiers du site semi-pro mis à jour.' });
+        loadSemiProSiteConfig(semiProSiteSlug);
+      } else {
+        toast({ title: 'Erreur', description: (r.errors || []).join('\n') || 'Erreur inconnue.', variant: 'destructive' });
+      }
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setUpdatingSemiProSite(false);
+    }
+  };
+
+  const updateSemiProDb = async () => {
+    if (!semiProSiteDbName) {
+      toast({ title: 'Erreur', description: 'Nom de la base de données requis.', variant: 'destructive' });
+      return;
+    }
+    try {
+      setUpdatingSemiProDb(true);
+      const result = await api.updateSemiProDb(semiProSiteDbName);
+      const r = result as any;
+      if (r.updated) {
+        toast({ title: 'Succès', description: 'Base de données semi-pro mise à jour.' });
+      } else {
+        toast({ title: 'Erreur', description: (r.errors || []).join('\n') || 'Erreur inconnue.', variant: 'destructive' });
+      }
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setUpdatingSemiProDb(false);
+    }
   };
 
   const openNewSemiProUser = () => {
@@ -312,49 +442,6 @@ export default function UsersPage() {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
     } finally {
       setDeletingSemiProId(null);
-    }
-  };
-
-  const deploySemiProSite = async () => {
-    if (!semiProSiteSlug || !semiProSiteDbName) {
-      toast({ title: 'Erreur', description: 'Slug et nom de la base de données sont requis.', variant: 'destructive' });
-      return;
-    }
-    try {
-      setDeployingSemiProSite(true);
-      const result = await api.deploySemiProSite({ slug: semiProSiteSlug, company_name: semiProSiteCompanyName, db_name: semiProSiteDbName });
-      const r = result as any;
-      if (r.deployed) {
-        toast({ title: 'Déployé !', description: `Site semi-pro déployé à: ${r.site_url}` });
-        checkSemiProSiteVersion();
-      } else {
-        toast({ title: 'Erreur déploiement', description: (r.errors || []).join('\n') || 'Erreur inconnue.', variant: 'destructive' });
-      }
-    } catch (err: any) {
-      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
-    } finally {
-      setDeployingSemiProSite(false);
-    }
-  };
-
-  const initSemiProDb = async () => {
-    if (!semiProSiteDbName) {
-      toast({ title: 'Erreur', description: 'Nom de la base de données requis.', variant: 'destructive' });
-      return;
-    }
-    try {
-      setInitializingSemiProDb(true);
-      const result = await api.initSemiProDb(semiProSiteDbName);
-      const r = result as any;
-      if (r.initialized) {
-        toast({ title: 'Succès', description: 'Base de données semi-pro initialisée.' });
-      } else {
-        toast({ title: 'Erreur', description: (r.errors || []).join('\n') || 'Erreur inconnue.', variant: 'destructive' });
-      }
-    } catch (err: any) {
-      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
-    } finally {
-      setInitializingSemiProDb(false);
     }
   };
 
@@ -1315,19 +1402,42 @@ function VersionChip({ ok, checking, label }: { ok: boolean; checking: boolean; 
             </div>
           )}
 
-          {/* Deploy Semi-Pro Shared Site */}
+          {/* Site partagé semi-pro — configuration et gestion */}
           <div className="mt-8 p-5 border border-dashed border-green-300 rounded-xl bg-green-50">
-            <p className="text-sm font-semibold text-green-800 flex items-center gap-2 mb-3">
-              <Globe className="w-4 h-4" /> Déploiement du site partagé semi-pro
+            <p className="text-sm font-semibold text-green-800 flex items-center gap-2 mb-1">
+              <Globe className="w-4 h-4" />
+              {semiProSiteConfig?.deployed ? 'Site partagé semi-pro — Gestion' : 'Déploiement du site partagé semi-pro'}
             </p>
             <p className="text-xs text-green-700 mb-4">
               Tous les semi-pro users partagent un sous-répertoire unique sous sunbox-mauritius.com/pros/
               et une base de données commune.
             </p>
+
+            {/* Version badge when deployed */}
+            {semiProSiteConfig?.deployed && (
+              <div className="mb-4 flex items-center gap-3 flex-wrap">
+                <span className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-white border border-green-200 text-green-700 font-medium">
+                  {semiProSiteConfig.files_up_to_date
+                    ? <CheckCircle2 className="w-3.5 h-3.5 text-green-600" />
+                    : <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />}
+                  Fichiers : {semiProSiteConfig.current_version ?? '?'} / {semiProSiteConfig.latest_version}
+                </span>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-xs text-green-700 h-6 px-2"
+                  onClick={() => loadSemiProSiteConfig(semiProSiteSlug)}
+                >
+                  <RefreshCw className="w-3 h-3 mr-1" /> Actualiser
+                </Button>
+              </div>
+            )}
+
+            {/* Config fields (always shown) */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
               <div>
                 <label className="text-xs font-medium text-gray-700 block mb-1">Slug (sous-répertoire)</label>
-                <Input value={semiProSiteSlug} onChange={e => setSemiProSiteSlug(e.target.value)} placeholder="semi-pro" className="text-sm" />
+                <Input value={semiProSiteSlug} onChange={e => setSemiProSiteSlug(e.target.value)} placeholder="semi-pro" className="text-sm" disabled={semiProSiteConfig?.deployed} />
                 <p className="text-xs text-gray-400 mt-1">sunbox-mauritius.com/pros/{semiProSiteSlug || '...'}</p>
               </div>
               <div>
@@ -1339,42 +1449,66 @@ function VersionChip({ ok, checking, label }: { ok: boolean; checking: boolean; 
                 <Input value={semiProSiteCompanyName} onChange={e => setSemiProSiteCompanyName(e.target.value)} placeholder="Semi-Pro ERP" className="text-sm" />
               </div>
             </div>
-            {semiProSiteStatus && (
-              <div className="mb-3 text-xs text-gray-600 flex items-center gap-2">
-                {semiProSiteStatus.files_up_to_date
-                  ? <CheckCircle2 className="w-4 h-4 text-green-600" />
-                  : <AlertTriangle className="w-4 h-4 text-amber-500" />}
-                Déployé — version {semiProSiteStatus.current_version ?? '?'} / {semiProSiteStatus.latest_version}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+              <div>
+                <label className="text-xs font-medium text-gray-700 block mb-1">Logo du site Semi-Pro (URL)</label>
+                <Input value={semiProSiteLogo} onChange={e => setSemiProSiteLogo(e.target.value)} placeholder="https://..." className="text-sm" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-700 block mb-1">Nom de domaine</label>
+                <Input value={semiProSiteDomain} onChange={e => setSemiProSiteDomain(e.target.value)} placeholder="erp.monsitepro.com" className="text-sm" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-700 block mb-1">Background page de connexion (URL)</label>
+                <Input value={semiProSiteLoginBg} onChange={e => setSemiProSiteLoginBg(e.target.value)} placeholder="https://..." className="text-sm" />
+              </div>
+            </div>
+
+            {/* Action buttons — conditional on deployed state */}
+            {semiProSiteConfig?.deployed ? (
+              <div className="flex gap-2 flex-wrap">
+                <Button
+                  size="sm"
+                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                  disabled={updatingSemiProSite}
+                  onClick={updateSemiProSite}
+                >
+                  <Upload className="w-3 h-3 mr-1" />
+                  {updatingSemiProSite ? 'Mise à jour...' : 'Mettre à jour les fichiers'}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="border-blue-300 text-blue-700 hover:bg-blue-50"
+                  disabled={updatingSemiProDb || !semiProSiteDbName}
+                  onClick={updateSemiProDb}
+                >
+                  <Database className="w-3 h-3 mr-1" />
+                  {updatingSemiProDb ? 'Mise à jour...' : 'Mettre à jour la base de données'}
+                </Button>
+              </div>
+            ) : (
+              <div className="flex gap-2 flex-wrap">
+                <Button
+                  size="sm"
+                  className="bg-green-600 hover:bg-green-700 text-white"
+                  disabled={deployingSemiProSite}
+                  onClick={deploySemiProSite}
+                >
+                  <FolderOpen className="w-3 h-3 mr-1" />
+                  {deployingSemiProSite ? 'Déploiement...' : 'Déployer le site'}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={initializingSemiProDb || !semiProSiteDbName}
+                  onClick={initSemiProDb}
+                >
+                  <Database className="w-3 h-3 mr-1" />
+                  {initializingSemiProDb ? 'Init...' : 'Initialiser la BD'}
+                </Button>
               </div>
             )}
-            <div className="flex gap-2 flex-wrap">
-              <Button
-                size="sm"
-                className="bg-green-600 hover:bg-green-700 text-white"
-                disabled={deployingSemiProSite}
-                onClick={deploySemiProSite}
-              >
-                <FolderOpen className="w-3 h-3 mr-1" />
-                {deployingSemiProSite ? 'Déploiement...' : 'Déployer le site'}
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={initializingSemiProDb || !semiProSiteDbName}
-                onClick={initSemiProDb}
-              >
-                <Database className="w-3 h-3 mr-1" />
-                {initializingSemiProDb ? 'Init...' : 'Initialiser la BD'}
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={!semiProSiteSlug}
-                onClick={checkSemiProSiteVersion}
-              >
-                <RefreshCw className="w-3 h-3 mr-1" /> Vérifier version
-              </Button>
-            </div>
           </div>
 
           {/* Semi-Pro User Dialog */}

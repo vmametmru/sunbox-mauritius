@@ -4886,6 +4886,9 @@ try {
             $slug        = preg_replace('/[^a-z0-9._-]/i', '_', strtolower((string)$body['slug']));
             $companyName = (string)$body['company_name'];
             $dbName      = (string)$body['db_name'];
+            $logoUrl     = (string)($body['logo_url']     ?? '');
+            $domain      = (string)($body['domain']       ?? '');
+            $loginBgUrl  = (string)($body['login_bg_url'] ?? '');
 
             if (!$slug) fail('Slug invalide.');
 
@@ -4970,7 +4973,8 @@ try {
                             . 'window.__PRO_SITE__=false;'
                             . 'window.__API_BASE_URL__='     . json_encode($siteApiUrl,   JSON_HEX_TAG | JSON_HEX_AMP) . ';'
                             . 'window.__PRO_COMPANY_NAME__=' . json_encode($companyName,  JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE) . ';'
-                            . 'window.__PRO_LOGO_URL__=\'\';'
+                            . 'window.__PRO_LOGO_URL__='     . json_encode($logoUrl,      JSON_HEX_TAG | JSON_HEX_AMP) . ';'
+                            . 'window.__PRO_LOGIN_BG__='     . json_encode($loginBgUrl,   JSON_HEX_TAG | JSON_HEX_AMP) . ';'
                             . 'window.__PRO_THEME__=null;'
                             . 'window.__PRO_HEADER_IMAGES__=[];'
                             . '</script>';
@@ -4991,6 +4995,9 @@ try {
                     'APP_URL=' . $siteUrl,
                     'DB_NAME=' . $dbName,
                     'COMPANY_NAME=' . $companyName,
+                    'LOGO_URL=' . $logoUrl,
+                    'DOMAIN=' . $domain,
+                    'LOGIN_BG_URL=' . $loginBgUrl,
                     'VAT_RATE=15',
                     'API_DEBUG=false',
                 ];
@@ -5074,6 +5081,195 @@ try {
                 }
                 $result['initialized'] = true;
                 $result['debug'][]     = 'Schéma semi-pro initialisé dans: ' . $dbName;
+            } catch (Throwable $e) {
+                $result['errors'][] = $e->getMessage();
+            }
+            ok($result);
+            break;
+        }
+
+        // ── Read deployed semi-pro site configuration from .env ───────────────
+        case 'get_semi_pro_site_config': {
+            requireAdmin();
+            $slug    = preg_replace('/[^a-z0-9._-]/i', '_', strtolower((string)($body['slug'] ?? 'semi-pro')));
+            $siteDir = proSiteDir($slug);
+
+            $config = [
+                'deployed'         => is_dir($siteDir),
+                'slug'             => $slug,
+                'db_name'          => '',
+                'company_name'     => '',
+                'logo_url'         => '',
+                'domain'           => '',
+                'login_bg_url'     => '',
+                'current_version'  => null,
+                'latest_version'   => SEMI_PRO_FILE_VERSION,
+                'files_up_to_date' => false,
+            ];
+
+            // Read .env for persisted config values
+            $envFile = $siteDir . '/.env';
+            if (is_file($envFile)) {
+                $lines = file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [];
+                foreach ($lines as $line) {
+                    $line = trim($line);
+                    if ($line === '' || str_starts_with($line, '#') || strpos($line, '=') === false) continue;
+                    [$k, $v] = explode('=', $line, 2);
+                    switch (trim($k)) {
+                        case 'DB_NAME':      $config['db_name']      = trim($v); break;
+                        case 'COMPANY_NAME': $config['company_name'] = trim($v); break;
+                        case 'LOGO_URL':     $config['logo_url']     = trim($v); break;
+                        case 'DOMAIN':       $config['domain']       = trim($v); break;
+                        case 'LOGIN_BG_URL': $config['login_bg_url'] = trim($v); break;
+                    }
+                }
+            }
+
+            // Read deploy version
+            $versionFile = $siteDir . '/.deploy_version';
+            if (is_file($versionFile)) {
+                $ver = trim((string)file_get_contents($versionFile));
+                $config['current_version']  = $ver;
+                $config['files_up_to_date'] = version_compare($ver, SEMI_PRO_FILE_VERSION, '>=');
+            }
+
+            ok($config);
+            break;
+        }
+
+        // ── Update semi-pro site files (re-deploy PHP templates) ─────────────
+        case 'update_semi_pro_site': {
+            requireAdmin();
+            validateRequired($body, ['slug', 'company_name', 'db_name']);
+            $slug        = preg_replace('/[^a-z0-9._-]/i', '_', strtolower((string)$body['slug']));
+            $companyName = (string)$body['company_name'];
+            $dbName      = (string)$body['db_name'];
+            $logoUrl     = (string)($body['logo_url']     ?? '');
+            $domain      = (string)($body['domain']       ?? '');
+            $loginBgUrl  = (string)($body['login_bg_url'] ?? '');
+
+            if (!$slug) fail('Slug invalide.');
+
+            $sunboxBaseUrl = rtrim((string)env('APP_URL', 'https://sunbox-mauritius.com'), '/');
+            $siteUrl       = $sunboxBaseUrl . '/pros/' . $slug;
+            $siteDir       = proSiteDir($slug);
+
+            if (!is_dir($siteDir)) fail('Site non déployé. Utilisez "Déployer le site" d\'abord.');
+
+            $result = ['updated' => false, 'errors' => [], 'debug' => []];
+            try {
+                // Ensure api subdirectory exists
+                if (!is_dir($siteDir . '/api')) {
+                    mkdir($siteDir . '/api', 0755, true);
+                }
+
+                $templateDir = __DIR__ . '/semi_pro_deploy';
+                $replacements = [
+                    '{{SLUG}}'         => $slug,
+                    '{{COMPANY_NAME}}' => $companyName,
+                    '{{DB_NAME}}'      => $dbName,
+                ];
+                $filesToDeploy = [
+                    'api_config.php'          => $siteDir . '/api/config.php',
+                    'api_index.php'           => $siteDir . '/api/index.php',
+                    'api_semi_pro_auth.php'   => $siteDir . '/api/pro_auth.php',
+                    'api_htaccess'            => $siteDir . '/api/.htaccess',
+                    'htaccess'                => $siteDir . '/.htaccess',
+                    'index.php'               => $siteDir . '/index.php',
+                ];
+                foreach ($filesToDeploy as $tpl => $dest) {
+                    $tplPath = $templateDir . '/' . $tpl;
+                    if (!file_exists($tplPath)) throw new \Exception("Template introuvable: $tplPath");
+                    $content = file_get_contents($tplPath);
+                    if ($content === false) throw new \Exception("Lecture échouée: $tplPath");
+                    $content = str_replace(array_keys($replacements), array_values($replacements), $content);
+                    if (file_put_contents($dest, $content) === false) throw new \Exception("Écriture échouée: $dest");
+                }
+                $result['debug'][] = 'Fichiers PHP mis à jour.';
+
+                // Re-inject index.html with updated config
+                $mainIndexPath = dirname(__DIR__) . '/index.html';
+                if (file_exists($mainIndexPath)) {
+                    $indexHtml = file_get_contents($mainIndexPath);
+                    if ($indexHtml !== false) {
+                        $siteApiUrl = $siteUrl . '/api';
+                        $proConfig  = '<script>'
+                            . 'window.__SEMI_PRO_SITE__=true;'
+                            . 'window.__PRO_SITE__=false;'
+                            . 'window.__API_BASE_URL__='     . json_encode($siteApiUrl,   JSON_HEX_TAG | JSON_HEX_AMP) . ';'
+                            . 'window.__PRO_COMPANY_NAME__=' . json_encode($companyName,  JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE) . ';'
+                            . 'window.__PRO_LOGO_URL__='     . json_encode($logoUrl,      JSON_HEX_TAG | JSON_HEX_AMP) . ';'
+                            . 'window.__PRO_LOGIN_BG__='     . json_encode($loginBgUrl,   JSON_HEX_TAG | JSON_HEX_AMP) . ';'
+                            . 'window.__PRO_THEME__=null;'
+                            . 'window.__PRO_HEADER_IMAGES__=[];'
+                            . '</script>';
+                        $closeHeadPos = stripos($indexHtml, '</head>');
+                        if ($closeHeadPos !== false) {
+                            $indexHtml = substr($indexHtml, 0, $closeHeadPos) . $proConfig . substr($indexHtml, $closeHeadPos);
+                        } else {
+                            $indexHtml .= $proConfig;
+                        }
+                        file_put_contents($siteDir . '/index.html', $indexHtml);
+                        $result['debug'][] = 'index.html mis à jour.';
+                    }
+                }
+
+                // Update .env
+                $envLines = [
+                    '# Semi-Pro site config — DB credentials come from Sunbox root .env automatically.',
+                    'APP_URL=' . $siteUrl,
+                    'DB_NAME=' . $dbName,
+                    'COMPANY_NAME=' . $companyName,
+                    'LOGO_URL=' . $logoUrl,
+                    'DOMAIN=' . $domain,
+                    'LOGIN_BG_URL=' . $loginBgUrl,
+                    'VAT_RATE=15',
+                    'API_DEBUG=false',
+                ];
+                file_put_contents($siteDir . '/.env', implode("\n", $envLines) . "\n");
+
+                // Update .deploy_version
+                file_put_contents($siteDir . '/.deploy_version', SEMI_PRO_FILE_VERSION);
+                $result['debug'][] = '.deploy_version: ' . SEMI_PRO_FILE_VERSION;
+
+                $result['updated'] = true;
+            } catch (Throwable $e) {
+                $result['errors'][] = $e->getMessage();
+            }
+            ok($result);
+            break;
+        }
+
+        // ── Update semi-pro shared database schema ────────────────────────────
+        case 'update_semi_pro_db': {
+            requireAdmin();
+            validateRequired($body, ['db_name']);
+            $dbName = (string)$body['db_name'];
+            $result = ['updated' => false, 'errors' => [], 'debug' => []];
+            try {
+                $semiProPdo = new PDO(
+                    "mysql:host=" . DB_HOST . ";dbname={$dbName};charset=utf8mb4",
+                    DB_USER, DB_PASS,
+                    [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_EMULATE_PREPARES => false]
+                );
+
+                $schemaFile = __DIR__ . '/semi_pro_deploy/semi_pro_site_schema.sql';
+                if (!file_exists($schemaFile)) throw new \Exception("Schema SQL introuvable: $schemaFile");
+                $sql = file_get_contents($schemaFile);
+                if ($sql === false) throw new \Exception("Lecture du schema SQL échouée.");
+
+                $stmts = array_filter(
+                    array_map(function (string $s): string {
+                        return trim(preg_replace('/^--[^\n]*\n?/m', '', $s) ?? $s);
+                    }, preg_split('/;\s*$/m', $sql) ?: []),
+                    fn($s) => $s !== ''
+                );
+                foreach ($stmts as $stmt) {
+                    if (trim($stmt) === '') continue;
+                    $semiProPdo->exec($stmt);
+                }
+                $result['updated'] = true;
+                $result['debug'][] = 'Schéma semi-pro mis à jour dans: ' . $dbName;
             } catch (Throwable $e) {
                 $result['errors'][] = $e->getMessage();
             }

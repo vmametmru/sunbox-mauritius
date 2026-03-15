@@ -46,6 +46,8 @@ foreach ([
 
 $siteAppUrl  = rtrim($localEnv['APP_URL'] ?? '', '/');
 $companyName = $localEnv['COMPANY_NAME'] ?? 'Semi-Pro ERP';
+$logoUrl     = $localEnv['LOGO_URL']     ?? '';
+$loginBgUrl  = $localEnv['LOGIN_BG_URL'] ?? '';
 $sunboxBase  = rtrim($sunboxEnv['APP_URL'] ?? 'https://sunbox-mauritius.com', '/');
 
 // ── Read Sunbox index.html ────────────────────────────────────────────────────
@@ -96,7 +98,8 @@ $inject = '<script>'
     . 'window.__PRO_SITE__=false;'
     . 'window.__API_BASE_URL__='      . json_encode($apiBaseUrl,   JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE) . ';'
     . 'window.__PRO_COMPANY_NAME__='  . json_encode($companyName,  JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE) . ';'
-    . 'window.__PRO_LOGO_URL__=\'\';'
+    . 'window.__PRO_LOGO_URL__='      . json_encode($logoUrl,      JSON_HEX_TAG | JSON_HEX_AMP) . ';'
+    . 'window.__PRO_LOGIN_BG__='      . json_encode($loginBgUrl,   JSON_HEX_TAG | JSON_HEX_AMP) . ';'
     . 'window.__PRO_THEME__=null;'
     . 'window.__PRO_HEADER_IMAGES__=[];'
     . '</script>';

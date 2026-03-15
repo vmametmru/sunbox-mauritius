@@ -11,7 +11,8 @@ export default function ProLoginPage() {
   const isProSite = typeof window !== 'undefined' && !!(window as any).__PRO_SITE__;
   const isSemiProSite = typeof window !== 'undefined' && !!(window as any).__SEMI_PRO_SITE__;
   const companyName: string = (isProSite || isSemiProSite) ? ((window as any).__PRO_COMPANY_NAME__ || '') : '';
-  const logoUrl: string = isProSite ? ((window as any).__PRO_LOGO_URL__ || '') : '';
+  const logoUrl: string = (isProSite || isSemiProSite) ? ((window as any).__PRO_LOGO_URL__ || '') : '';
+  const loginBgUrl: string = (isProSite || isSemiProSite) ? ((window as any).__PRO_LOGIN_BG__ || '') : '';
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -50,10 +51,13 @@ export default function ProLoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
+    <div
+      className="min-h-screen bg-gray-100 flex items-center justify-center p-4"
+      style={loginBgUrl ? { backgroundImage: `url(${loginBgUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined}
+    >
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          {isProSite && logoUrl ? (
+          {(isProSite || isSemiProSite) && logoUrl ? (
             <img src={logoUrl} alt={companyName} className="h-16 w-auto mx-auto mb-2" />
           ) : null}
           <span className="text-3xl font-bold text-gray-800">
