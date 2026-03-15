@@ -17,7 +17,7 @@
 header('Content-Type: text/html; charset=utf-8');
 
 $siteDir    = __DIR__;
-$sunboxRoot = dirname($siteDir, 2); // pros/<slug>/ -> pros/ -> Sunbox root
+$sunboxRoot = dirname($siteDir, 2); // pros/<slug>/ → pros/ → Sunbox root
 
 // ── Minimal .env parser ───────────────────────────────────────────────────────
 function semiProIndexParseEnv(string $path): array {

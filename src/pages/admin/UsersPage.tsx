@@ -631,7 +631,7 @@ function VersionChip({ ok, checking, label }: { ok: boolean; checking: boolean; 
         </button>
         <button
           className={`px-4 py-2 rounded-lg font-medium text-sm transition-colors ${activeTab === 'semi-pro' ? 'bg-green-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}
-          onClick={() => { if (activeTab !== 'semi-pro') { setActiveTab('semi-pro'); loadSemiProUsers(); } }}
+          onClick={() => { setActiveTab('semi-pro'); loadSemiProUsers(); }}
         >
           <Building2 className="inline-block w-4 h-4 mr-1 -mt-0.5" />
           Semi-Pro Users ({semiProUsers.length})

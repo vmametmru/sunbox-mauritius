@@ -50,6 +50,7 @@ function semiProParseEnvFile(string $path): array
 /**
  * Parse the Sunbox root .env (3 levels up from this file's location at
  * sunbox-root/pros/<slug>/api/config.php).
+ * __DIR__ = sunbox-root/pros/<slug>/api/ → up 3 → sunbox-root/
  */
 function parseSunboxRootEnv(): array
 {
@@ -322,7 +323,7 @@ function generateReference(string $prefix = 'SPQ'): string
 function getQuotePrefix(string $modelType, bool $isFreeQuote = false, bool $isPro = false): string
 {
     if ($isFreeQuote) return 'WFQ';
-    $base = $isPro ? 'S' : 'S'; // S = Semi-Pro
+    $base = 'S'; // S = Semi-Pro (all semi-pro quotes use S prefix)
     return match($modelType) {
         'container' => $base . 'CQ',
         'pool'      => $base . 'PQ',

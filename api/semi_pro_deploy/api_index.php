@@ -204,10 +204,7 @@ try {
         case 'get_modular_boq_price_list': {
             requireSemiPro();
             $sdb  = getSunboxDB();
-            $slug = $body['model_type_slug'] ?? '';
-            if (!$slug) fail('model_type_slug manquant');
-            $stmt = $sdb->prepare("SELECT id, reference, description, unit, unit_price, has_vat FROM pool_boq_price_list ORDER BY reference ASC");
-            $stmt->execute();
+            $stmt = $sdb->query("SELECT id, reference, description, unit, unit_price, has_vat FROM pool_boq_price_list ORDER BY reference ASC");
             $rows = $stmt->fetchAll();
             foreach ($rows as &$r) {
                 $r['has_vat']    = (bool)$r['has_vat'];
@@ -554,7 +551,7 @@ try {
             // Build BOQ lines from Sunbox
             $isCustom = !in_array($modelType, ['container', 'pool']);
             $linesSql = $isCustom
-                ? "SELECT bl.*, bc.name AS category_name, bc.is_option,
+                ? "SELECT bl.*, bc.id AS boq_category_id, bc.name AS category_name, bc.is_option,
                           s.name AS supplier_name,
                           COALESCE(ppl.unit_price, bl.unit_cost_ht) AS resolved_unit_price,
                           COALESCE(ppl.description, bl.description) AS resolved_description
@@ -563,7 +560,7 @@ try {
                    LEFT JOIN pool_boq_price_list ppl ON bl.price_list_id = ppl.id
                    LEFT JOIN suppliers s ON bl.supplier_id = s.id
                    ORDER BY bc.display_order ASC, bl.display_order ASC"
-                : "SELECT bl.*, bc.name AS category_name, bc.is_option,
+                : "SELECT bl.*, bc.id AS boq_category_id, bc.name AS category_name, bc.is_option,
                           s.name AS supplier_name,
                           COALESCE(ppl.unit_price, bl.unit_cost_ht) AS resolved_unit_price
                    FROM boq_lines bl
@@ -603,7 +600,7 @@ try {
                 $displayOrder = 0;
                 foreach ($boqLines as $line) {
                     $isOpt = (bool)($line['is_option'] ?? false);
-                    if ($isOpt && !in_array((int)($line['option_id'] ?? 0), $selectedOptionIds)) continue;
+                    if ($isOpt && !in_array((int)($line['boq_category_id'] ?? 0), $selectedOptionIds)) continue;
                     $unitPrice = (float)$line['resolved_unit_price'];
                     $qty       = (float)$line['quantity'];
                     $margin    = (float)$line['margin_percent'];
