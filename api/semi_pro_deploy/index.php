@@ -50,6 +50,16 @@ $logoUrl     = $localEnv['LOGO_URL']     ?? '';
 $loginBgUrl  = $localEnv['LOGIN_BG_URL'] ?? '';
 $sunboxBase  = rtrim($sunboxEnv['APP_URL'] ?? 'https://sunbox-mauritius.com', '/');
 
+// Make logo and login-background URLs absolute.
+// They may be stored as relative paths (e.g. /uploads/logos/…) which would resolve
+// to the custom domain (www.mokosting.com/uploads/…) — a path that doesn't exist.
+// Prepend the Sunbox base so images are always fetched from sunbox-mauritius.com.
+if ($logoUrl !== '' && strpos($logoUrl, 'http') !== 0) {
+    $logoUrl = $sunboxBase . '/' . ltrim($logoUrl, '/');
+}
+if ($loginBgUrl !== '' && strpos($loginBgUrl, 'http') !== 0) {
+    $loginBgUrl = $sunboxBase . '/' . ltrim($loginBgUrl, '/');
+}
 // ── Read Sunbox index.html ────────────────────────────────────────────────────
 $indexHtml = null;
 foreach ([
