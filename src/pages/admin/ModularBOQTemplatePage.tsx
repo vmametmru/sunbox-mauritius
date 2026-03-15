@@ -308,15 +308,7 @@ const ModularBOQTemplatePage: React.FC = () => {
     }).catch(() => {});
   }, []);
 
-  /* Navigation guard – beforeunload */
-  useEffect(() => {
-    if (!hasChanges) return;
-    const handler = (e: BeforeUnloadEvent) => { e.returnValue = ''; };
-    window.addEventListener('beforeunload', handler);
-    return () => window.removeEventListener('beforeunload', handler);
-  }, [hasChanges]);
-
-  /* Navigation guard – hashchange (modal-based) */
+  /* Navigation guard – beforeunload + React Router blocker (modal-based) */
   const { showDialog: showNavDialog, confirmNavigation, cancelNavigation } =
     useNavigationGuard(hasChanges);
 
