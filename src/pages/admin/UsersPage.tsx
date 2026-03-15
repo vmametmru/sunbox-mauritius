@@ -178,6 +178,8 @@ export default function UsersPage() {
   const [savingHeaderImgs, setSavingHeaderImgs] = useState(false);
   const logoInputRef = useRef<HTMLInputElement>(null);
   const headerImgInputRef = useRef<HTMLInputElement>(null);
+  const semiProLogoInputRef = useRef<HTMLInputElement>(null);
+  const semiProLoginBgInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   // Semi-pro state
@@ -195,6 +197,8 @@ export default function UsersPage() {
   const [semiProSiteLogo, setSemiProSiteLogo] = useState('');
   const [semiProSiteDomain, setSemiProSiteDomain] = useState('');
   const [semiProSiteLoginBg, setSemiProSiteLoginBg] = useState('');
+  const [uploadingSemiProLogo, setUploadingSemiProLogo] = useState(false);
+  const [uploadingSemiProLoginBg, setUploadingSemiProLoginBg] = useState(false);
   const [deployingSemiProSite, setDeployingSemiProSite] = useState(false);
   const [initializingSemiProDb, setInitializingSemiProDb] = useState(false);
   const [updatingSemiProSite, setUpdatingSemiProSite] = useState(false);
@@ -294,6 +298,46 @@ export default function UsersPage() {
       }
     } catch {
       // Silently ignore — site may not be deployed yet
+    }
+  };
+
+  const handleSemiProLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      setUploadingSemiProLogo(true);
+      const r = await fetch('/api/upload_sketch.php', { method: 'POST', body: formData, credentials: 'include' });
+      const j = await r.json();
+      if (!r.ok || j.error) throw new Error(j.error || 'Upload échoué');
+      setSemiProSiteLogo(j.url as string);
+      toast({ title: 'Logo uploadé' });
+    } catch (err: any) {
+      toast({ title: 'Erreur upload logo', description: err.message, variant: 'destructive' });
+    } finally {
+      setUploadingSemiProLogo(false);
+      if (semiProLogoInputRef.current) semiProLogoInputRef.current.value = '';
+    }
+  };
+
+  const handleSemiProLoginBgUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      setUploadingSemiProLoginBg(true);
+      const r = await fetch('/api/upload_sketch.php', { method: 'POST', body: formData, credentials: 'include' });
+      const j = await r.json();
+      if (!r.ok || j.error) throw new Error(j.error || 'Upload échoué');
+      setSemiProSiteLoginBg(j.url as string);
+      toast({ title: 'Background uploadé' });
+    } catch (err: any) {
+      toast({ title: 'Erreur upload background', description: err.message, variant: 'destructive' });
+    } finally {
+      setUploadingSemiProLoginBg(false);
+      if (semiProLoginBgInputRef.current) semiProLoginBgInputRef.current.value = '';
     }
   };
 
@@ -1450,17 +1494,80 @@ function VersionChip({ ok, checking, label }: { ok: boolean; checking: boolean; 
               </div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+              {/* Logo upload */}
               <div>
-                <label className="text-xs font-medium text-gray-700 block mb-1">Logo du site Semi-Pro (URL)</label>
-                <Input value={semiProSiteLogo} onChange={e => setSemiProSiteLogo(e.target.value)} placeholder="https://..." className="text-sm" />
+                <label className="text-xs font-medium text-gray-700 block mb-1">Logo du site Semi-Pro</label>
+                <input
+                  ref={semiProLogoInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={handleSemiProLogoUpload}
+                />
+                <div className="flex items-center gap-2">
+                  {semiProSiteLogo && (
+                    <img src={semiProSiteLogo} alt="Logo" className="h-9 w-9 object-contain rounded border border-gray-200 bg-white" />
+                  )}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="text-xs gap-1.5"
+                    disabled={uploadingSemiProLogo}
+                    onClick={() => semiProLogoInputRef.current?.click()}
+                  >
+                    <Upload className="w-3 h-3" />
+                    {uploadingSemiProLogo ? 'Upload...' : semiProSiteLogo ? 'Changer' : 'Choisir'}
+                  </Button>
+                  {semiProSiteLogo && (
+                    <button
+                      type="button"
+                      className="text-xs text-red-500 hover:text-red-700"
+                      onClick={() => setSemiProSiteLogo('')}
+                      title="Supprimer le logo"
+                    >✕</button>
+                  )}
+                </div>
               </div>
+              {/* Domain (text input unchanged) */}
               <div>
                 <label className="text-xs font-medium text-gray-700 block mb-1">Nom de domaine</label>
                 <Input value={semiProSiteDomain} onChange={e => setSemiProSiteDomain(e.target.value)} placeholder="erp.monsitepro.com" className="text-sm" />
               </div>
+              {/* Login background upload */}
               <div>
-                <label className="text-xs font-medium text-gray-700 block mb-1">Background page de connexion (URL)</label>
-                <Input value={semiProSiteLoginBg} onChange={e => setSemiProSiteLoginBg(e.target.value)} placeholder="https://..." className="text-sm" />
+                <label className="text-xs font-medium text-gray-700 block mb-1">Background page de connexion</label>
+                <input
+                  ref={semiProLoginBgInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={handleSemiProLoginBgUpload}
+                />
+                <div className="flex items-center gap-2">
+                  {semiProSiteLoginBg && (
+                    <img src={semiProSiteLoginBg} alt="Background" className="h-9 w-16 object-cover rounded border border-gray-200" />
+                  )}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="text-xs gap-1.5"
+                    disabled={uploadingSemiProLoginBg}
+                    onClick={() => semiProLoginBgInputRef.current?.click()}
+                  >
+                    <Upload className="w-3 h-3" />
+                    {uploadingSemiProLoginBg ? 'Upload...' : semiProSiteLoginBg ? 'Changer' : 'Choisir'}
+                  </Button>
+                  {semiProSiteLoginBg && (
+                    <button
+                      type="button"
+                      className="text-xs text-red-500 hover:text-red-700"
+                      onClick={() => setSemiProSiteLoginBg('')}
+                      title="Supprimer le background"
+                    >✕</button>
+                  )}
+                </div>
               </div>
             </div>
 
