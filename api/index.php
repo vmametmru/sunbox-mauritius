@@ -5058,10 +5058,15 @@ try {
                 $sql = file_get_contents($schemaFile);
                 if ($sql === false) throw new \Exception("Lecture du schema SQL échouée.");
 
-                // Execute statement by statement
+                // Execute statement by statement.
+                // Strip single-line SQL comments (-- ...) from each block before checking
+                // whether it is empty, so that CREATE TABLE statements preceded by section
+                // comments (e.g. "-- ── Purchase reports ───") are not accidentally dropped.
                 $stmts = array_filter(
-                    array_map('trim', preg_split('/;\s*$/m', $sql)),
-                    fn($s) => $s !== '' && strpos($s, '--') !== 0
+                    array_map(function (string $s): string {
+                        return trim(preg_replace('/^--[^\n]*\n?/m', '', $s) ?? $s);
+                    }, preg_split('/;\s*$/m', $sql) ?: []),
+                    fn($s) => $s !== ''
                 );
                 foreach ($stmts as $stmt) {
                     if (trim($stmt) === '') continue;
