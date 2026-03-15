@@ -11,7 +11,7 @@ define('PRO_DB_SCHEMA_VERSION', '1.8.0');
 
 // Semi-pro shared site deployment version.
 // SEMI_PRO_FILE_VERSION must match define('SEMI_PRO_FILE_VERSION', ...) in api/semi_pro_deploy/api_config.php
-define('SEMI_PRO_FILE_VERSION',      '1.0.3');
+define('SEMI_PRO_FILE_VERSION',      '1.0.4');
 define('SEMI_PRO_DB_SCHEMA_VERSION', '1.0.0');
 
 // Sunbox main database schema version.
@@ -4950,6 +4950,25 @@ try {
             $siteUrl       = $sunboxBaseUrl . '/pros/' . $slug;
             $siteDir       = proSiteDir($slug);
 
+            // ── Merge with existing .env to preserve branding config ─────────
+            // When re-deploying, the admin UI may send empty logo/bg (e.g. if the
+            // config hadn't finished loading). Preserve any non-empty value already
+            // stored in the site's .env to avoid accidental data loss.
+            $existingEnvFile = $siteDir . '/.env';
+            if (is_file($existingEnvFile)) {
+                $existingLines = file($existingEnvFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [];
+                foreach ($existingLines as $_line) {
+                    $_line = trim($_line);
+                    if ($_line === '' || $_line[0] === '#' || strpos($_line, '=') === false) continue;
+                    [$_k, $_v] = explode('=', $_line, 2);
+                    $_k = trim($_k); $_v = trim($_v);
+                    if ($_k === 'LOGO_URL'     && $logoUrl    === '' && $_v !== '') $logoUrl    = $_v;
+                    if ($_k === 'LOGIN_BG_URL' && $loginBgUrl === '' && $_v !== '') $loginBgUrl = $_v;
+                    if ($_k === 'DOMAIN'       && $domain     === '' && $_v !== '') $domain     = $_v;
+                    if ($_k === 'COMPANY_NAME' && $companyName === '') $companyName = $_v;
+                }
+            }
+
             $result = [
                 'deployed' => false,
                 'site_dir' => $siteDir,
@@ -5179,6 +5198,18 @@ try {
                 }
             }
 
+            // Make logo and login-bg URLs absolute so the admin preview renders correctly.
+            // Relative paths (e.g. /uploads/logo.png) resolve to the Sunbox origin, which
+            // is correct for the admin portal (sunbox-mauritius.com), but we return the full
+            // URL so the deployed site's index.php and the admin preview are in sync.
+            $_sunboxBase = rtrim((string)env('APP_URL', 'https://sunbox-mauritius.com'), '/');
+            if ($config['logo_url'] !== '' && strpos($config['logo_url'], 'http') !== 0) {
+                $config['logo_url'] = $_sunboxBase . '/' . ltrim($config['logo_url'], '/');
+            }
+            if ($config['login_bg_url'] !== '' && strpos($config['login_bg_url'], 'http') !== 0) {
+                $config['login_bg_url'] = $_sunboxBase . '/' . ltrim($config['login_bg_url'], '/');
+            }
+
             // Read deploy version
             $versionFile = $siteDir . '/.deploy_version';
             if (is_file($versionFile)) {
@@ -5262,6 +5293,25 @@ try {
             $siteDir       = proSiteDir($slug);
 
             if (!is_dir($siteDir)) fail('Site non déployé. Utilisez "Déployer le site" d\'abord.');
+
+            // ── Merge with existing .env to preserve branding config ─────────
+            // When updating files the admin UI may send empty logo/bg if the config
+            // hadn't finished loading from the server. Preserve any non-empty value
+            // already stored in the .env to avoid accidental data loss.
+            $existingEnvFile = $siteDir . '/.env';
+            if (is_file($existingEnvFile)) {
+                $existingLines = file($existingEnvFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [];
+                foreach ($existingLines as $_line) {
+                    $_line = trim($_line);
+                    if ($_line === '' || $_line[0] === '#' || strpos($_line, '=') === false) continue;
+                    [$_k, $_v] = explode('=', $_line, 2);
+                    $_k = trim($_k); $_v = trim($_v);
+                    if ($_k === 'LOGO_URL'     && $logoUrl    === '' && $_v !== '') $logoUrl    = $_v;
+                    if ($_k === 'LOGIN_BG_URL' && $loginBgUrl === '' && $_v !== '') $loginBgUrl = $_v;
+                    if ($_k === 'DOMAIN'       && $domain     === '' && $_v !== '') $domain     = $_v;
+                    if ($_k === 'COMPANY_NAME' && $companyName === '') $companyName = $_v;
+                }
+            }
 
             $result = ['updated' => false, 'errors' => [], 'debug' => []];
             try {
