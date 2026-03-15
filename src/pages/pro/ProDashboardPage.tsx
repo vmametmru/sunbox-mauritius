@@ -28,12 +28,15 @@ const reasonLabels: Record<string, string> = {
   model_request:  'Demande modèle',
 };
 
+const isSemiProSite = typeof window !== 'undefined' && !!(window as any).__SEMI_PRO_SITE__;
+
 export default function ProDashboardPage() {
   const [credits, setCredits] = useState<Credits | null>(null);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
 
   useEffect(() => {
+    if (isSemiProSite) { setLoading(false); return; }
     (async () => {
       try {
         const data = await api.getProCredits();
@@ -59,7 +62,8 @@ export default function ProDashboardPage() {
         <p className="text-gray-500 mt-1">Bienvenue sur votre portail professionnel Sunbox</p>
       </div>
 
-      {/* Credits card */}
+      {/* Credits, model-request count — pro-only */}
+      {!isSemiProSite && (
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card className="border-orange-200 bg-orange-50">
           <CardContent className="p-6">
@@ -103,6 +107,7 @@ export default function ProDashboardPage() {
           </CardContent>
         </Card>
       </div>
+      )}
 
       {/* Quick actions */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -117,27 +122,32 @@ export default function ProDashboardPage() {
                 <ArrowRight className="h-4 w-4" />
               </Button>
             </Link>
-            <Link to="/pro/model-request">
-              <Button variant="outline" className="w-full justify-between mt-2">
-                <span className="flex items-center gap-2"><Cpu className="h-4 w-4" /> Demander un modèle</span>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-orange-600 font-medium">
-                    {loading ? '…' : `${modelCost.toLocaleString()} Rs`}
-                  </span>
-                  <ArrowRight className="h-4 w-4" />
-                </div>
-              </Button>
-            </Link>
-            <Link to="/pro/settings">
-              <Button variant="outline" className="w-full justify-between mt-2">
-                <span className="flex items-center gap-2"><TrendingUp className="h-4 w-4" /> Acheter un pack crédits</span>
-                <ArrowRight className="h-4 w-4" />
-              </Button>
-            </Link>
+            {!isSemiProSite && (
+              <>
+                <Link to="/pro/model-request">
+                  <Button variant="outline" className="w-full justify-between mt-2">
+                    <span className="flex items-center gap-2"><Cpu className="h-4 w-4" /> Demander un modèle</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-orange-600 font-medium">
+                        {loading ? '…' : `${modelCost.toLocaleString()} Rs`}
+                      </span>
+                      <ArrowRight className="h-4 w-4" />
+                    </div>
+                  </Button>
+                </Link>
+                <Link to="/pro/settings">
+                  <Button variant="outline" className="w-full justify-between mt-2">
+                    <span className="flex items-center gap-2"><TrendingUp className="h-4 w-4" /> Acheter un pack crédits</span>
+                    <ArrowRight className="h-4 w-4" />
+                  </Button>
+                </Link>
+              </>
+            )}
           </CardContent>
         </Card>
 
-        {/* Recent transactions */}
+        {/* Recent transactions — pro-only */}
+        {!isSemiProSite && (
         <Card>
           <CardHeader>
             <CardTitle className="text-lg">Dernières transactions</CardTitle>
@@ -166,6 +176,7 @@ export default function ProDashboardPage() {
             )}
           </CardContent>
         </Card>
+        )}
       </div>
     </div>
   );

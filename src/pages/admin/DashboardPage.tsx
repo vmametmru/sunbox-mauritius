@@ -14,6 +14,8 @@ import {
   Upload,
   HardDrive,
   ClipboardList,
+  Globe,
+  CheckCircle2,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -69,6 +71,20 @@ interface ProUserRow {
   initingDb?: boolean;
 }
 
+interface SemiProSiteStatus {
+  deployed: boolean;
+  slug: string;
+  company_name: string;
+  files_up_to_date: boolean;
+  db_up_to_date: boolean;
+  current_version: string | null;
+  latest_version: string;
+  current_db_version: string | null;
+  latest_db_version: string;
+  db_name: string;
+  domain: string;
+}
+
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [emailSettings, setEmailSettings] = useState<EmailSettings | null>(null);
@@ -77,12 +93,54 @@ export default function DashboardPage() {
   const [dbVersion, setDbVersion]   = useState<DbVersionStatus | null>(null);
   const [dbUpdating, setDbUpdating] = useState(false);
   const [proUsers, setProUsers]     = useState<ProUserRow[]>([]);
+  const [semiProStatus, setSemiProStatus] = useState<SemiProSiteStatus | null>(null);
+  const [semiProUpdatingFiles, setSemiProUpdatingFiles] = useState(false);
+  const [semiProUpdatingDb, setSemiProUpdatingDb]       = useState(false);
 
   useEffect(() => {
     loadStats();
     loadDbVersion();
     loadProUsers();
+    loadSemiProStatus();
   }, []);
+
+  const loadSemiProStatus = async () => {
+    try {
+      const cfg: any = await api.getSemiProSiteConfig('semi-pro');
+      if (cfg?.deployed) setSemiProStatus(cfg as SemiProSiteStatus);
+      else setSemiProStatus(null);
+    } catch { /* non-fatal */ }
+  };
+
+  const handleSemiProUpdateFiles = async () => {
+    if (!semiProStatus) return;
+    setSemiProUpdatingFiles(true);
+    try {
+      await api.updateSemiProSite({
+        slug: semiProStatus.slug,
+        company_name: semiProStatus.company_name || '',
+        db_name: semiProStatus.db_name,
+      });
+      await loadSemiProStatus();
+    } catch (err: any) {
+      alert('Erreur mise à jour fichiers : ' + err.message);
+    } finally {
+      setSemiProUpdatingFiles(false);
+    }
+  };
+
+  const handleSemiProUpdateDb = async () => {
+    if (!semiProStatus?.db_name) return;
+    setSemiProUpdatingDb(true);
+    try {
+      await api.updateSemiProDb(semiProStatus.db_name);
+      await loadSemiProStatus();
+    } catch (err: any) {
+      alert('Erreur mise à jour BD : ' + err.message);
+    } finally {
+      setSemiProUpdatingDb(false);
+    }
+  };
 
   const loadDbVersion = async () => {
     try {
@@ -462,6 +520,86 @@ export default function DashboardPage() {
                   </div>
                 );
               })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Semi-Pro Site Status */}
+      {semiProStatus && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Globe className="h-5 w-5 text-green-500" />
+              Site partagé semi-pro
+              <Button size="sm" variant="ghost" className="ml-auto h-6 px-2 text-xs text-gray-500"
+                onClick={loadSemiProStatus}>
+                <RefreshCw className="h-3 w-3 mr-1" /> Actualiser
+              </Button>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-gray-700 font-mono">
+                  sunbox-mauritius.com/pros/{semiProStatus.slug}
+                </p>
+                {semiProStatus.domain && (
+                  <p className="text-xs text-gray-400">{semiProStatus.domain}</p>
+                )}
+              </div>
+              {/* Version chips */}
+              <div className="flex gap-2 flex-wrap">
+                {semiProStatus.files_up_to_date ? (
+                  <span className="inline-flex items-center gap-1 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
+                    <CheckCircle2 className="h-3 w-3" /> Fichiers <span className="font-mono">v{semiProStatus.current_version}</span>
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">
+                    <AlertTriangle className="h-3 w-3" /> Fichiers <span className="font-mono">{semiProStatus.current_version} → {semiProStatus.latest_version}</span>
+                  </span>
+                )}
+                {semiProStatus.current_db_version ? (
+                  semiProStatus.db_up_to_date ? (
+                    <span className="inline-flex items-center gap-1 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
+                      <CheckCircle2 className="h-3 w-3" /> BD <span className="font-mono">v{semiProStatus.current_db_version}</span>
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">
+                      <AlertTriangle className="h-3 w-3" /> BD <span className="font-mono">{semiProStatus.current_db_version} → {semiProStatus.latest_db_version}</span>
+                    </span>
+                  )
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
+                    BD non connectée
+                  </span>
+                )}
+              </div>
+              {/* Update actions — only when needed */}
+              {(!semiProStatus.files_up_to_date || !semiProStatus.db_up_to_date) && (
+                <div className="flex gap-2 flex-wrap">
+                  {!semiProStatus.files_up_to_date && (
+                    <Button size="sm" variant="outline"
+                      className="text-blue-700 border-blue-300 hover:bg-blue-50 text-xs h-7 px-2"
+                      onClick={handleSemiProUpdateFiles}
+                      disabled={semiProUpdatingFiles}>
+                      {semiProUpdatingFiles
+                        ? <><Loader2 className="h-3 w-3 mr-1 animate-spin" />Déploiement…</>
+                        : <><Upload className="h-3 w-3 mr-1" />Déployer fichiers</>}
+                    </Button>
+                  )}
+                  {!semiProStatus.db_up_to_date && semiProStatus.db_name && (
+                    <Button size="sm" variant="outline"
+                      className="text-purple-700 border-purple-300 hover:bg-purple-50 text-xs h-7 px-2"
+                      onClick={handleSemiProUpdateDb}
+                      disabled={semiProUpdatingDb}>
+                      {semiProUpdatingDb
+                        ? <><Loader2 className="h-3 w-3 mr-1 animate-spin" />Mise à jour…</>
+                        : <><HardDrive className="h-3 w-3 mr-1" />Mettre à jour BD</>}
+                    </Button>
+                  )}
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>

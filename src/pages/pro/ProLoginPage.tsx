@@ -9,8 +9,10 @@ import { API_BASE_URL } from '@/lib/api';
 
 export default function ProLoginPage() {
   const isProSite = typeof window !== 'undefined' && !!(window as any).__PRO_SITE__;
-  const companyName: string = isProSite ? ((window as any).__PRO_COMPANY_NAME__ || '') : '';
-  const logoUrl: string = isProSite ? ((window as any).__PRO_LOGO_URL__ || '') : '';
+  const isSemiProSite = typeof window !== 'undefined' && !!(window as any).__SEMI_PRO_SITE__;
+  const companyName: string = (isProSite || isSemiProSite) ? ((window as any).__PRO_COMPANY_NAME__ || '') : '';
+  const logoUrl: string = (isProSite || isSemiProSite) ? ((window as any).__PRO_LOGO_URL__ || '') : '';
+  const loginBgUrl: string = (isProSite || isSemiProSite) ? ((window as any).__PRO_LOGIN_BG__ || '') : '';
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -23,7 +25,9 @@ export default function ProLoginPage() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!password || (!isProSite && !email)) {
+    // On a pro site (single-user): password only; on semi-pro or Sunbox: email + password
+    const needsEmail = !isProSite;
+    if (!password || (needsEmail && !email)) {
       toast({ title: 'Erreur', description: 'Veuillez remplir tous les champs.', variant: 'destructive' });
       return;
     }
@@ -47,16 +51,19 @@ export default function ProLoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
+    <div
+      className="min-h-screen bg-gray-100 flex items-center justify-center p-4"
+      style={loginBgUrl ? { backgroundImage: `url(${loginBgUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined}
+    >
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          {isProSite && logoUrl ? (
+          {(isProSite || isSemiProSite) && logoUrl ? (
             <img src={logoUrl} alt={companyName} className="h-16 w-auto mx-auto mb-2" />
           ) : null}
           <span className="text-3xl font-bold text-gray-800">
-            {isProSite && companyName ? companyName : <><span>Sun</span><span className="text-orange-500">box</span></>}
+            {(isProSite || isSemiProSite) && companyName ? companyName : <><span>Sun</span><span className="text-orange-500">box</span></>}
           </span>
-          <p className="text-gray-500 mt-1">Portail Professionnel</p>
+          <p className="text-gray-500 mt-1">{isSemiProSite ? 'Portail Semi-Pro (ERP)' : 'Portail Professionnel'}</p>
         </div>
 
         <Card>
@@ -65,6 +72,7 @@ export default function ProLoginPage() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleLogin} className="space-y-4">
+              {/* Show email on semi-pro site (multi-user) and on Sunbox main, but not on a single-user pro site */}
               {!isProSite && (
                 <div>
                   <Label htmlFor="email">Email</Label>

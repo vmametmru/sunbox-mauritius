@@ -1,0 +1,21 @@
+Options -MultiViews +FollowSymLinks
+
+# Always execute index.php for directory requests — serves React SPA with injected
+# window.__SEMI_PRO_SITE__ flag.
+DirectoryIndex index.php index.html
+
+RewriteEngine On
+RewriteBase /
+
+# Deny .env access
+<Files ".env">
+    Require all denied
+</Files>
+
+# API requests go directly to api/
+RewriteRule ^api/ - [L]
+
+# Everything else → index.php (React SPA served dynamically)
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule . index.php [L]

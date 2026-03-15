@@ -1146,7 +1146,7 @@ export const api = {
     return this.query('create_pro_user', user);
   },
 
-  updateProUser(user: { id: number; name?: string; email?: string; password?: string; is_active?: boolean; company_name?: string; address?: string; vat_number?: string; brn_number?: string; phone?: string; sunbox_margin_percent?: number; domain?: string; logo_url?: string; db_name?: string; theme_id?: number | null }) {
+  updateProUser(user: { id: number; name?: string; email?: string; password?: string; is_active?: boolean; company_name?: string; address?: string; vat_number?: string; brn_number?: string; phone?: string; sunbox_margin_percent?: number; domain?: string; logo_url?: string; login_bg_url?: string; db_name?: string; theme_id?: number | null }) {
     return this.query('update_pro_user', user);
   },
 
@@ -1168,6 +1168,51 @@ export const api = {
 
   checkProVersions(userId: number) {
     return this.query('check_pro_versions', { user_id: userId });
+  },
+
+  // ── Semi-Pro Users ──────────────────────────────────────────────────────────
+  getSemiProUsers() {
+    return this.query('get_semi_pro_users');
+  },
+
+  createSemiProUser(user: { name: string; email: string; password: string; company_name: string; address?: string; vat_number?: string; brn_number?: string; phone?: string }) {
+    return this.query('create_semi_pro_user', user);
+  },
+
+  updateSemiProUser(user: { id: number; name?: string; email?: string; password?: string; is_active?: boolean; company_name?: string; address?: string; vat_number?: string; brn_number?: string; phone?: string; logo_url?: string; allowed_model_type_slugs?: string[] | null }) {
+    return this.query('update_semi_pro_user', user);
+  },
+
+  deleteSemiProUser(id: number) {
+    return this.query('delete_semi_pro_user', { id });
+  },
+
+  deploySemiProSite(params: { slug: string; company_name: string; db_name: string; logo_url?: string; domain?: string; login_bg_url?: string }) {
+    return this.query('deploy_semi_pro_site', params);
+  },
+
+  getSemiProSiteVersion(slug: string) {
+    return this.query('get_semi_pro_site_version', { slug });
+  },
+
+  getSemiProSiteConfig(slug?: string) {
+    return this.query('get_semi_pro_site_config', { slug: slug ?? 'semi-pro' });
+  },
+
+  initSemiProDb(dbName: string) {
+    return this.query('init_semi_pro_db', { db_name: dbName });
+  },
+
+  updateSemiProSite(params: { slug: string; company_name: string; db_name: string; logo_url?: string; domain?: string; login_bg_url?: string }) {
+    return this.query('update_semi_pro_site', params);
+  },
+
+  updateSemiProDb(dbName: string) {
+    return this.query('update_semi_pro_db', { db_name: dbName });
+  },
+
+  saveSemiProConfig(params: { slug: string; company_name?: string; logo_url?: string; domain?: string; login_bg_url?: string }) {
+    return this.query('save_semi_pro_config', params);
   },
 
   buyProPack(userId: number) {

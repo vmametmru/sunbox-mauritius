@@ -36,6 +36,8 @@ const reasonLabels: Record<string, string> = {
   model_request:  'Demande modèle',
 };
 
+const isSemiProSite = typeof window !== 'undefined' && !!(window as any).__SEMI_PRO_SITE__;
+
 export default function ProSettingsPage() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -55,12 +57,17 @@ export default function ProSettingsPage() {
 
   const loadData = async () => {
     try {
-      const [profileData, creditsData] = await Promise.all([
-        api.getProProfile(),
-        api.getProCredits(),
-      ]);
-      setProfile(profileData);
-      setTransactions(creditsData.transactions ?? []);
+      if (isSemiProSite) {
+        const profileData = await api.getProProfile();
+        setProfile(profileData);
+      } else {
+        const [profileData, creditsData] = await Promise.all([
+          api.getProProfile(),
+          api.getProCredits(),
+        ]);
+        setProfile(profileData);
+        setTransactions(creditsData.transactions ?? []);
+      }
     } catch (err: any) {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
     }
@@ -189,7 +196,8 @@ export default function ProSettingsPage() {
         <p className="text-gray-500 mt-1">Gérez vos informations professionnelles</p>
       </div>
 
-      {/* Credits */}
+      {/* Credits — pro-only */}
+      {!isSemiProSite && (
       <Card className="border-orange-200 bg-orange-50">
         <CardContent className="p-6">
           <div className="flex items-center justify-between flex-wrap gap-4">
@@ -211,6 +219,7 @@ export default function ProSettingsPage() {
           </div>
         </CardContent>
       </Card>
+      )}
 
       {/* Profile form */}
       <Card>
@@ -283,7 +292,8 @@ export default function ProSettingsPage() {
         </CardContent>
       </Card>
 
-      {/* Transaction history */}
+      {/* Transaction history — pro-only */}
+      {!isSemiProSite && (
       <Card>
         <CardHeader>
           <CardTitle>Historique des crédits</CardTitle>
@@ -311,6 +321,7 @@ export default function ProSettingsPage() {
           )}
         </CardContent>
       </Card>
+      )}
 
       {/* Header images */}
       <Card>

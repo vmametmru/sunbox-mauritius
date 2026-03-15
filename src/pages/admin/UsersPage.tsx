@@ -30,6 +30,7 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import { api, ProTheme } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 
@@ -53,9 +54,41 @@ interface ProUser {
   domain?: string;
   api_token?: string;
   logo_url?: string;
+  login_bg_url?: string;
   db_name?: string;
   theme_id?: number | null;
   theme_name?: string;
+}
+
+interface SemiProUser {
+  id?: number;
+  name: string;
+  email: string;
+  password?: string;
+  company_name: string;
+  address?: string;
+  vat_number?: string;
+  brn_number?: string;
+  phone?: string;
+  logo_url?: string;
+  is_active?: boolean;
+  allowed_model_type_slugs?: string[] | null;
+}
+
+interface SemiProSiteConfig {
+  deployed: boolean;
+  slug: string;
+  db_name: string;
+  company_name: string;
+  logo_url: string;
+  domain: string;
+  login_bg_url: string;
+  current_version: string | null;
+  latest_version: string;
+  files_up_to_date: boolean;
+  current_db_version: string | null;
+  latest_db_version: string;
+  db_up_to_date: boolean;
 }
 
 interface VersionStatus {
@@ -84,7 +117,21 @@ const emptyUser: ProUser = {
   model_request_cost: 5000,
   domain: '',
   logo_url: '',
+  login_bg_url: '',
   db_name: '',
+  is_active: true,
+};
+
+const emptySemiProUser: SemiProUser = {
+  name: '',
+  email: '',
+  password: '',
+  company_name: '',
+  address: '',
+  vat_number: '',
+  brn_number: '',
+  phone: '',
+  logo_url: '',
   is_active: true,
 };
 
@@ -136,9 +183,38 @@ export default function UsersPage() {
   const [headerImages, setHeaderImages] = useState<string[]>([]);
   const [uploadingHeaderImg, setUploadingHeaderImg] = useState(false);
   const [savingHeaderImgs, setSavingHeaderImgs] = useState(false);
+  const [uploadingLoginBg, setUploadingLoginBg] = useState(false);
   const logoInputRef = useRef<HTMLInputElement>(null);
+  const loginBgInputRef = useRef<HTMLInputElement>(null);
   const headerImgInputRef = useRef<HTMLInputElement>(null);
+  const semiProLogoInputRef = useRef<HTMLInputElement>(null);
+  const semiProLoginBgInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+
+  // Semi-pro state
+  const [activeTab, setActiveTab] = useState<'pro' | 'semi-pro'>('pro');
+  const [semiProUsers, setSemiProUsers] = useState<SemiProUser[]>([]);
+  const [loadingSemiPro, setLoadingSemiPro] = useState(false);
+  const [semiProSearchTerm, setSemiProSearchTerm] = useState('');
+  const [editingSemiProUser, setEditingSemiProUser] = useState<SemiProUser | null>(null);
+  const [isSemiProDialogOpen, setIsSemiProDialogOpen] = useState(false);
+  const [savingSemiPro, setSavingSemiPro] = useState(false);
+  const [deletingSemiProId, setDeletingSemiProId] = useState<number | null>(null);
+  const [semiProSiteSlug, setSemiProSiteSlug] = useState('semi-pro');
+  const [semiProSiteDbName, setSemiProSiteDbName] = useState('');
+  const [semiProSiteCompanyName, setSemiProSiteCompanyName] = useState('Semi-Pro ERP');
+  const [semiProSiteLogo, setSemiProSiteLogo] = useState('');
+  const [semiProSiteDomain, setSemiProSiteDomain] = useState('');
+  const [semiProSiteLoginBg, setSemiProSiteLoginBg] = useState('');
+  const [uploadingSemiProLogo, setUploadingSemiProLogo] = useState(false);
+  const [uploadingSemiProLoginBg, setUploadingSemiProLoginBg] = useState(false);
+  const [deployingSemiProSite, setDeployingSemiProSite] = useState(false);
+  const [initializingSemiProDb, setInitializingSemiProDb] = useState(false);
+  const [updatingSemiProSite, setUpdatingSemiProSite] = useState(false);
+  const [updatingSemiProDb, setUpdatingSemiProDb] = useState(false);
+  const [savingSemiProConfig, setSavingSemiProConfig] = useState(false);
+  const [semiProSiteConfig, setSemiProSiteConfig] = useState<SemiProSiteConfig | null>(null);
+  const [allModelTypes, setAllModelTypes] = useState<{ slug: string; name: string }[]>([]);
 
   const API_BASE = 'https://sunbox-mauritius.com/api';
 
@@ -169,12 +245,18 @@ export default function UsersPage() {
 
   useEffect(() => {
     loadUsers();
+    loadSemiProUsers();
+    loadSemiProSiteConfig();
     api.getModels(undefined, true).then((data: any) => {
       const list = Array.isArray(data) ? data : (data?.models ?? []);
       setAllModels(list.map((m: any) => ({ id: Number(m.id), name: m.name, type: m.type })));
     }).catch((err: any) => {
       console.error('Erreur chargement modèles:', err);
     });
+    api.getModelTypes(true).then((data: any) => {
+      const list = Array.isArray(data) ? data : [];
+      setAllModelTypes(list.map((mt: any) => ({ slug: mt.slug, name: mt.name })));
+    }).catch(() => {});
     api.getProThemes().then((data: any) => {
       setAllThemes(Array.isArray(data) ? data : []);
     }).catch(() => {});
@@ -198,6 +280,248 @@ export default function UsersPage() {
       setUsers([]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  /* ======================================================
+     SEMI-PRO CRUD & DEPLOY
+  ====================================================== */
+  const loadSemiProUsers = async () => {
+    try {
+      setLoadingSemiPro(true);
+      const data = await api.getSemiProUsers();
+      setSemiProUsers(Array.isArray(data) ? data : []);
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setLoadingSemiPro(false);
+    }
+  };
+
+  const loadSemiProSiteConfig = async (slug?: string) => {
+    try {
+      const data = await api.getSemiProSiteConfig(slug ?? semiProSiteSlug) as SemiProSiteConfig;
+      setSemiProSiteConfig(data);
+      if (data.deployed) {
+        // Restore persisted config into form fields
+        if (data.slug)         setSemiProSiteSlug(data.slug);
+        if (data.db_name)      setSemiProSiteDbName(data.db_name);
+        if (data.company_name) setSemiProSiteCompanyName(data.company_name);
+        setSemiProSiteLogo(data.logo_url ?? '');
+        setSemiProSiteDomain(data.domain ?? '');
+        setSemiProSiteLoginBg(data.login_bg_url ?? '');
+      }
+    } catch {
+      // Silently ignore — site may not be deployed yet
+    }
+  };
+
+  const handleSemiProLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      setUploadingSemiProLogo(true);
+      const r = await fetch('/api/upload_sketch.php', { method: 'POST', body: formData, credentials: 'include' });
+      const j = await r.json();
+      if (!r.ok || j.error) throw new Error(j.error || 'Upload échoué');
+      setSemiProSiteLogo(j.url as string);
+      toast({ title: 'Logo uploadé' });
+    } catch (err: any) {
+      toast({ title: 'Erreur upload logo', description: err.message, variant: 'destructive' });
+    } finally {
+      setUploadingSemiProLogo(false);
+      if (semiProLogoInputRef.current) semiProLogoInputRef.current.value = '';
+    }
+  };
+
+  const handleSemiProLoginBgUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      setUploadingSemiProLoginBg(true);
+      const r = await fetch('/api/upload_sketch.php', { method: 'POST', body: formData, credentials: 'include' });
+      const j = await r.json();
+      if (!r.ok || j.error) throw new Error(j.error || 'Upload échoué');
+      setSemiProSiteLoginBg(j.url as string);
+      toast({ title: 'Background uploadé' });
+    } catch (err: any) {
+      toast({ title: 'Erreur upload background', description: err.message, variant: 'destructive' });
+    } finally {
+      setUploadingSemiProLoginBg(false);
+      if (semiProLoginBgInputRef.current) semiProLoginBgInputRef.current.value = '';
+    }
+  };
+
+  const deploySemiProSite = async () => {
+    if (!semiProSiteSlug || !semiProSiteDbName) {
+      toast({ title: 'Erreur', description: 'Slug et nom de la base de données sont requis.', variant: 'destructive' });
+      return;
+    }
+    try {
+      setDeployingSemiProSite(true);
+      const result = await api.deploySemiProSite({
+        slug: semiProSiteSlug,
+        company_name: semiProSiteCompanyName,
+        db_name: semiProSiteDbName,
+        logo_url: semiProSiteLogo,
+        domain: semiProSiteDomain,
+        login_bg_url: semiProSiteLoginBg,
+      });
+      const r = result as any;
+      if (r.deployed) {
+        toast({ title: 'Déployé !', description: `Site semi-pro déployé à: ${r.site_url}` });
+        loadSemiProSiteConfig(semiProSiteSlug);
+      } else {
+        toast({ title: 'Erreur déploiement', description: (r.errors || []).join('\n') || 'Erreur inconnue.', variant: 'destructive' });
+      }
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setDeployingSemiProSite(false);
+    }
+  };
+
+  const initSemiProDb = async () => {
+    if (!semiProSiteDbName) {
+      toast({ title: 'Erreur', description: 'Nom de la base de données requis.', variant: 'destructive' });
+      return;
+    }
+    try {
+      setInitializingSemiProDb(true);
+      const result = await api.initSemiProDb(semiProSiteDbName);
+      const r = result as any;
+      if (r.initialized) {
+        toast({ title: 'Succès', description: 'Base de données semi-pro initialisée.' });
+        loadSemiProSiteConfig(semiProSiteSlug);
+      } else {
+        toast({ title: 'Erreur', description: (r.errors || []).join('\n') || 'Erreur inconnue.', variant: 'destructive' });
+      }
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setInitializingSemiProDb(false);
+    }
+  };
+
+  const updateSemiProSite = async () => {
+    if (!semiProSiteSlug || !semiProSiteDbName) {
+      toast({ title: 'Erreur', description: 'Slug et nom de la base de données sont requis.', variant: 'destructive' });
+      return;
+    }
+    try {
+      setUpdatingSemiProSite(true);
+      const result = await api.updateSemiProSite({
+        slug: semiProSiteSlug,
+        company_name: semiProSiteCompanyName,
+        db_name: semiProSiteDbName,
+        logo_url: semiProSiteLogo,
+        domain: semiProSiteDomain,
+        login_bg_url: semiProSiteLoginBg,
+      });
+      const r = result as any;
+      if (r.updated) {
+        toast({ title: 'Mis à jour !', description: 'Fichiers du site semi-pro mis à jour.' });
+        loadSemiProSiteConfig(semiProSiteSlug);
+      } else {
+        toast({ title: 'Erreur', description: (r.errors || []).join('\n') || 'Erreur inconnue.', variant: 'destructive' });
+      }
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setUpdatingSemiProSite(false);
+    }
+  };
+
+  const updateSemiProDb = async () => {
+    if (!semiProSiteDbName) {
+      toast({ title: 'Erreur', description: 'Nom de la base de données requis.', variant: 'destructive' });
+      return;
+    }
+    try {
+      setUpdatingSemiProDb(true);
+      const result = await api.updateSemiProDb(semiProSiteDbName);
+      const r = result as any;
+      if (r.updated) {
+        toast({ title: 'Succès', description: 'Base de données semi-pro mise à jour.' });
+      } else {
+        toast({ title: 'Erreur', description: (r.errors || []).join('\n') || 'Erreur inconnue.', variant: 'destructive' });
+      }
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setUpdatingSemiProDb(false);
+      loadSemiProSiteConfig(semiProSiteSlug);
+    }
+  };
+
+  const saveSemiProConfig = async () => {
+    if (!semiProSiteSlug) return;
+    try {
+      setSavingSemiProConfig(true);
+      await api.saveSemiProConfig({
+        slug: semiProSiteSlug,
+        company_name: semiProSiteCompanyName,
+        logo_url: semiProSiteLogo,
+        domain: semiProSiteDomain,
+        login_bg_url: semiProSiteLoginBg,
+      });
+      toast({ title: 'Configuration sauvegardée' });
+      loadSemiProSiteConfig(semiProSiteSlug);
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setSavingSemiProConfig(false);
+    }
+  };
+
+  const openNewSemiProUser = () => {
+    setEditingSemiProUser({ ...emptySemiProUser });
+    setIsSemiProDialogOpen(true);
+  };
+
+  const openEditSemiProUser = (user: SemiProUser) => {
+    setEditingSemiProUser({ ...user, password: '' });
+    setIsSemiProDialogOpen(true);
+  };
+
+  const saveSemiProUser = async () => {
+    if (!editingSemiProUser) return;
+    try {
+      setSavingSemiPro(true);
+      if (editingSemiProUser.id) {
+        await api.updateSemiProUser(editingSemiProUser as { id: number } & SemiProUser);
+      } else {
+        if (!editingSemiProUser.password) {
+          toast({ title: 'Erreur', description: 'Le mot de passe est requis.', variant: 'destructive' });
+          return;
+        }
+        await api.createSemiProUser(editingSemiProUser as { name: string; email: string; password: string; company_name: string });
+      }
+      toast({ title: 'Succès', description: 'Utilisateur semi-pro enregistré.' });
+      setIsSemiProDialogOpen(false);
+      loadSemiProUsers();
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setSavingSemiPro(false);
+    }
+  };
+
+  const deleteSemiProUser = async (id: number) => {
+    if (!confirm('Supprimer cet utilisateur semi-pro ?')) return;
+    try {
+      setDeletingSemiProId(id);
+      await api.deleteSemiProUser(id);
+      toast({ title: 'Supprimé', description: 'Utilisateur semi-pro supprimé.' });
+      loadSemiProUsers();
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setDeletingSemiProId(null);
     }
   };
 
@@ -326,6 +650,26 @@ export default function UsersPage() {
     }
   };
 
+  const handleLoginBgUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !editingUser) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      setUploadingLoginBg(true);
+      const r = await fetch('/api/upload_sketch.php', { method: 'POST', body: formData, credentials: 'include' });
+      const j = await r.json();
+      if (!r.ok || j.error) throw new Error(j.error || 'Upload échoué');
+      setEditingUser((prev) => prev ? { ...prev, login_bg_url: j.url } : prev);
+      toast({ title: 'Background de connexion uploadé' });
+    } catch (err: any) {
+      toast({ title: 'Erreur upload background', description: err.message, variant: 'destructive' });
+    } finally {
+      setUploadingLoginBg(false);
+      if (loginBgInputRef.current) loginBgInputRef.current.value = '';
+    }
+  };
+
   const handleHeaderImgUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     if (files.length === 0 || !editingUser?.id) return;
@@ -448,15 +792,41 @@ function VersionChip({ ok, checking, label }: { ok: boolean; checking: boolean; 
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Utilisateurs Professionnels</h1>
-          <p className="text-gray-500 mt-1">{users.length} utilisateur(s) professionnel(s)</p>
+          <h1 className="text-3xl font-bold text-gray-900">
+            {activeTab === 'pro' ? 'Utilisateurs Professionnels' : 'Utilisateurs Semi-Pro'}
+          </h1>
+          <p className="text-gray-500 mt-1">
+            {activeTab === 'pro' ? `${users.length} utilisateur(s) professionnel(s)` : `${semiProUsers.length} utilisateur(s) semi-pro`}
+          </p>
         </div>
-        <Button onClick={openNewUser} className="bg-orange-500 hover:bg-orange-600">
-          <Plus className="h-4 w-4 mr-2" />
-          Nouveau Professionnel
-        </Button>
+        {activeTab === 'pro' && (
+          <Button onClick={openNewUser} className="bg-orange-500 hover:bg-orange-600">
+            <Plus className="h-4 w-4 mr-2" />
+            Nouveau Professionnel
+          </Button>
+        )}
       </div>
 
+      {/* Tab switcher */}
+      <div className="flex gap-2 mb-4">
+        <button
+          className={`px-4 py-2 rounded-lg font-medium text-sm transition-colors ${activeTab === 'pro' ? 'bg-orange-500 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+          onClick={() => setActiveTab('pro')}
+        >
+          <Users className="inline-block w-4 h-4 mr-1 -mt-0.5" />
+          Pro Users ({users.length})
+        </button>
+        <button
+          className={`px-4 py-2 rounded-lg font-medium text-sm transition-colors ${activeTab === 'semi-pro' ? 'bg-green-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+          onClick={() => { setActiveTab('semi-pro'); loadSemiProUsers(); }}
+        >
+          <Building2 className="inline-block w-4 h-4 mr-1 -mt-0.5" />
+          Semi-Pro Users ({semiProUsers.length})
+        </button>
+      </div>
+
+      {activeTab === 'pro' && (
+        <>
       <Card>
         <CardContent className="p-4">
           <div className="relative">
@@ -685,6 +1055,49 @@ function VersionChip({ ok, checking, label }: { ok: boolean; checking: boolean; 
                   accept="image/jpeg,image/png,image/webp"
                   className="hidden"
                   onChange={handleLogoUpload}
+                />
+              </div>
+
+              <div>
+                <Label>Background page de connexion</Label>
+                <div className="flex items-center gap-3 mt-1">
+                  {editingUser.login_bg_url && (
+                    <img
+                      src={editingUser.login_bg_url}
+                      alt="Background actuel"
+                      className="h-12 w-20 object-cover border rounded"
+                    />
+                  )}
+                  <div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => loginBgInputRef.current?.click()}
+                      disabled={uploadingLoginBg}
+                      className="gap-2"
+                    >
+                      <Upload className="h-4 w-4" />
+                      {uploadingLoginBg ? 'Upload...' : editingUser.login_bg_url ? 'Changer' : 'Choisir'}
+                    </Button>
+                    {editingUser.login_bg_url && (
+                      <button
+                        type="button"
+                        onClick={() => setEditingUser({ ...editingUser, login_bg_url: '' })}
+                        className="ml-2 text-xs text-red-500 hover:underline"
+                      >
+                        Supprimer
+                      </button>
+                    )}
+                    <p className="text-xs text-gray-400 mt-1">JPG, PNG ou WEBP</p>
+                  </div>
+                </div>
+                <input
+                  ref={loginBgInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={handleLoginBgUpload}
                 />
               </div>
 
@@ -1054,6 +1467,374 @@ function VersionChip({ ok, checking, label }: { ok: boolean; checking: boolean; 
           )}
         </DialogContent>
       </Dialog>
+        </>
+      )}
+
+      {activeTab === 'semi-pro' && (
+        <div>
+          {/* Search + New button for semi-pro */}
+          <div className="flex items-center gap-3 mb-4">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+              <Input
+                className="pl-10"
+                placeholder="Rechercher un utilisateur semi-pro..."
+                value={semiProSearchTerm}
+                onChange={(e) => setSemiProSearchTerm(e.target.value)}
+              />
+            </div>
+            <Button className="bg-green-600 hover:bg-green-700 text-white" onClick={openNewSemiProUser}>
+              <Plus className="w-4 h-4 mr-2" /> Nouveau Semi-Pro
+            </Button>
+          </div>
+
+          {/* Semi-pro users list */}
+          {loadingSemiPro ? (
+            <div className="text-center py-8 text-gray-500">Chargement...</div>
+          ) : semiProUsers.filter(u =>
+              (u.name || '').toLowerCase().includes(semiProSearchTerm.toLowerCase()) ||
+              (u.email || '').toLowerCase().includes(semiProSearchTerm.toLowerCase()) ||
+              (u.company_name || '').toLowerCase().includes(semiProSearchTerm.toLowerCase())
+            ).length === 0 ? (
+            <div className="text-center py-12 text-gray-400">
+              <Building2 className="w-12 h-12 mx-auto mb-3 opacity-30" />
+              <p>Aucun utilisateur semi-pro</p>
+              <Button className="mt-4 bg-green-600 hover:bg-green-700 text-white" onClick={openNewSemiProUser}>
+                <Plus className="w-4 h-4 mr-2" /> Créer le premier
+              </Button>
+            </div>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {semiProUsers
+                .filter(u =>
+                  (u.name || '').toLowerCase().includes(semiProSearchTerm.toLowerCase()) ||
+                  (u.email || '').toLowerCase().includes(semiProSearchTerm.toLowerCase()) ||
+                  (u.company_name || '').toLowerCase().includes(semiProSearchTerm.toLowerCase())
+                )
+                .map(user => (
+                  <Card key={user.id} className="border border-green-100 hover:shadow-md transition-shadow">
+                    <CardContent className="p-4">
+                      <div className="flex items-start justify-between mb-3">
+                        <div>
+                          <p className="font-semibold text-gray-900">{user.name}</p>
+                          <p className="text-sm text-gray-500">{user.email}</p>
+                          <p className="text-xs text-green-700 font-medium mt-0.5">{user.company_name}</p>
+                        </div>
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${user.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                          {user.is_active ? 'Actif' : 'Inactif'}
+                        </span>
+                      </div>
+                      {user.phone && <p className="text-xs text-gray-400 mb-3">📞 {user.phone}</p>}
+                      <div className="flex gap-2 mt-2">
+                        <Button size="sm" variant="outline" className="flex-1" onClick={() => openEditSemiProUser(user)}>
+                          <Edit className="w-3 h-3 mr-1" /> Modifier
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-red-600 border-red-200 hover:bg-red-50"
+                          disabled={deletingSemiProId === user.id}
+                          onClick={() => deleteSemiProUser(user.id!)}
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+            </div>
+          )}
+
+          {/* Site partagé semi-pro — configuration et gestion */}
+          <div className="mt-8 p-5 border border-dashed border-green-300 rounded-xl bg-green-50">
+            <p className="text-sm font-semibold text-green-800 flex items-center gap-2 mb-1">
+              <Globe className="w-4 h-4" />
+              {semiProSiteConfig?.deployed ? 'Site partagé semi-pro — Gestion' : 'Déploiement du site partagé semi-pro'}
+            </p>
+            <p className="text-xs text-green-700 mb-4">
+              Tous les semi-pro users partagent un sous-répertoire unique sous sunbox-mauritius.com/pros/
+              et une base de données commune.
+            </p>
+
+            {/* Version badges when deployed */}
+            {semiProSiteConfig?.deployed && (
+              <div className="mb-4 flex items-center gap-2 flex-wrap">
+                <span className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-white border border-green-200 text-green-700 font-medium">
+                  {semiProSiteConfig.files_up_to_date
+                    ? <CheckCircle2 className="w-3.5 h-3.5 text-green-600" />
+                    : <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />}
+                  Fichiers : {semiProSiteConfig.current_version ?? '?'} / {semiProSiteConfig.latest_version}
+                </span>
+                <span className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-white border border-green-200 text-green-700 font-medium">
+                  {semiProSiteConfig.db_up_to_date
+                    ? <CheckCircle2 className="w-3.5 h-3.5 text-green-600" />
+                    : <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />}
+                  BD : {semiProSiteConfig.current_db_version ?? '?'} / {semiProSiteConfig.latest_db_version}
+                </span>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-xs text-green-700 h-6 px-2"
+                  onClick={() => loadSemiProSiteConfig(semiProSiteSlug)}
+                >
+                  <RefreshCw className="w-3 h-3 mr-1" /> Actualiser
+                </Button>
+              </div>
+            )}
+
+            {/* Config fields (always shown) */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+              <div>
+                <label className="text-xs font-medium text-gray-700 block mb-1">Slug (sous-répertoire)</label>
+                <Input value={semiProSiteSlug} onChange={e => setSemiProSiteSlug(e.target.value)} placeholder="semi-pro" className="text-sm" disabled={semiProSiteConfig?.deployed} />
+                <p className="text-xs text-gray-400 mt-1">sunbox-mauritius.com/pros/{semiProSiteSlug || '...'}</p>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-700 block mb-1">Nom de la base de données partagée</label>
+                <Input value={semiProSiteDbName} onChange={e => setSemiProSiteDbName(e.target.value)} placeholder="sunbox_semi_pro" className="text-sm" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-700 block mb-1">Nom affiché (login page)</label>
+                <Input value={semiProSiteCompanyName} onChange={e => setSemiProSiteCompanyName(e.target.value)} placeholder="Semi-Pro ERP" className="text-sm" />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+              {/* Logo upload */}
+              <div>
+                <label className="text-xs font-medium text-gray-700 block mb-1">Logo du site Semi-Pro</label>
+                <input
+                  ref={semiProLogoInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={handleSemiProLogoUpload}
+                />
+                <div className="flex items-center gap-2">
+                  {semiProSiteLogo && (
+                    <img src={semiProSiteLogo} alt="Logo" className="h-9 w-9 object-contain rounded border border-gray-200 bg-white" />
+                  )}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="text-xs gap-1.5"
+                    disabled={uploadingSemiProLogo}
+                    onClick={() => semiProLogoInputRef.current?.click()}
+                  >
+                    <Upload className="w-3 h-3" />
+                    {uploadingSemiProLogo ? 'Upload...' : semiProSiteLogo ? 'Changer' : 'Choisir'}
+                  </Button>
+                  {semiProSiteLogo && (
+                    <button
+                      type="button"
+                      className="text-xs text-red-500 hover:text-red-700"
+                      onClick={() => setSemiProSiteLogo('')}
+                      title="Supprimer le logo"
+                    >✕</button>
+                  )}
+                </div>
+              </div>
+              {/* Domain (text input unchanged) */}
+              <div>
+                <label className="text-xs font-medium text-gray-700 block mb-1">Nom de domaine</label>
+                <Input value={semiProSiteDomain} onChange={e => setSemiProSiteDomain(e.target.value)} placeholder="erp.monsitepro.com" className="text-sm" />
+              </div>
+              {/* Login background upload */}
+              <div>
+                <label className="text-xs font-medium text-gray-700 block mb-1">Background page de connexion</label>
+                <input
+                  ref={semiProLoginBgInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={handleSemiProLoginBgUpload}
+                />
+                <div className="flex items-center gap-2">
+                  {semiProSiteLoginBg && (
+                    <img src={semiProSiteLoginBg} alt="Background" className="h-9 w-16 object-cover rounded border border-gray-200" />
+                  )}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="text-xs gap-1.5"
+                    disabled={uploadingSemiProLoginBg}
+                    onClick={() => semiProLoginBgInputRef.current?.click()}
+                  >
+                    <Upload className="w-3 h-3" />
+                    {uploadingSemiProLoginBg ? 'Upload...' : semiProSiteLoginBg ? 'Changer' : 'Choisir'}
+                  </Button>
+                  {semiProSiteLoginBg && (
+                    <button
+                      type="button"
+                      className="text-xs text-red-500 hover:text-red-700"
+                      onClick={() => setSemiProSiteLoginBg('')}
+                      title="Supprimer le background"
+                    >✕</button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Action buttons — conditional on deployed state */}
+            {semiProSiteConfig?.deployed ? (
+              <div className="flex gap-2 flex-wrap">
+                {/* C: Save branding config (domain, logo, bg) without full redeploy */}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="border-green-400 text-green-700 hover:bg-green-50"
+                  disabled={savingSemiProConfig}
+                  onClick={saveSemiProConfig}
+                >
+                  <CheckCircle2 className="w-3 h-3 mr-1" />
+                  {savingSemiProConfig ? 'Sauvegarde...' : 'Sauvegarder la configuration'}
+                </Button>
+                {/* A: Only show file update button when files are NOT up-to-date */}
+                {!semiProSiteConfig.files_up_to_date && (
+                  <Button
+                    size="sm"
+                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                    disabled={updatingSemiProSite}
+                    onClick={updateSemiProSite}
+                  >
+                    <Upload className="w-3 h-3 mr-1" />
+                    {updatingSemiProSite
+                      ? 'Mise à jour...'
+                      : `Mettre à jour les fichiers (v${semiProSiteConfig.current_version ?? '?'} → v${semiProSiteConfig.latest_version})`}
+                  </Button>
+                )}
+                {/* A: Only show DB update button when DB is NOT up-to-date */}
+                {!semiProSiteConfig.db_up_to_date && semiProSiteDbName && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-blue-300 text-blue-700 hover:bg-blue-50"
+                    disabled={updatingSemiProDb}
+                    onClick={updateSemiProDb}
+                  >
+                    <Database className="w-3 h-3 mr-1" />
+                    {updatingSemiProDb
+                      ? 'Mise à jour...'
+                      : `Mettre à jour la BD (v${semiProSiteConfig.current_db_version ?? '?'} → v${semiProSiteConfig.latest_db_version})`}
+                  </Button>
+                )}
+              </div>
+            ) : (
+              <div className="flex gap-2 flex-wrap">
+                <Button
+                  size="sm"
+                  className="bg-green-600 hover:bg-green-700 text-white"
+                  disabled={deployingSemiProSite}
+                  onClick={deploySemiProSite}
+                >
+                  <FolderOpen className="w-3 h-3 mr-1" />
+                  {deployingSemiProSite ? 'Déploiement...' : 'Déployer le site'}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={initializingSemiProDb || !semiProSiteDbName}
+                  onClick={initSemiProDb}
+                >
+                  <Database className="w-3 h-3 mr-1" />
+                  {initializingSemiProDb ? 'Init...' : 'Initialiser la BD'}
+                </Button>
+              </div>
+            )}
+          </div>
+
+          {/* Semi-Pro User Dialog */}
+          <Dialog open={isSemiProDialogOpen} onOpenChange={setIsSemiProDialogOpen}>
+            <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>{editingSemiProUser?.id ? 'Modifier' : 'Nouveau'} utilisateur semi-pro</DialogTitle>
+              </DialogHeader>
+              {editingSemiProUser && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label>Nom *</Label>
+                      <Input value={editingSemiProUser.name} onChange={e => setEditingSemiProUser({ ...editingSemiProUser, name: e.target.value })} />
+                    </div>
+                    <div>
+                      <Label>Email *</Label>
+                      <Input type="email" value={editingSemiProUser.email} onChange={e => setEditingSemiProUser({ ...editingSemiProUser, email: e.target.value })} />
+                    </div>
+                  </div>
+                  <div>
+                    <Label>{editingSemiProUser.id ? 'Nouveau mot de passe (optionnel)' : 'Mot de passe *'}</Label>
+                    <Input type="password" value={editingSemiProUser.password || ''} onChange={e => setEditingSemiProUser({ ...editingSemiProUser, password: e.target.value })} placeholder="••••••••" />
+                  </div>
+                  <div>
+                    <Label>Nom de l'entreprise *</Label>
+                    <Input value={editingSemiProUser.company_name} onChange={e => setEditingSemiProUser({ ...editingSemiProUser, company_name: e.target.value })} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label>Téléphone</Label>
+                      <Input value={editingSemiProUser.phone || ''} onChange={e => setEditingSemiProUser({ ...editingSemiProUser, phone: e.target.value })} />
+                    </div>
+                    <div>
+                      <Label>Numéro TVA</Label>
+                      <Input value={editingSemiProUser.vat_number || ''} onChange={e => setEditingSemiProUser({ ...editingSemiProUser, vat_number: e.target.value })} />
+                    </div>
+                  </div>
+                  <div>
+                    <Label>Adresse</Label>
+                    <Input value={editingSemiProUser.address || ''} onChange={e => setEditingSemiProUser({ ...editingSemiProUser, address: e.target.value })} />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      checked={editingSemiProUser.is_active ?? true}
+                      onCheckedChange={v => setEditingSemiProUser({ ...editingSemiProUser, is_active: v })}
+                    />
+                    <Label>Compte actif</Label>
+                  </div>
+                  {/* E: Model type access */}
+                  {allModelTypes.length > 0 && (
+                    <div>
+                      <Label className="block mb-2">Modèles autorisés <span className="text-xs font-normal text-gray-500">(laisser vide = tous)</span></Label>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {allModelTypes.map(mt => {
+                          const allowed = editingSemiProUser.allowed_model_type_slugs ?? null;
+                          const checked = allowed === null || allowed.includes(mt.slug);
+                          return (
+                            <label key={mt.slug} className="flex items-center gap-2 cursor-pointer text-sm p-1.5 rounded hover:bg-gray-50">
+                              <Checkbox
+                                checked={checked}
+                                onCheckedChange={(v) => {
+                                  // null means unrestricted; expand to all slugs first so we can remove one
+                                  const current: string[] = editingSemiProUser.allowed_model_type_slugs ?? allModelTypes.map(x => x.slug);
+                                  const next = v
+                                    ? [...new Set([...current, mt.slug])]
+                                    : current.filter(s => s !== mt.slug);
+                                  // If all slugs selected → store null (unrestricted)
+                                  setEditingSemiProUser({
+                                    ...editingSemiProUser,
+                                    allowed_model_type_slugs: next.length === allModelTypes.length ? null : next,
+                                  });
+                                }}
+                              />
+                              {mt.name}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  <div className="flex gap-3 pt-2">
+                    <Button className="flex-1 bg-green-600 hover:bg-green-700 text-white" disabled={savingSemiPro} onClick={saveSemiProUser}>
+                      {savingSemiPro ? 'Enregistrement...' : 'Enregistrer'}
+                    </Button>
+                    <Button variant="outline" onClick={() => setIsSemiProDialogOpen(false)}>Annuler</Button>
+                  </div>
+                </div>
+              )}
+            </DialogContent>
+          </Dialog>
+        </div>
+      )}
     </div>
   );
 }

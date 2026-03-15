@@ -16,7 +16,7 @@ declare(strict_types=1);
  */
 
 /** Deployed file version — must match PRO_FILE_VERSION in sunbox api/index.php. */
-define('PRO_FILE_VERSION', '2.9.8');
+define('PRO_FILE_VERSION', '2.10.1');
 
 /**
  * Parse a single .env file from disk, bypassing getenv() entirely.
@@ -490,6 +490,30 @@ function handleCORS(): void
     if ($host) {
         $allowed[] = 'https://' . $host;
         $allowed[] = 'https://www.' . $host;
+        // Strip leading www. so both variants are covered
+        if (strpos($host, 'www.') === 0) {
+            $allowed[] = 'https://' . substr($host, 4);
+        }
+    }
+    // Also allow the custom domain configured for this pro site (e.g. www.mokosting.com).
+    // Requests from index.php are same-origin (HTTP_HOST-based API URL), but we keep
+    // this here as a defence-in-depth safety net for edge cases (cached old HTML, etc.).
+    $customDomain = trim((string)env('DOMAIN', ''));
+    if ($customDomain) {
+        if (strpos($customDomain, 'www.') === 0) {
+            $allowed[] = 'https://' . $customDomain;
+            $allowed[] = 'https://' . substr($customDomain, 4);
+        } else {
+            $allowed[] = 'https://' . $customDomain;
+            $allowed[] = 'https://www.' . $customDomain;
+        }
+    }
+    // Additionally accept the origin that matches the current HTTP_HOST — this covers
+    // any domain the server is actually responding on without needing .env changes.
+    $serverHost = $_SERVER['HTTP_HOST'] ?? '';
+    if ($serverHost) {
+        $proto = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+        $allowed[] = $proto . '://' . $serverHost;
     }
     $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
     if ($origin && in_array($origin, $allowed, true)) {

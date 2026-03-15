@@ -6,12 +6,17 @@ handleCORS();
 
 // Pro site deployment versions — increment these when templates or DB schema change.
 // PRO_FILE_VERSION must match define('PRO_FILE_VERSION', ...) in api/pro_deploy/api_config.php
-define('PRO_FILE_VERSION',      '2.9.8');
+define('PRO_FILE_VERSION',      '2.10.1');
 define('PRO_DB_SCHEMA_VERSION', '1.8.0');
+
+// Semi-pro shared site deployment version.
+// SEMI_PRO_FILE_VERSION must match define('SEMI_PRO_FILE_VERSION', ...) in api/semi_pro_deploy/api_config.php
+define('SEMI_PRO_FILE_VERSION',      '1.0.5');
+define('SEMI_PRO_DB_SCHEMA_VERSION', '1.0.0');
 
 // Sunbox main database schema version.
 // Increment when new tables or columns are added.
-define('SUNBOX_DB_SCHEMA_VERSION', '2.15.0');
+define('SUNBOX_DB_SCHEMA_VERSION', '2.18.0');
 
 $action = $_GET['action'] ?? '';
 $body   = getRequestBody();
@@ -53,6 +58,32 @@ function getQuotePrefix(string $modelType, bool $isFreeQuote = false, bool $isPr
 
 try {
     $db = getDB();
+
+    // ── Auto-apply pending schema changes ─────────────────────────────────────
+    // Runs silently on every request. Uses information_schema to skip columns that
+    // already exist, so this is idempotent and negligible overhead.
+    // This ensures new columns are available immediately after a code deploy,
+    // without requiring the admin to manually trigger 'update_db_schema'.
+    try {
+        // NOTE: $t, $c, $d are hardcoded literal strings in every call site below —
+        // never interpolated from user input — so there is no injection risk here.
+        $autoCol = function(string $t, string $c, string $d) use ($db): void {
+            $s = $db->prepare(
+                "SELECT COUNT(*) FROM information_schema.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?"
+            );
+            $s->execute([$t, $c]);
+            if (!(bool)$s->fetchColumn()) {
+                $db->exec("ALTER TABLE `{$t}` ADD COLUMN `{$c}` {$d}");
+            }
+        };
+        // v2.18.0
+        $autoCol('professional_profiles', 'login_bg_url', 'VARCHAR(500) NULL DEFAULT NULL');
+    } catch (\Throwable $_autoEx) {
+        // Non-blocking — log only; do not abort the request
+        error_log('[api] auto-migrate warning: ' . $_autoEx->getMessage());
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     switch ($action) {
         // === DASHBOARD STATS
@@ -491,6 +522,28 @@ try {
             $addCol('model_images', 'title',        "VARCHAR(255) NULL DEFAULT NULL");
             $addCol('model_images', 'description',  "TEXT          NULL DEFAULT NULL");
             $addCol('model_images', 'pro_user_id',  "INT           NULL DEFAULT NULL");
+
+            // ── v2.16.0 ── Add 'semi_professional' role for semi-pro users ──────
+            try {
+                $chkRoleEnum = $db->prepare(
+                    "SELECT COLUMN_TYPE FROM information_schema.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'role'"
+                );
+                $chkRoleEnum->execute();
+                $roleEnumType = (string)$chkRoleEnum->fetchColumn();
+                if (strpos($roleEnumType, "'semi_professional'") === false) {
+                    $db->exec("ALTER TABLE `users` MODIFY COLUMN `role`
+                        ENUM('admin','manager','sales','professional','semi_professional')
+                        NOT NULL DEFAULT 'sales'");
+                    $messages[] = "ENUM étendu : users.role += 'semi_professional'";
+                }
+            } catch (\Throwable $e) { $messages[] = "ENUM semi_professional : " . $e->getMessage(); }
+
+            // ── v2.17.0 ── Add allowed_model_type_slugs for semi-pro users ──────
+            $addCol('professional_profiles', 'allowed_model_type_slugs', "JSON NULL DEFAULT NULL");
+
+            // ── v2.18.0 ── Add login_bg_url to professional_profiles ────────────
+            $addCol('professional_profiles', 'login_bg_url', "VARCHAR(500) NULL DEFAULT NULL");
 
             // ── Schema version table (always create / update) ─────────────────
             $db->exec("CREATE TABLE IF NOT EXISTS `db_schema_version` (
@@ -3905,7 +3958,7 @@ try {
             $stmt = $db->query("
                 SELECT u.id, u.name, u.email, u.role,
                        pp.company_name, pp.address, pp.vat_number, pp.brn_number,
-                       pp.phone, pp.logo_url, pp.sunbox_margin_percent, pp.credits,
+                       pp.phone, pp.logo_url, pp.login_bg_url, pp.sunbox_margin_percent, pp.credits,
                        COALESCE(pp.model_request_cost, 5000) AS model_request_cost,
                        pp.is_active, pp.domain, pp.api_token, pp.db_name,
                        pp.theme_id,
@@ -3982,6 +4035,7 @@ try {
             if (array_key_exists('phone', $body)) { $profSets[] = 'phone = ?'; $profParams[] = $body['phone']; }
             if (array_key_exists('domain', $body)) { $profSets[] = 'domain = ?'; $profParams[] = strtolower(trim($body['domain'])); }
             if (array_key_exists('logo_url', $body)) { $profSets[] = 'logo_url = ?'; $profParams[] = $body['logo_url']; }
+            if (array_key_exists('login_bg_url', $body)) { $profSets[] = 'login_bg_url = ?'; $profParams[] = $body['login_bg_url']; }
             if (array_key_exists('db_name', $body)) { $profSets[] = 'db_name = ?'; $profParams[] = $body['db_name']; }
             if (array_key_exists('sunbox_margin_percent', $body)) { $profSets[] = 'sunbox_margin_percent = ?'; $profParams[] = (float)$body['sunbox_margin_percent']; }
             if (array_key_exists('model_request_cost', $body)) { $profSets[] = 'model_request_cost = ?'; $profParams[] = (float)$body['model_request_cost']; }
@@ -4227,7 +4281,7 @@ try {
             $userId = (int)$body['user_id'];
 
             $stmt = $db->prepare("
-                SELECT pp.domain, pp.company_name, pp.db_name, pp.logo_url,
+                SELECT pp.domain, pp.company_name, pp.db_name, pp.logo_url, pp.login_bg_url,
                        u.password_hash,
                        pp.theme_id,
                        pt.logo_position, pt.header_height, pt.header_bg_color,
@@ -4293,6 +4347,10 @@ try {
                 $logoUrlAbs = (string)($profile['logo_url'] ?? '');
                 if ($logoUrlAbs !== '' && strpos($logoUrlAbs, 'http') !== 0) {
                     $logoUrlAbs = $sunboxBaseUrl . '/' . ltrim($logoUrlAbs, '/');
+                }
+                $loginBgUrlAbs = (string)($profile['login_bg_url'] ?? '');
+                if ($loginBgUrlAbs !== '' && strpos($loginBgUrlAbs, 'http') !== 0) {
+                    $loginBgUrlAbs = $sunboxBaseUrl . '/' . ltrim($loginBgUrlAbs, '/');
                 }
 
                 $filesToDeploy = [
@@ -4398,10 +4456,15 @@ try {
                 // are NOT written here — the pro site's api_config.php loads them
                 // automatically from the Sunbox root .env (3 levels up).
                 // Only pro-specific overrides are stored here.
+                // NOTE: ADMIN_PASSWORD_HASH is intentionally NOT written to .env.
+                //   Password verification is done by api_pro_auth.php by querying the
+                //   Sunbox DB at login time (via SUNBOX_USER_ID). This ensures that
+                //   password changes made in the admin panel take effect immediately
+                //   without requiring a site redeploy.
                 $envLines = [
                     '# Pro site config — DB credentials come from Sunbox root .env automatically.',
                     'APP_URL=' . $proBaseUrl,
-                    'API_DEBUG=true',
+                    'API_DEBUG=false',
                     '',
                     '# Pro user identifier in Sunbox DB (used for direct DB queries)',
                     'SUNBOX_USER_ID=' . $userId,
@@ -4409,10 +4472,9 @@ try {
                     '# Pro site own database (overrides DB_NAME from Sunbox root .env)',
                     'DB_NAME=' . $dbName,
                     '',
-                    'ADMIN_PASSWORD_HASH=' . $passwordHash,
-                    '',
                     'COMPANY_NAME=' . $companyName,
                     'LOGO_URL=' . $logoUrlAbs,
+                    'LOGIN_BG_URL=' . $loginBgUrlAbs,
                     'VAT_RATE=15',
                 ];
                 if (file_put_contents($siteDir . '/.env', implode("\n", $envLines) . "\n") === false) {
@@ -4761,6 +4823,614 @@ try {
             validateRequired($body, ['id']);
             $db->prepare("DELETE FROM users WHERE id = ? AND role = 'professional'")->execute([(int)$body['id']]);
             ok();
+            break;
+        }
+
+        // =====================================================================
+        // SEMI-PROFESSIONAL USERS (admin management)
+        // =====================================================================
+
+        case 'get_semi_pro_users': {
+            $stmt = $db->query("
+                SELECT u.id, u.name, u.email, u.role,
+                       pp.company_name, pp.address, pp.vat_number, pp.brn_number,
+                       pp.phone, pp.logo_url, pp.is_active,
+                       COALESCE(pp.model_request_cost, 5000) AS model_request_cost,
+                       pp.allowed_model_type_slugs
+                FROM users u
+                LEFT JOIN professional_profiles pp ON pp.user_id = u.id
+                WHERE u.role = 'semi_professional'
+                ORDER BY u.name ASC
+            ");
+            $rows = $stmt->fetchAll();
+            foreach ($rows as &$r) {
+                $r['allowed_model_type_slugs'] = !empty($r['allowed_model_type_slugs'])
+                    ? json_decode($r['allowed_model_type_slugs'], true)
+                    : null;
+            }
+            unset($r);
+            ok($rows);
+            break;
+        }
+
+        case 'create_semi_pro_user': {
+            validateRequired($body, ['name', 'email', 'password', 'company_name']);
+            $passwordHash = password_hash((string)$body['password'], PASSWORD_BCRYPT);
+            $apiToken     = bin2hex(random_bytes(32));
+
+            $db->beginTransaction();
+            try {
+                $stmt = $db->prepare("
+                    INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, 'semi_professional')
+                ");
+                $stmt->execute([$body['name'], strtolower(trim($body['email'])), $passwordHash]);
+                $userId = (int)$db->lastInsertId();
+
+                $stmt = $db->prepare("
+                    INSERT INTO professional_profiles
+                        (user_id, company_name, address, vat_number, brn_number, phone, api_token, is_active)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+                ");
+                $stmt->execute([
+                    $userId,
+                    $body['company_name'],
+                    $body['address'] ?? '',
+                    $body['vat_number'] ?? '',
+                    $body['brn_number'] ?? '',
+                    $body['phone'] ?? '',
+                    $apiToken,
+                ]);
+                $db->commit();
+                ok(['id' => $userId, 'api_token' => $apiToken]);
+            } catch (Throwable $e) {
+                $db->rollBack();
+                throw $e;
+            }
+            break;
+        }
+
+        case 'update_semi_pro_user': {
+            validateRequired($body, ['id']);
+            $id = (int)$body['id'];
+
+            $userSets = [];
+            $userParams = [];
+            if (array_key_exists('name', $body))     { $userSets[] = 'name = ?';          $userParams[] = $body['name']; }
+            if (array_key_exists('email', $body))    { $userSets[] = 'email = ?';         $userParams[] = strtolower(trim($body['email'])); }
+            if (!empty($body['password']))            { $userSets[] = 'password_hash = ?'; $userParams[] = password_hash((string)$body['password'], PASSWORD_BCRYPT); }
+            if (!empty($userSets)) {
+                $userParams[] = $id;
+                $db->prepare("UPDATE users SET " . implode(', ', $userSets) . " WHERE id = ? AND role = 'semi_professional'")->execute($userParams);
+            }
+
+            $profSets = [];
+            $profParams = [];
+            if (array_key_exists('company_name', $body)) { $profSets[] = 'company_name = ?'; $profParams[] = $body['company_name']; }
+            if (array_key_exists('address', $body))      { $profSets[] = 'address = ?';      $profParams[] = $body['address']; }
+            if (array_key_exists('vat_number', $body))   { $profSets[] = 'vat_number = ?';   $profParams[] = $body['vat_number']; }
+            if (array_key_exists('brn_number', $body))   { $profSets[] = 'brn_number = ?';   $profParams[] = $body['brn_number']; }
+            if (array_key_exists('phone', $body))        { $profSets[] = 'phone = ?';        $profParams[] = $body['phone']; }
+            if (array_key_exists('logo_url', $body))     { $profSets[] = 'logo_url = ?';     $profParams[] = $body['logo_url']; }
+            if (array_key_exists('is_active', $body))    { $profSets[] = 'is_active = ?';    $profParams[] = (int)(bool)$body['is_active']; }
+            if (array_key_exists('allowed_model_type_slugs', $body)) {
+                $slugs = $body['allowed_model_type_slugs'];
+                $profSets[]   = 'allowed_model_type_slugs = ?';
+                $profParams[] = ($slugs === null) ? null : json_encode(array_values(array_filter((array)$slugs)));
+            }
+            if (!empty($profSets)) {
+                $profSets[] = 'updated_at = NOW()';
+                $profParams[] = $id;
+                $db->prepare("UPDATE professional_profiles SET " . implode(', ', $profSets) . " WHERE user_id = ?")->execute($profParams);
+            }
+            ok();
+            break;
+        }
+
+        case 'delete_semi_pro_user': {
+            validateRequired($body, ['id']);
+            $db->prepare("DELETE FROM users WHERE id = ? AND role = 'semi_professional'")->execute([(int)$body['id']]);
+            ok();
+            break;
+        }
+
+        // ── Deploy shared semi-pro site to /pros/<slug>/ ──────────────────────
+        case 'deploy_semi_pro_site': {
+            requireAdmin();
+            validateRequired($body, ['slug', 'company_name', 'db_name']);
+            $slug        = preg_replace('/[^a-z0-9._-]/i', '_', strtolower((string)$body['slug']));
+            $companyName = (string)$body['company_name'];
+            $dbName      = (string)$body['db_name'];
+            $logoUrl     = (string)($body['logo_url']     ?? '');
+            $domain      = (string)($body['domain']       ?? '');
+            $loginBgUrl  = (string)($body['login_bg_url'] ?? '');
+
+            if (!$slug) fail('Slug invalide.');
+
+            $sunboxBaseUrl = rtrim((string)env('APP_URL', 'https://sunbox-mauritius.com'), '/');
+            $siteUrl       = $sunboxBaseUrl . '/pros/' . $slug;
+            $siteDir       = proSiteDir($slug);
+
+            // ── Merge with existing .env to preserve branding config ─────────
+            // When re-deploying, the admin UI may send empty logo/bg (e.g. if the
+            // config hadn't finished loading). Preserve any non-empty value already
+            // stored in the site's .env to avoid accidental data loss.
+            $existingEnvFile = $siteDir . '/.env';
+            if (is_file($existingEnvFile)) {
+                $existingLines = file($existingEnvFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [];
+                foreach ($existingLines as $_line) {
+                    $_line = trim($_line);
+                    if ($_line === '' || $_line[0] === '#' || strpos($_line, '=') === false) continue;
+                    [$_k, $_v] = explode('=', $_line, 2);
+                    $_k = trim($_k); $_v = trim($_v);
+                    if ($_k === 'LOGO_URL'     && $logoUrl    === '' && $_v !== '') $logoUrl    = $_v;
+                    if ($_k === 'LOGIN_BG_URL' && $loginBgUrl === '' && $_v !== '') $loginBgUrl = $_v;
+                    if ($_k === 'DOMAIN'       && $domain     === '' && $_v !== '') $domain     = $_v;
+                    if ($_k === 'COMPANY_NAME' && $companyName === '') $companyName = $_v;
+                }
+            }
+
+            $result = [
+                'deployed' => false,
+                'site_dir' => $siteDir,
+                'site_url' => $siteUrl,
+                'errors'   => [],
+                'debug'    => [],
+            ];
+
+            try {
+                foreach ([$siteDir, $siteDir . '/api'] as $dir) {
+                    if (!is_dir($dir)) {
+                        if (!mkdir($dir, 0755, true)) {
+                            throw new \Exception("mkdir échoué pour: $dir — vérifiez les permissions.");
+                        }
+                    }
+                }
+                $result['debug'][] = 'Répertoires créés.';
+
+                $templateDir = __DIR__ . '/semi_pro_deploy';
+                if (!is_dir($templateDir)) {
+                    throw new \Exception("Dossier templates semi-pro introuvable: $templateDir");
+                }
+
+                $replacements = [
+                    '{{SLUG}}'         => $slug,
+                    '{{COMPANY_NAME}}' => $companyName,
+                    '{{DB_NAME}}'      => $dbName,
+                ];
+
+                $filesToDeploy = [
+                    'api_config.php'          => $siteDir . '/api/config.php',
+                    'api_index.php'           => $siteDir . '/api/index.php',
+                    'api_semi_pro_auth.php'   => $siteDir . '/api/pro_auth.php',
+                    'api_htaccess'            => $siteDir . '/api/.htaccess',
+                    'htaccess'                => $siteDir . '/.htaccess',
+                    'index.php'               => $siteDir . '/index.php',
+                ];
+                foreach ($filesToDeploy as $tpl => $dest) {
+                    $tplPath = $templateDir . '/' . $tpl;
+                    if (!file_exists($tplPath)) {
+                        throw new \Exception("Template introuvable: $tplPath");
+                    }
+                    $content = file_get_contents($tplPath);
+                    if ($content === false) throw new \Exception("Lecture échouée: $tplPath");
+                    $content = str_replace(array_keys($replacements), array_values($replacements), $content);
+                    if (file_put_contents($dest, $content) === false) {
+                        throw new \Exception("Écriture échouée: $dest — vérifiez les permissions.");
+                    }
+                }
+                $result['debug'][] = 'Fichiers PHP déployés.';
+
+                // Symlink assets
+                $mainAssetsDir = dirname(__DIR__) . '/assets';
+                $proAssetsLink = $siteDir . '/assets';
+                if (!file_exists($proAssetsLink) && !is_link($proAssetsLink)) {
+                    if (is_dir($mainAssetsDir)) {
+                        if (!symlink($mainAssetsDir, $proAssetsLink)) {
+                            $result['errors'][] = 'Avertissement: symlink assets échoué. Créez-le manuellement: ln -s {sunbox_root}/assets ' . $proAssetsLink;
+                        } else {
+                            $result['debug'][] = 'Symlink assets créé.';
+                        }
+                    }
+                } else {
+                    $result['debug'][] = 'Symlink/dossier assets déjà présent.';
+                }
+
+                // Copy fallback index.html
+                $mainIndexPath = dirname(__DIR__) . '/index.html';
+                if (file_exists($mainIndexPath)) {
+                    $indexHtml = file_get_contents($mainIndexPath);
+                    if ($indexHtml !== false) {
+                        $siteApiUrl = $siteUrl . '/api';
+                        $proConfig  = '<script>'
+                            . 'window.__SEMI_PRO_SITE__=true;'
+                            . 'window.__PRO_SITE__=false;'
+                            . 'window.__API_BASE_URL__='     . json_encode($siteApiUrl,   JSON_HEX_TAG | JSON_HEX_AMP) . ';'
+                            . 'window.__PRO_COMPANY_NAME__=' . json_encode($companyName,  JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE) . ';'
+                            . 'window.__PRO_LOGO_URL__='     . json_encode($logoUrl,      JSON_HEX_TAG | JSON_HEX_AMP) . ';'
+                            . 'window.__PRO_LOGIN_BG__='     . json_encode($loginBgUrl,   JSON_HEX_TAG | JSON_HEX_AMP) . ';'
+                            . 'window.__PRO_THEME__=null;'
+                            . 'window.__PRO_HEADER_IMAGES__=[];'
+                            . '</script>';
+                        $closeHeadPos = stripos($indexHtml, '</head>');
+                        if ($closeHeadPos !== false) {
+                            $indexHtml = substr($indexHtml, 0, $closeHeadPos) . $proConfig . substr($indexHtml, $closeHeadPos);
+                        } else {
+                            $indexHtml .= $proConfig;
+                        }
+                        file_put_contents($siteDir . '/index.html', $indexHtml);
+                        $result['debug'][] = 'index.html (fallback) déployé.';
+                    }
+                }
+
+                // Write .env
+                $envLines = [
+                    '# Semi-Pro site config — DB credentials come from Sunbox root .env automatically.',
+                    'APP_URL=' . $siteUrl,
+                    'DB_NAME=' . $dbName,
+                    'COMPANY_NAME=' . $companyName,
+                    'LOGO_URL=' . $logoUrl,
+                    'DOMAIN=' . $domain,
+                    'LOGIN_BG_URL=' . $loginBgUrl,
+                    'VAT_RATE=15',
+                    'API_DEBUG=false',
+                ];
+                if (file_put_contents($siteDir . '/.env', implode("\n", $envLines) . "\n") === false) {
+                    $result['errors'][] = 'Avertissement: impossible d\'écrire .env';
+                } else {
+                    $result['debug'][] = '.env écrit.';
+                }
+
+                // Write .deploy_version
+                file_put_contents($siteDir . '/.deploy_version', SEMI_PRO_FILE_VERSION);
+                $result['debug'][] = '.deploy_version: ' . SEMI_PRO_FILE_VERSION;
+
+                $result['deployed'] = true;
+            } catch (Throwable $e) {
+                $result['errors'][] = $e->getMessage();
+            }
+            ok($result);
+            break;
+        }
+
+        // ── Check semi-pro site deployment status ─────────────────────────────
+        case 'get_semi_pro_site_version': {
+            requireAdmin();
+            validateRequired($body, ['slug']);
+            $slug    = preg_replace('/[^a-z0-9._-]/i', '_', strtolower((string)$body['slug']));
+            $siteDir = proSiteDir($slug);
+
+            $result = [
+                'slug'             => $slug,
+                'site_dir'         => $siteDir,
+                'deployed'         => is_dir($siteDir),
+                'files_up_to_date' => false,
+                'latest_version'   => SEMI_PRO_FILE_VERSION,
+                'current_version'  => null,
+            ];
+            $versionFile = $siteDir . '/.deploy_version';
+            if (is_file($versionFile)) {
+                $ver = trim((string)file_get_contents($versionFile));
+                $result['current_version']  = $ver;
+                $result['files_up_to_date'] = version_compare($ver, SEMI_PRO_FILE_VERSION, '>=');
+            }
+            ok($result);
+            break;
+        }
+
+        // ── Initialize semi-pro shared database schema ────────────────────────
+        case 'init_semi_pro_db': {
+            requireAdmin();
+            validateRequired($body, ['db_name']);
+            $dbName = (string)$body['db_name'];
+            $result = ['initialized' => false, 'errors' => [], 'debug' => []];
+            try {
+                $semiProPdo = new PDO(
+                    "mysql:host=" . DB_HOST . ";dbname={$dbName};charset=utf8mb4",
+                    DB_USER, DB_PASS,
+                    [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_EMULATE_PREPARES => false]
+                );
+
+                // Run schema from SQL file
+                $schemaFile = __DIR__ . '/semi_pro_deploy/semi_pro_site_schema.sql';
+                if (!file_exists($schemaFile)) {
+                    throw new \Exception("Schema SQL introuvable: $schemaFile");
+                }
+                $sql = file_get_contents($schemaFile);
+                if ($sql === false) throw new \Exception("Lecture du schema SQL échouée.");
+
+                // Execute statement by statement.
+                // Strip single-line SQL comments (-- ...) from each block before checking
+                // whether it is empty, so that CREATE TABLE statements preceded by section
+                // comments (e.g. "-- ── Purchase reports ───") are not accidentally dropped.
+                $stmts = array_filter(
+                    array_map(function (string $s): string {
+                        return trim(preg_replace('/^--[^\n]*\n?/m', '', $s) ?? $s);
+                    }, preg_split('/;\s*$/m', $sql) ?: []),
+                    fn($s) => $s !== ''
+                );
+                foreach ($stmts as $stmt) {
+                    if (trim($stmt) === '') continue;
+                    $semiProPdo->exec($stmt);
+                }
+                $result['initialized'] = true;
+                $result['debug'][]     = 'Schéma semi-pro initialisé dans: ' . $dbName;
+            } catch (Throwable $e) {
+                $result['errors'][] = $e->getMessage();
+            }
+            ok($result);
+            break;
+        }
+
+        // ── Read deployed semi-pro site configuration from .env ───────────────
+        case 'get_semi_pro_site_config': {
+            requireAdmin();
+            $slug    = preg_replace('/[^a-z0-9._-]/i', '_', strtolower((string)($body['slug'] ?? 'semi-pro')));
+            $siteDir = proSiteDir($slug);
+
+            $config = [
+                'deployed'         => is_dir($siteDir),
+                'slug'             => $slug,
+                'db_name'          => '',
+                'company_name'     => '',
+                'logo_url'         => '',
+                'domain'           => '',
+                'login_bg_url'     => '',
+                'current_version'  => null,
+                'latest_version'   => SEMI_PRO_FILE_VERSION,
+                'files_up_to_date' => false,
+            ];
+
+            // Read .env for persisted config values
+            $envFile = $siteDir . '/.env';
+            if (is_file($envFile)) {
+                $lines = file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [];
+                foreach ($lines as $line) {
+                    $line = trim($line);
+                    if ($line === '' || str_starts_with($line, '#') || strpos($line, '=') === false) continue;
+                    [$k, $v] = explode('=', $line, 2);
+                    switch (trim($k)) {
+                        case 'DB_NAME':      $config['db_name']      = trim($v); break;
+                        case 'COMPANY_NAME': $config['company_name'] = trim($v); break;
+                        case 'LOGO_URL':     $config['logo_url']     = trim($v); break;
+                        case 'DOMAIN':       $config['domain']       = trim($v); break;
+                        case 'LOGIN_BG_URL': $config['login_bg_url'] = trim($v); break;
+                    }
+                }
+            }
+
+            // Make logo and login-bg URLs absolute so the admin preview renders correctly.
+            // Relative paths (e.g. /uploads/logo.png) resolve to the Sunbox origin, which
+            // is correct for the admin portal (sunbox-mauritius.com), but we return the full
+            // URL so the deployed site's index.php and the admin preview are in sync.
+            $_sunboxBase = rtrim((string)env('APP_URL', 'https://sunbox-mauritius.com'), '/');
+            if ($config['logo_url'] !== '' && strpos($config['logo_url'], 'http') !== 0) {
+                $config['logo_url'] = $_sunboxBase . '/' . ltrim($config['logo_url'], '/');
+            }
+            if ($config['login_bg_url'] !== '' && strpos($config['login_bg_url'], 'http') !== 0) {
+                $config['login_bg_url'] = $_sunboxBase . '/' . ltrim($config['login_bg_url'], '/');
+            }
+
+            // Read deploy version
+            $versionFile = $siteDir . '/.deploy_version';
+            if (is_file($versionFile)) {
+                $ver = trim((string)file_get_contents($versionFile));
+                $config['current_version']  = $ver;
+                $config['files_up_to_date'] = version_compare($ver, SEMI_PRO_FILE_VERSION, '>=');
+            }
+
+            // Read semi-pro DB schema version (non-fatal)
+            $config['current_db_version']  = null;
+            $config['latest_db_version']   = SEMI_PRO_DB_SCHEMA_VERSION;
+            $config['db_up_to_date']       = false;
+            if (!empty($config['db_name'])) {
+                try {
+                    $spPdo = new PDO(
+                        "mysql:host=" . DB_HOST . ";dbname=" . $config['db_name'] . ";charset=utf8mb4",
+                        DB_USER, DB_PASS,
+                        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_EMULATE_PREPARES => false]
+                    );
+                    $row = $spPdo->query("SELECT `version` FROM `semi_pro_schema_version` WHERE `id` = 1 LIMIT 1")->fetch();
+                    if ($row) {
+                        $config['current_db_version'] = $row['version'];
+                        $config['db_up_to_date']      = version_compare($row['version'], SEMI_PRO_DB_SCHEMA_VERSION, '>=');
+                    }
+                } catch (\Throwable $ignored) {}
+            }
+
+            ok($config);
+            break;
+        }
+
+        // ── Save semi-pro site branding config to .env (no file re-deploy) ────
+        case 'save_semi_pro_config': {
+            requireAdmin();
+            validateRequired($body, ['slug']);
+            $slug        = preg_replace('/[^a-z0-9._-]/i', '_', strtolower((string)$body['slug']));
+            $siteDir     = proSiteDir($slug);
+            if (!is_dir($siteDir)) fail('Site non déployé.');
+
+            $envFile = $siteDir . '/.env';
+            $envVars = [];
+            // Read existing .env first
+            if (is_file($envFile)) {
+                foreach (file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
+                    $line = trim($line);
+                    if ($line === '' || $line[0] === '#' || strpos($line, '=') === false) continue;
+                    [$k, $v] = explode('=', $line, 2);
+                    $envVars[trim($k)] = trim($v);
+                }
+            }
+            // Overwrite only the branding fields passed in the request
+            if (array_key_exists('company_name', $body)) $envVars['COMPANY_NAME'] = (string)$body['company_name'];
+            if (array_key_exists('logo_url',     $body)) $envVars['LOGO_URL']     = (string)$body['logo_url'];
+            if (array_key_exists('domain',       $body)) $envVars['DOMAIN']       = (string)$body['domain'];
+            if (array_key_exists('login_bg_url', $body)) $envVars['LOGIN_BG_URL'] = (string)$body['login_bg_url'];
+
+            $lines = [];
+            foreach ($envVars as $k => $v) $lines[] = "$k=$v";
+            if (file_put_contents($envFile, implode("\n", $lines) . "\n") === false) {
+                fail('Impossible d\'écrire le fichier .env.');
+            }
+            ok(['saved' => true]);
+            break;
+        }
+
+        // ── Update semi-pro site files (re-deploy PHP templates) ─────────────
+        case 'update_semi_pro_site': {
+            requireAdmin();
+            validateRequired($body, ['slug', 'company_name', 'db_name']);
+            $slug        = preg_replace('/[^a-z0-9._-]/i', '_', strtolower((string)$body['slug']));
+            $companyName = (string)$body['company_name'];
+            $dbName      = (string)$body['db_name'];
+            $logoUrl     = (string)($body['logo_url']     ?? '');
+            $domain      = (string)($body['domain']       ?? '');
+            $loginBgUrl  = (string)($body['login_bg_url'] ?? '');
+
+            if (!$slug) fail('Slug invalide.');
+
+            $sunboxBaseUrl = rtrim((string)env('APP_URL', 'https://sunbox-mauritius.com'), '/');
+            $siteUrl       = $sunboxBaseUrl . '/pros/' . $slug;
+            $siteDir       = proSiteDir($slug);
+
+            if (!is_dir($siteDir)) fail('Site non déployé. Utilisez "Déployer le site" d\'abord.');
+
+            // ── Merge with existing .env to preserve branding config ─────────
+            // When updating files the admin UI may send empty logo/bg if the config
+            // hadn't finished loading from the server. Preserve any non-empty value
+            // already stored in the .env to avoid accidental data loss.
+            $existingEnvFile = $siteDir . '/.env';
+            if (is_file($existingEnvFile)) {
+                $existingLines = file($existingEnvFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [];
+                foreach ($existingLines as $_line) {
+                    $_line = trim($_line);
+                    if ($_line === '' || $_line[0] === '#' || strpos($_line, '=') === false) continue;
+                    [$_k, $_v] = explode('=', $_line, 2);
+                    $_k = trim($_k); $_v = trim($_v);
+                    if ($_k === 'LOGO_URL'     && $logoUrl    === '' && $_v !== '') $logoUrl    = $_v;
+                    if ($_k === 'LOGIN_BG_URL' && $loginBgUrl === '' && $_v !== '') $loginBgUrl = $_v;
+                    if ($_k === 'DOMAIN'       && $domain     === '' && $_v !== '') $domain     = $_v;
+                    if ($_k === 'COMPANY_NAME' && $companyName === '') $companyName = $_v;
+                }
+            }
+
+            $result = ['updated' => false, 'errors' => [], 'debug' => []];
+            try {
+                // Ensure api subdirectory exists
+                if (!is_dir($siteDir . '/api')) {
+                    mkdir($siteDir . '/api', 0755, true);
+                }
+
+                $templateDir = __DIR__ . '/semi_pro_deploy';
+                $replacements = [
+                    '{{SLUG}}'         => $slug,
+                    '{{COMPANY_NAME}}' => $companyName,
+                    '{{DB_NAME}}'      => $dbName,
+                ];
+                $filesToDeploy = [
+                    'api_config.php'          => $siteDir . '/api/config.php',
+                    'api_index.php'           => $siteDir . '/api/index.php',
+                    'api_semi_pro_auth.php'   => $siteDir . '/api/pro_auth.php',
+                    'api_htaccess'            => $siteDir . '/api/.htaccess',
+                    'htaccess'                => $siteDir . '/.htaccess',
+                    'index.php'               => $siteDir . '/index.php',
+                ];
+                foreach ($filesToDeploy as $tpl => $dest) {
+                    $tplPath = $templateDir . '/' . $tpl;
+                    if (!file_exists($tplPath)) throw new \Exception("Template introuvable: $tplPath");
+                    $content = file_get_contents($tplPath);
+                    if ($content === false) throw new \Exception("Lecture échouée: $tplPath");
+                    $content = str_replace(array_keys($replacements), array_values($replacements), $content);
+                    if (file_put_contents($dest, $content) === false) throw new \Exception("Écriture échouée: $dest");
+                }
+                $result['debug'][] = 'Fichiers PHP mis à jour.';
+
+                // Re-inject index.html with updated config
+                $mainIndexPath = dirname(__DIR__) . '/index.html';
+                if (file_exists($mainIndexPath)) {
+                    $indexHtml = file_get_contents($mainIndexPath);
+                    if ($indexHtml !== false) {
+                        $siteApiUrl = $siteUrl . '/api';
+                        $proConfig  = '<script>'
+                            . 'window.__SEMI_PRO_SITE__=true;'
+                            . 'window.__PRO_SITE__=false;'
+                            . 'window.__API_BASE_URL__='     . json_encode($siteApiUrl,   JSON_HEX_TAG | JSON_HEX_AMP) . ';'
+                            . 'window.__PRO_COMPANY_NAME__=' . json_encode($companyName,  JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE) . ';'
+                            . 'window.__PRO_LOGO_URL__='     . json_encode($logoUrl,      JSON_HEX_TAG | JSON_HEX_AMP) . ';'
+                            . 'window.__PRO_LOGIN_BG__='     . json_encode($loginBgUrl,   JSON_HEX_TAG | JSON_HEX_AMP) . ';'
+                            . 'window.__PRO_THEME__=null;'
+                            . 'window.__PRO_HEADER_IMAGES__=[];'
+                            . '</script>';
+                        $closeHeadPos = stripos($indexHtml, '</head>');
+                        if ($closeHeadPos !== false) {
+                            $indexHtml = substr($indexHtml, 0, $closeHeadPos) . $proConfig . substr($indexHtml, $closeHeadPos);
+                        } else {
+                            $indexHtml .= $proConfig;
+                        }
+                        file_put_contents($siteDir . '/index.html', $indexHtml);
+                        $result['debug'][] = 'index.html mis à jour.';
+                    }
+                }
+
+                // Update .env
+                $envLines = [
+                    '# Semi-Pro site config — DB credentials come from Sunbox root .env automatically.',
+                    'APP_URL=' . $siteUrl,
+                    'DB_NAME=' . $dbName,
+                    'COMPANY_NAME=' . $companyName,
+                    'LOGO_URL=' . $logoUrl,
+                    'DOMAIN=' . $domain,
+                    'LOGIN_BG_URL=' . $loginBgUrl,
+                    'VAT_RATE=15',
+                    'API_DEBUG=false',
+                ];
+                file_put_contents($siteDir . '/.env', implode("\n", $envLines) . "\n");
+
+                // Update .deploy_version
+                file_put_contents($siteDir . '/.deploy_version', SEMI_PRO_FILE_VERSION);
+                $result['debug'][] = '.deploy_version: ' . SEMI_PRO_FILE_VERSION;
+
+                $result['updated'] = true;
+            } catch (Throwable $e) {
+                $result['errors'][] = $e->getMessage();
+            }
+            ok($result);
+            break;
+        }
+
+        // ── Update semi-pro shared database schema ────────────────────────────
+        case 'update_semi_pro_db': {
+            requireAdmin();
+            validateRequired($body, ['db_name']);
+            $dbName = (string)$body['db_name'];
+            $result = ['updated' => false, 'errors' => [], 'debug' => []];
+            try {
+                $semiProPdo = new PDO(
+                    "mysql:host=" . DB_HOST . ";dbname={$dbName};charset=utf8mb4",
+                    DB_USER, DB_PASS,
+                    [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_EMULATE_PREPARES => false]
+                );
+
+                $schemaFile = __DIR__ . '/semi_pro_deploy/semi_pro_site_schema.sql';
+                if (!file_exists($schemaFile)) throw new \Exception("Schema SQL introuvable: $schemaFile");
+                $sql = file_get_contents($schemaFile);
+                if ($sql === false) throw new \Exception("Lecture du schema SQL échouée.");
+
+                $stmts = array_filter(
+                    array_map(function (string $s): string {
+                        return trim(preg_replace('/^--[^\n]*\n?/m', '', $s) ?? $s);
+                    }, preg_split('/;\s*$/m', $sql) ?: []),
+                    fn($s) => $s !== ''
+                );
+                foreach ($stmts as $stmt) {
+                    if (trim($stmt) === '') continue;
+                    $semiProPdo->exec($stmt);
+                }
+                $result['updated'] = true;
+                $result['debug'][] = 'Schéma semi-pro mis à jour dans: ' . $dbName;
+            } catch (Throwable $e) {
+                $result['errors'][] = $e->getMessage();
+            }
+            ok($result);
             break;
         }
 
