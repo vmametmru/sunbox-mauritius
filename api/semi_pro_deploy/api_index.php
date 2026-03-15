@@ -27,7 +27,7 @@ try {
         // ── MODELS (read from Sunbox DB) ──────────────────────────────────────
         case 'get_models': {
             requireSemiPro();
-            $result = fetchModels();
+            $result = fetchModels(getSemiProUserId());
             ok($result);
             break;
         }

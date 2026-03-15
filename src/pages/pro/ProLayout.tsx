@@ -75,10 +75,19 @@ const proSiteNavGroups = [
   },
 ];
 
+// ── Semi-Pro shared-site nav (simplified: quotes, models, profile) ─────────
+const semiProNavItems = [
+  { icon: LayoutDashboard, label: 'Tableau de bord', path: '/pro' },
+  { icon: FileText,        label: 'Mes Devis',       path: '/pro/quotes' },
+  { icon: Package,         label: 'Modèles',         path: '/pro/models' },
+  { icon: Settings,        label: 'Mon Profil',      path: '/pro/settings' },
+];
+
 export default function ProLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const isProSite = !!(window as any).__PRO_SITE__;
+  const isSemiProSite = !!(window as any).__SEMI_PRO_SITE__;
   const proLogoUrl: string = (window as any).__PRO_LOGO_URL__ || '';
   const proCompany: string = (window as any).__PRO_COMPANY_NAME__ || '';
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -202,8 +211,28 @@ export default function ProLayout() {
     </nav>
   );
 
+  // ── Semi-Pro nav (flat, same style as sunbox nav) ───────────────────────
+  const renderSemiProNav = (onClickLink?: () => void) => (
+    <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
+      {semiProNavItems.map((item) => (
+        <Link
+          key={item.path}
+          to={item.path}
+          onClick={onClickLink}
+          className={cn(
+            'flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-sm',
+            isActive(item.path) ? 'bg-orange-500 text-white' : 'hover:bg-white/10'
+          )}
+        >
+          <item.icon className="h-5 w-5 flex-shrink-0" />
+          <span>{item.label}</span>
+        </Link>
+      ))}
+    </nav>
+  );
+
   const renderNav = (onClickLink?: () => void) =>
-    isProSite ? renderProSiteNav(onClickLink) : renderSunboxNav(onClickLink);
+    isProSite ? renderProSiteNav(onClickLink) : isSemiProSite ? renderSemiProNav(onClickLink) : renderSunboxNav(onClickLink);
 
 
   // ── Sidebar header content ───────────────────────────────────────────────
@@ -216,10 +245,12 @@ export default function ProLayout() {
       {/* Mobile Header */}
       <div className="lg:hidden bg-[#1A365D] text-white p-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          {isProSite && proLogoUrl
+          {(isProSite || isSemiProSite) && proLogoUrl
             ? <img src={proLogoUrl} alt={proCompany} className="h-8 w-auto" />
             : <span className="text-xl font-bold">Sun<span className="text-orange-400">box</span></span>}
-          <span className="text-sm opacity-75">{isProSite ? 'Admin' : 'Pro'}</span>
+          {(isProSite || isSemiProSite) && proCompany
+            ? <span className="text-sm font-medium truncate max-w-[160px]">{proCompany}</span>
+            : <span className="text-sm opacity-75">{isSemiProSite ? 'Semi-Pro' : isProSite ? 'Admin' : 'Pro'}</span>}
         </div>
         <Button variant="ghost" size="icon" className="text-white" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}>
           {mobileMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
@@ -262,6 +293,16 @@ export default function ProLayout() {
                   </div>
                 )}
               </div>
+            ) : isSemiProSite ? (
+              <div className="flex items-center gap-3 mb-1">
+                {proLogoUrl
+                  ? <img src={proLogoUrl} alt={proCompany} className="h-10 w-auto rounded" />
+                  : <div className="w-10 h-10 bg-orange-500 rounded-lg flex items-center justify-center font-bold text-lg">SP</div>}
+                <div>
+                  <p className="font-bold text-sm leading-tight">{proCompany || 'Semi-Pro ERP'}</p>
+                  <p className="text-xs opacity-75">Portail Semi-Pro</p>
+                </div>
+              </div>
             ) : (
               <div className="flex items-center gap-3 mb-3">
                 <div className="w-10 h-10 bg-orange-500 rounded-lg flex items-center justify-center font-bold text-lg">S</div>
@@ -271,7 +312,7 @@ export default function ProLayout() {
                 </div>
               </div>
             )}
-            {!isProSite && user && (
+            {!isProSite && !isSemiProSite && user && (
               <div className="mt-2">
                 <p className="font-semibold text-sm">{user.company_name || user.name}</p>
                 <div className="flex items-center gap-2 mt-1">
@@ -286,8 +327,8 @@ export default function ProLayout() {
 
           {renderNav()}
 
-          {/* Credit rules — only on Sunbox portal */}
-          {!isProSite && (
+          {/* Credit rules — only on Sunbox portal, not semi-pro */}
+          {!isProSite && !isSemiProSite && (
             <div className="p-4 border-t border-white/10">
               <p className="text-xs opacity-50 uppercase tracking-wider mb-2 flex items-center gap-1">
                 <DollarSign className="h-3 w-3" /> Tarifs crédits
@@ -336,7 +377,7 @@ export default function ProLayout() {
         </aside>
 
         {/* Main Content */}
-        <main className="flex-1 p-6 lg:p-8 overflow-auto">
+        <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-auto min-w-0">
           <Outlet />
         </main>
       </div>

@@ -1179,7 +1179,7 @@ export const api = {
     return this.query('create_semi_pro_user', user);
   },
 
-  updateSemiProUser(user: { id: number; name?: string; email?: string; password?: string; is_active?: boolean; company_name?: string; address?: string; vat_number?: string; brn_number?: string; phone?: string; logo_url?: string }) {
+  updateSemiProUser(user: { id: number; name?: string; email?: string; password?: string; is_active?: boolean; company_name?: string; address?: string; vat_number?: string; brn_number?: string; phone?: string; logo_url?: string; allowed_model_type_slugs?: string[] | null }) {
     return this.query('update_semi_pro_user', user);
   },
 
@@ -1209,6 +1209,10 @@ export const api = {
 
   updateSemiProDb(dbName: string) {
     return this.query('update_semi_pro_db', { db_name: dbName });
+  },
+
+  saveSemiProConfig(params: { slug: string; company_name?: string; logo_url?: string; domain?: string; login_bg_url?: string }) {
+    return this.query('save_semi_pro_config', params);
   },
 
   buyProPack(userId: number) {

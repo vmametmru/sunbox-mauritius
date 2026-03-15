@@ -185,22 +185,47 @@ function requireSemiPro(): void
 }
 
 /**
- * Fetch all models from Sunbox DB (same as pro site, no per-user filtering).
+ * Fetch all models from Sunbox DB.
+ * If $userId > 0, filters to only models whose type slug is in the user's allowed list.
  */
-function fetchModels(): array
+function fetchModels(int $userId = 0): array
 {
     $empty = ['models' => [], 'catalog_mode' => false, 'credits' => 0, 'logo_url' => '', 'company_name' => ''];
     try {
         $sdb = getSunboxDB();
         $sunboxAppUrl = sunboxBaseUrl();
 
-        $stmt = $sdb->query("
-            SELECT m.*, mt.label AS type_label
-            FROM models m
-            LEFT JOIN model_types mt ON mt.slug = m.type
-            WHERE m.is_active = 1
-            ORDER BY m.display_order ASC, m.name ASC
-        ");
+        // Determine allowed model type slugs for this user (null = all allowed)
+        $allowedSlugs = null;
+        if ($userId > 0) {
+            $profileStmt = $sdb->prepare("SELECT allowed_model_type_slugs FROM professional_profiles WHERE user_id = ? LIMIT 1");
+            $profileStmt->execute([$userId]);
+            $profileData = $profileStmt->fetch();
+            if ($profileData && !empty($profileData['allowed_model_type_slugs'])) {
+                $allowedSlugs = json_decode($profileData['allowed_model_type_slugs'], true);
+                if (!is_array($allowedSlugs) || empty($allowedSlugs)) $allowedSlugs = null;
+            }
+        }
+
+        if ($allowedSlugs !== null) {
+            $placeholders = implode(',', array_fill(0, count($allowedSlugs), '?'));
+            $stmt = $sdb->prepare("
+                SELECT m.*, mt.label AS type_label
+                FROM models m
+                LEFT JOIN model_types mt ON mt.slug = m.type
+                WHERE m.is_active = 1 AND m.type IN ($placeholders)
+                ORDER BY m.display_order ASC, m.name ASC
+            ");
+            $stmt->execute($allowedSlugs);
+        } else {
+            $stmt = $sdb->query("
+                SELECT m.*, mt.label AS type_label
+                FROM models m
+                LEFT JOIN model_types mt ON mt.slug = m.type
+                WHERE m.is_active = 1
+                ORDER BY m.display_order ASC, m.name ASC
+            ");
+        }
         $models = $stmt->fetchAll();
 
         // Fetch active discounts (global)

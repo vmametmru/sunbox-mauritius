@@ -30,6 +30,7 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import { api, ProTheme } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 
@@ -70,6 +71,7 @@ interface SemiProUser {
   phone?: string;
   logo_url?: string;
   is_active?: boolean;
+  allowed_model_type_slugs?: string[] | null;
 }
 
 interface SemiProSiteConfig {
@@ -83,6 +85,9 @@ interface SemiProSiteConfig {
   current_version: string | null;
   latest_version: string;
   files_up_to_date: boolean;
+  current_db_version: string | null;
+  latest_db_version: string;
+  db_up_to_date: boolean;
 }
 
 interface VersionStatus {
@@ -203,7 +208,9 @@ export default function UsersPage() {
   const [initializingSemiProDb, setInitializingSemiProDb] = useState(false);
   const [updatingSemiProSite, setUpdatingSemiProSite] = useState(false);
   const [updatingSemiProDb, setUpdatingSemiProDb] = useState(false);
+  const [savingSemiProConfig, setSavingSemiProConfig] = useState(false);
   const [semiProSiteConfig, setSemiProSiteConfig] = useState<SemiProSiteConfig | null>(null);
+  const [allModelTypes, setAllModelTypes] = useState<{ slug: string; name: string }[]>([]);
 
   const API_BASE = 'https://sunbox-mauritius.com/api';
 
@@ -242,6 +249,10 @@ export default function UsersPage() {
     }).catch((err: any) => {
       console.error('Erreur chargement modèles:', err);
     });
+    api.getModelTypes(true).then((data: any) => {
+      const list = Array.isArray(data) ? data : [];
+      setAllModelTypes(list.map((mt: any) => ({ slug: mt.slug, name: mt.name })));
+    }).catch(() => {});
     api.getProThemes().then((data: any) => {
       setAllThemes(Array.isArray(data) ? data : []);
     }).catch(() => {});
@@ -439,6 +450,27 @@ export default function UsersPage() {
       toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
     } finally {
       setUpdatingSemiProDb(false);
+      loadSemiProSiteConfig(semiProSiteSlug);
+    }
+  };
+
+  const saveSemiProConfig = async () => {
+    if (!semiProSiteSlug) return;
+    try {
+      setSavingSemiProConfig(true);
+      await api.saveSemiProConfig({
+        slug: semiProSiteSlug,
+        company_name: semiProSiteCompanyName,
+        logo_url: semiProSiteLogo,
+        domain: semiProSiteDomain,
+        login_bg_url: semiProSiteLoginBg,
+      });
+      toast({ title: 'Configuration sauvegardée' });
+      loadSemiProSiteConfig(semiProSiteSlug);
+    } catch (err: any) {
+      toast({ title: 'Erreur', description: err.message, variant: 'destructive' });
+    } finally {
+      setSavingSemiProConfig(false);
     }
   };
 
@@ -1457,14 +1489,20 @@ function VersionChip({ ok, checking, label }: { ok: boolean; checking: boolean; 
               et une base de données commune.
             </p>
 
-            {/* Version badge when deployed */}
+            {/* Version badges when deployed */}
             {semiProSiteConfig?.deployed && (
-              <div className="mb-4 flex items-center gap-3 flex-wrap">
+              <div className="mb-4 flex items-center gap-2 flex-wrap">
                 <span className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-white border border-green-200 text-green-700 font-medium">
                   {semiProSiteConfig.files_up_to_date
                     ? <CheckCircle2 className="w-3.5 h-3.5 text-green-600" />
                     : <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />}
                   Fichiers : {semiProSiteConfig.current_version ?? '?'} / {semiProSiteConfig.latest_version}
+                </span>
+                <span className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-white border border-green-200 text-green-700 font-medium">
+                  {semiProSiteConfig.db_up_to_date
+                    ? <CheckCircle2 className="w-3.5 h-3.5 text-green-600" />
+                    : <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />}
+                  BD : {semiProSiteConfig.current_db_version ?? '?'} / {semiProSiteConfig.latest_db_version}
                 </span>
                 <Button
                   size="sm"
@@ -1574,25 +1612,46 @@ function VersionChip({ ok, checking, label }: { ok: boolean; checking: boolean; 
             {/* Action buttons — conditional on deployed state */}
             {semiProSiteConfig?.deployed ? (
               <div className="flex gap-2 flex-wrap">
-                <Button
-                  size="sm"
-                  className="bg-blue-600 hover:bg-blue-700 text-white"
-                  disabled={updatingSemiProSite}
-                  onClick={updateSemiProSite}
-                >
-                  <Upload className="w-3 h-3 mr-1" />
-                  {updatingSemiProSite ? 'Mise à jour...' : 'Mettre à jour les fichiers'}
-                </Button>
+                {/* C: Save branding config (domain, logo, bg) without full redeploy */}
                 <Button
                   size="sm"
                   variant="outline"
-                  className="border-blue-300 text-blue-700 hover:bg-blue-50"
-                  disabled={updatingSemiProDb || !semiProSiteDbName}
-                  onClick={updateSemiProDb}
+                  className="border-green-400 text-green-700 hover:bg-green-50"
+                  disabled={savingSemiProConfig}
+                  onClick={saveSemiProConfig}
                 >
-                  <Database className="w-3 h-3 mr-1" />
-                  {updatingSemiProDb ? 'Mise à jour...' : 'Mettre à jour la base de données'}
+                  <CheckCircle2 className="w-3 h-3 mr-1" />
+                  {savingSemiProConfig ? 'Sauvegarde...' : 'Sauvegarder la configuration'}
                 </Button>
+                {/* A: Only show file update button when files are NOT up-to-date */}
+                {!semiProSiteConfig.files_up_to_date && (
+                  <Button
+                    size="sm"
+                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                    disabled={updatingSemiProSite}
+                    onClick={updateSemiProSite}
+                  >
+                    <Upload className="w-3 h-3 mr-1" />
+                    {updatingSemiProSite
+                      ? 'Mise à jour...'
+                      : `Mettre à jour les fichiers (v${semiProSiteConfig.current_version ?? '?'} → v${semiProSiteConfig.latest_version})`}
+                  </Button>
+                )}
+                {/* A: Only show DB update button when DB is NOT up-to-date */}
+                {!semiProSiteConfig.db_up_to_date && semiProSiteDbName && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-blue-300 text-blue-700 hover:bg-blue-50"
+                    disabled={updatingSemiProDb}
+                    onClick={updateSemiProDb}
+                  >
+                    <Database className="w-3 h-3 mr-1" />
+                    {updatingSemiProDb
+                      ? 'Mise à jour...'
+                      : `Mettre à jour la BD (v${semiProSiteConfig.current_db_version ?? '?'} → v${semiProSiteConfig.latest_db_version})`}
+                  </Button>
+                )}
               </div>
             ) : (
               <div className="flex gap-2 flex-wrap">
@@ -1620,7 +1679,7 @@ function VersionChip({ ok, checking, label }: { ok: boolean; checking: boolean; 
 
           {/* Semi-Pro User Dialog */}
           <Dialog open={isSemiProDialogOpen} onOpenChange={setIsSemiProDialogOpen}>
-            <DialogContent className="max-w-lg">
+            <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>{editingSemiProUser?.id ? 'Modifier' : 'Nouveau'} utilisateur semi-pro</DialogTitle>
               </DialogHeader>
@@ -1665,6 +1724,38 @@ function VersionChip({ ok, checking, label }: { ok: boolean; checking: boolean; 
                     />
                     <Label>Compte actif</Label>
                   </div>
+                  {/* E: Model type access */}
+                  {allModelTypes.length > 0 && (
+                    <div>
+                      <Label className="block mb-2">Modèles autorisés <span className="text-xs font-normal text-gray-500">(laisser vide = tous)</span></Label>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {allModelTypes.map(mt => {
+                          const allowed = editingSemiProUser.allowed_model_type_slugs ?? null;
+                          const checked = allowed === null || allowed.includes(mt.slug);
+                          return (
+                            <label key={mt.slug} className="flex items-center gap-2 cursor-pointer text-sm p-1.5 rounded hover:bg-gray-50">
+                              <Checkbox
+                                checked={checked}
+                                onCheckedChange={(v) => {
+                                  // null means unrestricted; expand to all slugs first so we can remove one
+                                  const current: string[] = editingSemiProUser.allowed_model_type_slugs ?? allModelTypes.map(x => x.slug);
+                                  const next = v
+                                    ? [...new Set([...current, mt.slug])]
+                                    : current.filter(s => s !== mt.slug);
+                                  // If all slugs selected → store null (unrestricted)
+                                  setEditingSemiProUser({
+                                    ...editingSemiProUser,
+                                    allowed_model_type_slugs: next.length === allModelTypes.length ? null : next,
+                                  });
+                                }}
+                              />
+                              {mt.name}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                   <div className="flex gap-3 pt-2">
                     <Button className="flex-1 bg-green-600 hover:bg-green-700 text-white" disabled={savingSemiPro} onClick={saveSemiProUser}>
                       {savingSemiPro ? 'Enregistrement...' : 'Enregistrer'}

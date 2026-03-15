@@ -16,7 +16,7 @@ define('SEMI_PRO_DB_SCHEMA_VERSION', '1.0.0');
 
 // Sunbox main database schema version.
 // Increment when new tables or columns are added.
-define('SUNBOX_DB_SCHEMA_VERSION', '2.16.0');
+define('SUNBOX_DB_SCHEMA_VERSION', '2.17.0');
 
 $action = $_GET['action'] ?? '';
 $body   = getRequestBody();
@@ -512,6 +512,9 @@ try {
                     $messages[] = "ENUM étendu : users.role += 'semi_professional'";
                 }
             } catch (\Throwable $e) { $messages[] = "ENUM semi_professional : " . $e->getMessage(); }
+
+            // ── v2.17.0 ── Add allowed_model_type_slugs for semi-pro users ──────
+            $addCol('professional_profiles', 'allowed_model_type_slugs', "JSON NULL DEFAULT NULL");
 
             // ── Schema version table (always create / update) ─────────────────
             $db->exec("CREATE TABLE IF NOT EXISTS `db_schema_version` (
@@ -4794,13 +4797,21 @@ try {
                 SELECT u.id, u.name, u.email, u.role,
                        pp.company_name, pp.address, pp.vat_number, pp.brn_number,
                        pp.phone, pp.logo_url, pp.is_active,
-                       COALESCE(pp.model_request_cost, 5000) AS model_request_cost
+                       COALESCE(pp.model_request_cost, 5000) AS model_request_cost,
+                       pp.allowed_model_type_slugs
                 FROM users u
                 LEFT JOIN professional_profiles pp ON pp.user_id = u.id
                 WHERE u.role = 'semi_professional'
                 ORDER BY u.name ASC
             ");
-            ok($stmt->fetchAll());
+            $rows = $stmt->fetchAll();
+            foreach ($rows as &$r) {
+                $r['allowed_model_type_slugs'] = !empty($r['allowed_model_type_slugs'])
+                    ? json_decode($r['allowed_model_type_slugs'], true)
+                    : null;
+            }
+            unset($r);
+            ok($rows);
             break;
         }
 
@@ -4863,6 +4874,11 @@ try {
             if (array_key_exists('phone', $body))        { $profSets[] = 'phone = ?';        $profParams[] = $body['phone']; }
             if (array_key_exists('logo_url', $body))     { $profSets[] = 'logo_url = ?';     $profParams[] = $body['logo_url']; }
             if (array_key_exists('is_active', $body))    { $profSets[] = 'is_active = ?';    $profParams[] = (int)(bool)$body['is_active']; }
+            if (array_key_exists('allowed_model_type_slugs', $body)) {
+                $slugs = $body['allowed_model_type_slugs'];
+                $profSets[]   = 'allowed_model_type_slugs = ?';
+                $profParams[] = ($slugs === null) ? null : json_encode(array_values(array_filter((array)$slugs)));
+            }
             if (!empty($profSets)) {
                 $profSets[] = 'updated_at = NOW()';
                 $profParams[] = $id;
@@ -5133,7 +5149,60 @@ try {
                 $config['files_up_to_date'] = version_compare($ver, SEMI_PRO_FILE_VERSION, '>=');
             }
 
+            // Read semi-pro DB schema version (non-fatal)
+            $config['current_db_version']  = null;
+            $config['latest_db_version']   = SEMI_PRO_DB_SCHEMA_VERSION;
+            $config['db_up_to_date']       = false;
+            if (!empty($config['db_name'])) {
+                try {
+                    $spPdo = new PDO(
+                        "mysql:host=" . DB_HOST . ";dbname=" . $config['db_name'] . ";charset=utf8mb4",
+                        DB_USER, DB_PASS,
+                        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_EMULATE_PREPARES => false]
+                    );
+                    $row = $spPdo->query("SELECT `version` FROM `semi_pro_schema_version` WHERE `id` = 1 LIMIT 1")->fetch();
+                    if ($row) {
+                        $config['current_db_version'] = $row['version'];
+                        $config['db_up_to_date']      = version_compare($row['version'], SEMI_PRO_DB_SCHEMA_VERSION, '>=');
+                    }
+                } catch (\Throwable $ignored) {}
+            }
+
             ok($config);
+            break;
+        }
+
+        // ── Save semi-pro site branding config to .env (no file re-deploy) ────
+        case 'save_semi_pro_config': {
+            requireAdmin();
+            validateRequired($body, ['slug']);
+            $slug        = preg_replace('/[^a-z0-9._-]/i', '_', strtolower((string)$body['slug']));
+            $siteDir     = proSiteDir($slug);
+            if (!is_dir($siteDir)) fail('Site non déployé.');
+
+            $envFile = $siteDir . '/.env';
+            $envVars = [];
+            // Read existing .env first
+            if (is_file($envFile)) {
+                foreach (file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
+                    $line = trim($line);
+                    if ($line === '' || $line[0] === '#' || strpos($line, '=') === false) continue;
+                    [$k, $v] = explode('=', $line, 2);
+                    $envVars[trim($k)] = trim($v);
+                }
+            }
+            // Overwrite only the branding fields passed in the request
+            if (array_key_exists('company_name', $body)) $envVars['COMPANY_NAME'] = (string)$body['company_name'];
+            if (array_key_exists('logo_url',     $body)) $envVars['LOGO_URL']     = (string)$body['logo_url'];
+            if (array_key_exists('domain',       $body)) $envVars['DOMAIN']       = (string)$body['domain'];
+            if (array_key_exists('login_bg_url', $body)) $envVars['LOGIN_BG_URL'] = (string)$body['login_bg_url'];
+
+            $lines = [];
+            foreach ($envVars as $k => $v) $lines[] = "$k=$v";
+            if (file_put_contents($envFile, implode("\n", $lines) . "\n") === false) {
+                fail('Impossible d\'écrire le fichier .env.');
+            }
+            ok(['saved' => true]);
             break;
         }
 
