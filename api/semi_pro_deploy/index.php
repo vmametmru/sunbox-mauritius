@@ -92,15 +92,19 @@ foreach (['/vite.svg', '/favicon.ico', '/favicon.png'] as $staticAsset) {
 }
 
 // ── Inject semi-pro config variables before </head> ───────────────────────────
-// When a custom domain is configured the site is accessed via that domain but
-// APP_URL still points to the Sunbox subdirectory (e.g. sunbox-mauritius.com/pros/semi-pro).
-// Injecting APP_URL as the API base would make every fetch() call cross-origin,
-// triggering CORS errors ("Failed to fetch").  Instead, derive the API URL from
-// the actual HTTP_HOST so it is always same-origin with the browser.
-$_customDomain = trim($localEnv['DOMAIN'] ?? '');
-if ($_customDomain && !empty($_SERVER['HTTP_HOST'])) {
-    $_proto     = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-    $apiBaseUrl = $_proto . '://' . $_SERVER['HTTP_HOST'] . '/api';
+// Always derive the API base URL from the ACTUAL HTTP request (HTTP_HOST + script
+// directory) rather than from APP_URL in .env.  This guarantees same-origin API
+// calls regardless of www vs non-www mismatch in the stored domain, stale APP_URL,
+// or addon-domain vs sub-directory access.
+//
+// SCRIPT_NAME gives the path of this script as seen by the browser:
+//   addon-domain:   /index.php          → dir = /
+//   sub-directory:  /pros/foo/index.php → dir = /pros/foo
+$_proto     = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+$_host      = $_SERVER['HTTP_HOST'] ?? '';
+$_scriptDir = rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? '/index.php'), '/');
+if ($_host) {
+    $apiBaseUrl = $_proto . '://' . $_host . $_scriptDir . '/api';
 } else {
     $apiBaseUrl = $siteAppUrl . '/api';
 }
