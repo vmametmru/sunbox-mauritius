@@ -492,58 +492,6 @@ try {
             $addCol('model_images', 'description',  "TEXT          NULL DEFAULT NULL");
             $addCol('model_images', 'pro_user_id',  "INT           NULL DEFAULT NULL");
 
-            // ── v2.15.0 ── Merge modular_boq_price_list into pool_boq_price_list ──
-            // Copy modular items that don't already exist (by name) into pool_boq_price_list
-            try {
-                $tableCheck = $db->query("SHOW TABLES LIKE 'modular_boq_price_list'")->rowCount();
-                if ($tableCheck > 0) {
-                    $db->beginTransaction();
-
-                    $maxOrder = (int)$db->query("SELECT COALESCE(MAX(display_order), 0) FROM pool_boq_price_list")->fetchColumn();
-                    $modItems = $db->query("SELECT * FROM modular_boq_price_list")->fetchAll();
-                    // Build O(1) lookup set of existing pool names
-                    $existingNames = array_flip($db->query("SELECT name FROM pool_boq_price_list")->fetchAll(\PDO::FETCH_COLUMN));
-                    $inserted = 0;
-                    $ins = $db->prepare("INSERT INTO pool_boq_price_list (name, unit, unit_price, has_vat, supplier_id, display_order) VALUES (?, ?, ?, ?, ?, ?)");
-                    foreach ($modItems as $mi) {
-                        if (!isset($existingNames[$mi['name']])) {
-                            $maxOrder++;
-                            $ins->execute([$mi['name'], $mi['unit'], $mi['unit_price'], $mi['has_vat'], $mi['supplier_id'], $maxOrder]);
-                            $inserted++;
-                        }
-                    }
-                    if ($inserted > 0) $messages[] = "Pricelist: $inserted articles modulaires migrés vers pool_boq_price_list.";
-
-                    // Re-map boq_lines for custom model types: modular_boq_price_list IDs → pool_boq_price_list IDs (by name)
-                    // Build name→id map for pool items in one query
-                    $poolNameMap = [];
-                    foreach ($db->query("SELECT id, name FROM pool_boq_price_list")->fetchAll() as $row) {
-                        $poolNameMap[$row['name']] = (int)$row['id'];
-                    }
-                    $remapped = 0;
-                    $upd = $db->prepare("
-                        UPDATE boq_lines bl
-                        JOIN boq_categories bc ON bl.category_id = bc.id
-                        JOIN models m ON bc.model_id = m.id
-                        SET bl.price_list_id = ?
-                        WHERE bl.price_list_id = ? AND m.type NOT IN ('pool', 'container')
-                    ");
-                    foreach ($modItems as $mi) {
-                        $poolId = $poolNameMap[$mi['name']] ?? null;
-                        if ($poolId) {
-                            $upd->execute([$poolId, (int)$mi['id']]);
-                            $remapped += $upd->rowCount();
-                        }
-                    }
-                    if ($remapped > 0) $messages[] = "Pricelist: $remapped lignes BOQ remappées vers pool_boq_price_list.";
-
-                    $db->commit();
-                }
-            } catch (\Throwable $e) {
-                if ($db->inTransaction()) $db->rollBack();
-                $messages[] = "Migration pricelist: " . $e->getMessage();
-            }
-
             // ── Schema version table (always create / update) ─────────────────
             $db->exec("CREATE TABLE IF NOT EXISTS `db_schema_version` (
                 `id`         INT NOT NULL DEFAULT 1,
