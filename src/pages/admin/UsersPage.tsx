@@ -54,6 +54,7 @@ interface ProUser {
   domain?: string;
   api_token?: string;
   logo_url?: string;
+  login_bg_url?: string;
   db_name?: string;
   theme_id?: number | null;
   theme_name?: string;
@@ -116,6 +117,7 @@ const emptyUser: ProUser = {
   model_request_cost: 5000,
   domain: '',
   logo_url: '',
+  login_bg_url: '',
   db_name: '',
   is_active: true,
 };
@@ -181,7 +183,9 @@ export default function UsersPage() {
   const [headerImages, setHeaderImages] = useState<string[]>([]);
   const [uploadingHeaderImg, setUploadingHeaderImg] = useState(false);
   const [savingHeaderImgs, setSavingHeaderImgs] = useState(false);
+  const [uploadingLoginBg, setUploadingLoginBg] = useState(false);
   const logoInputRef = useRef<HTMLInputElement>(null);
+  const loginBgInputRef = useRef<HTMLInputElement>(null);
   const headerImgInputRef = useRef<HTMLInputElement>(null);
   const semiProLogoInputRef = useRef<HTMLInputElement>(null);
   const semiProLoginBgInputRef = useRef<HTMLInputElement>(null);
@@ -646,6 +650,26 @@ export default function UsersPage() {
     }
   };
 
+  const handleLoginBgUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !editingUser) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      setUploadingLoginBg(true);
+      const r = await fetch('/api/upload_sketch.php', { method: 'POST', body: formData, credentials: 'include' });
+      const j = await r.json();
+      if (!r.ok || j.error) throw new Error(j.error || 'Upload échoué');
+      setEditingUser((prev) => prev ? { ...prev, login_bg_url: j.url } : prev);
+      toast({ title: 'Background de connexion uploadé' });
+    } catch (err: any) {
+      toast({ title: 'Erreur upload background', description: err.message, variant: 'destructive' });
+    } finally {
+      setUploadingLoginBg(false);
+      if (loginBgInputRef.current) loginBgInputRef.current.value = '';
+    }
+  };
+
   const handleHeaderImgUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     if (files.length === 0 || !editingUser?.id) return;
@@ -1031,6 +1055,49 @@ function VersionChip({ ok, checking, label }: { ok: boolean; checking: boolean; 
                   accept="image/jpeg,image/png,image/webp"
                   className="hidden"
                   onChange={handleLogoUpload}
+                />
+              </div>
+
+              <div>
+                <Label>Background page de connexion</Label>
+                <div className="flex items-center gap-3 mt-1">
+                  {editingUser.login_bg_url && (
+                    <img
+                      src={editingUser.login_bg_url}
+                      alt="Background actuel"
+                      className="h-12 w-20 object-cover border rounded"
+                    />
+                  )}
+                  <div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => loginBgInputRef.current?.click()}
+                      disabled={uploadingLoginBg}
+                      className="gap-2"
+                    >
+                      <Upload className="h-4 w-4" />
+                      {uploadingLoginBg ? 'Upload...' : editingUser.login_bg_url ? 'Changer' : 'Choisir'}
+                    </Button>
+                    {editingUser.login_bg_url && (
+                      <button
+                        type="button"
+                        onClick={() => setEditingUser({ ...editingUser, login_bg_url: '' })}
+                        className="ml-2 text-xs text-red-500 hover:underline"
+                      >
+                        Supprimer
+                      </button>
+                    )}
+                    <p className="text-xs text-gray-400 mt-1">JPG, PNG ou WEBP</p>
+                  </div>
+                </div>
+                <input
+                  ref={loginBgInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={handleLoginBgUpload}
                 />
               </div>
 

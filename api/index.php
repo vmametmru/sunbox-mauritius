@@ -6,7 +6,7 @@ handleCORS();
 
 // Pro site deployment versions — increment these when templates or DB schema change.
 // PRO_FILE_VERSION must match define('PRO_FILE_VERSION', ...) in api/pro_deploy/api_config.php
-define('PRO_FILE_VERSION',      '2.9.8');
+define('PRO_FILE_VERSION',      '2.9.9');
 define('PRO_DB_SCHEMA_VERSION', '1.8.0');
 
 // Semi-pro shared site deployment version.
@@ -16,7 +16,7 @@ define('SEMI_PRO_DB_SCHEMA_VERSION', '1.0.0');
 
 // Sunbox main database schema version.
 // Increment when new tables or columns are added.
-define('SUNBOX_DB_SCHEMA_VERSION', '2.17.0');
+define('SUNBOX_DB_SCHEMA_VERSION', '2.18.0');
 
 $action = $_GET['action'] ?? '';
 $body   = getRequestBody();
@@ -515,6 +515,9 @@ try {
 
             // ── v2.17.0 ── Add allowed_model_type_slugs for semi-pro users ──────
             $addCol('professional_profiles', 'allowed_model_type_slugs', "JSON NULL DEFAULT NULL");
+
+            // ── v2.18.0 ── Add login_bg_url to professional_profiles ────────────
+            $addCol('professional_profiles', 'login_bg_url', "VARCHAR(500) NULL DEFAULT NULL");
 
             // ── Schema version table (always create / update) ─────────────────
             $db->exec("CREATE TABLE IF NOT EXISTS `db_schema_version` (
@@ -3929,7 +3932,7 @@ try {
             $stmt = $db->query("
                 SELECT u.id, u.name, u.email, u.role,
                        pp.company_name, pp.address, pp.vat_number, pp.brn_number,
-                       pp.phone, pp.logo_url, pp.sunbox_margin_percent, pp.credits,
+                       pp.phone, pp.logo_url, pp.login_bg_url, pp.sunbox_margin_percent, pp.credits,
                        COALESCE(pp.model_request_cost, 5000) AS model_request_cost,
                        pp.is_active, pp.domain, pp.api_token, pp.db_name,
                        pp.theme_id,
@@ -4006,6 +4009,7 @@ try {
             if (array_key_exists('phone', $body)) { $profSets[] = 'phone = ?'; $profParams[] = $body['phone']; }
             if (array_key_exists('domain', $body)) { $profSets[] = 'domain = ?'; $profParams[] = strtolower(trim($body['domain'])); }
             if (array_key_exists('logo_url', $body)) { $profSets[] = 'logo_url = ?'; $profParams[] = $body['logo_url']; }
+            if (array_key_exists('login_bg_url', $body)) { $profSets[] = 'login_bg_url = ?'; $profParams[] = $body['login_bg_url']; }
             if (array_key_exists('db_name', $body)) { $profSets[] = 'db_name = ?'; $profParams[] = $body['db_name']; }
             if (array_key_exists('sunbox_margin_percent', $body)) { $profSets[] = 'sunbox_margin_percent = ?'; $profParams[] = (float)$body['sunbox_margin_percent']; }
             if (array_key_exists('model_request_cost', $body)) { $profSets[] = 'model_request_cost = ?'; $profParams[] = (float)$body['model_request_cost']; }
@@ -4251,7 +4255,7 @@ try {
             $userId = (int)$body['user_id'];
 
             $stmt = $db->prepare("
-                SELECT pp.domain, pp.company_name, pp.db_name, pp.logo_url,
+                SELECT pp.domain, pp.company_name, pp.db_name, pp.logo_url, pp.login_bg_url,
                        u.password_hash,
                        pp.theme_id,
                        pt.logo_position, pt.header_height, pt.header_bg_color,
@@ -4317,6 +4321,10 @@ try {
                 $logoUrlAbs = (string)($profile['logo_url'] ?? '');
                 if ($logoUrlAbs !== '' && strpos($logoUrlAbs, 'http') !== 0) {
                     $logoUrlAbs = $sunboxBaseUrl . '/' . ltrim($logoUrlAbs, '/');
+                }
+                $loginBgUrlAbs = (string)($profile['login_bg_url'] ?? '');
+                if ($loginBgUrlAbs !== '' && strpos($loginBgUrlAbs, 'http') !== 0) {
+                    $loginBgUrlAbs = $sunboxBaseUrl . '/' . ltrim($loginBgUrlAbs, '/');
                 }
 
                 $filesToDeploy = [
@@ -4422,6 +4430,11 @@ try {
                 // are NOT written here — the pro site's api_config.php loads them
                 // automatically from the Sunbox root .env (3 levels up).
                 // Only pro-specific overrides are stored here.
+                // NOTE: ADMIN_PASSWORD_HASH is intentionally NOT written to .env.
+                //   Password verification is done by api_pro_auth.php by querying the
+                //   Sunbox DB at login time (via SUNBOX_USER_ID). This ensures that
+                //   password changes made in the admin panel take effect immediately
+                //   without requiring a site redeploy.
                 $envLines = [
                     '# Pro site config — DB credentials come from Sunbox root .env automatically.',
                     'APP_URL=' . $proBaseUrl,
@@ -4433,10 +4446,9 @@ try {
                     '# Pro site own database (overrides DB_NAME from Sunbox root .env)',
                     'DB_NAME=' . $dbName,
                     '',
-                    'ADMIN_PASSWORD_HASH=' . $passwordHash,
-                    '',
                     'COMPANY_NAME=' . $companyName,
                     'LOGO_URL=' . $logoUrlAbs,
+                    'LOGIN_BG_URL=' . $loginBgUrlAbs,
                     'VAT_RATE=15',
                 ];
                 if (file_put_contents($siteDir . '/.env', implode("\n", $envLines) . "\n") === false) {
