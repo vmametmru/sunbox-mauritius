@@ -11,7 +11,7 @@ define('PRO_DB_SCHEMA_VERSION', '1.8.0');
 
 // Sunbox main database schema version.
 // Increment when new tables or columns are added.
-define('SUNBOX_DB_SCHEMA_VERSION', '2.14.0');
+define('SUNBOX_DB_SCHEMA_VERSION', '2.15.0');
 
 $action = $_GET['action'] ?? '';
 $body   = getRequestBody();
@@ -492,6 +492,48 @@ try {
             $addCol('model_images', 'description',  "TEXT          NULL DEFAULT NULL");
             $addCol('model_images', 'pro_user_id',  "INT           NULL DEFAULT NULL");
 
+            // ── v2.15.0 ── Merge modular_boq_price_list into pool_boq_price_list ──
+            // Copy modular items that don't already exist (by name) into pool_boq_price_list
+            try {
+                $tableCheck = $db->query("SHOW TABLES LIKE 'modular_boq_price_list'")->rowCount();
+                if ($tableCheck > 0) {
+                    $maxOrder = (int)$db->query("SELECT COALESCE(MAX(display_order), 0) FROM pool_boq_price_list")->fetchColumn();
+                    $modItems = $db->query("SELECT * FROM modular_boq_price_list")->fetchAll();
+                    $existingNames = $db->query("SELECT name FROM pool_boq_price_list")->fetchAll(\PDO::FETCH_COLUMN);
+                    $inserted = 0;
+                    foreach ($modItems as $mi) {
+                        if (!in_array($mi['name'], $existingNames, true)) {
+                            $maxOrder++;
+                            $ins = $db->prepare("INSERT INTO pool_boq_price_list (name, unit, unit_price, has_vat, supplier_id, display_order) VALUES (?, ?, ?, ?, ?, ?)");
+                            $ins->execute([$mi['name'], $mi['unit'], $mi['unit_price'], $mi['has_vat'], $mi['supplier_id'], $maxOrder]);
+                            $inserted++;
+                        }
+                    }
+                    if ($inserted > 0) $messages[] = "Pricelist: $inserted articles modulaires migrés vers pool_boq_price_list.";
+
+                    // Re-map boq_lines for custom model types: modular_boq_price_list IDs → pool_boq_price_list IDs (by name)
+                    $remapped = 0;
+                    $modItems2 = $db->query("SELECT id, name FROM modular_boq_price_list")->fetchAll();
+                    foreach ($modItems2 as $mi) {
+                        $poolItem = $db->prepare("SELECT id FROM pool_boq_price_list WHERE name = ? LIMIT 1");
+                        $poolItem->execute([$mi['name']]);
+                        $poolId = $poolItem->fetchColumn();
+                        if ($poolId) {
+                            $upd = $db->prepare("
+                                UPDATE boq_lines bl
+                                JOIN boq_categories bc ON bl.category_id = bc.id
+                                JOIN models m ON bc.model_id = m.id
+                                SET bl.price_list_id = ?
+                                WHERE bl.price_list_id = ? AND m.type NOT IN ('pool', 'container')
+                            ");
+                            $upd->execute([(int)$poolId, (int)$mi['id']]);
+                            $remapped += $upd->rowCount();
+                        }
+                    }
+                    if ($remapped > 0) $messages[] = "Pricelist: $remapped lignes BOQ remappées vers pool_boq_price_list.";
+                }
+            } catch (\Throwable $e) { $messages[] = "Migration pricelist: " . $e->getMessage(); }
+
             // ── Schema version table (always create / update) ─────────────────
             $db->exec("CREATE TABLE IF NOT EXISTS `db_schema_version` (
                 `id`         INT NOT NULL DEFAULT 1,
@@ -611,13 +653,11 @@ try {
                 if ($includeBOQPrice) {
                     $boqStmt = $db->prepare("
                         SELECT 
-                            COALESCE(SUM(ROUND(bl.quantity * COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS boq_base_price_ht,
-                            COALESCE(SUM(ROUND(bl.quantity * COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht), 2)), 0) AS boq_cost_ht
+                            COALESCE(SUM(ROUND(bl.quantity * COALESCE(ppl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS boq_base_price_ht,
+                            COALESCE(SUM(ROUND(bl.quantity * COALESCE(ppl.unit_price, bl.unit_cost_ht), 2)), 0) AS boq_cost_ht
                         FROM boq_categories bc
-                        LEFT JOIN models m_p ON m_p.id = bc.model_id
                         LEFT JOIN boq_lines bl ON bc.id = bl.category_id
-                        LEFT JOIN pool_boq_price_list ppl ON bl.price_list_id = ppl.id AND m_p.type IN ('pool', 'container')
-                        LEFT JOIN modular_boq_price_list mpl ON bl.price_list_id = mpl.id AND m_p.type NOT IN ('pool', 'container')
+                        LEFT JOIN pool_boq_price_list ppl ON bl.price_list_id = ppl.id
                         WHERE bc.model_id = ? AND bc.is_option = FALSE
                     ");
                     $boqStmt->execute([$m['id']]);
@@ -1000,13 +1040,11 @@ try {
             $stmt = $db->prepare("
                 SELECT bc.*, 
                     mi.file_path AS image_path,
-                    COALESCE(SUM(ROUND(bl.quantity * COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht), 2)), 0) AS total_cost_ht,
-                    COALESCE(SUM(ROUND(bl.quantity * COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS total_sale_price_ht
+                    COALESCE(SUM(ROUND(bl.quantity * COALESCE(ppl.unit_price, bl.unit_cost_ht), 2)), 0) AS total_cost_ht,
+                    COALESCE(SUM(ROUND(bl.quantity * COALESCE(ppl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS total_sale_price_ht
                 FROM boq_categories bc
-                LEFT JOIN models m ON m.id = bc.model_id
                 LEFT JOIN boq_lines bl ON bc.id = bl.category_id
-                LEFT JOIN pool_boq_price_list ppl ON bl.price_list_id = ppl.id AND m.type IN ('pool', 'container')
-                LEFT JOIN modular_boq_price_list mpl ON bl.price_list_id = mpl.id AND m.type NOT IN ('pool', 'container')
+                LEFT JOIN pool_boq_price_list ppl ON bl.price_list_id = ppl.id
                 LEFT JOIN model_images mi ON bc.image_id = mi.id
                 WHERE bc.model_id = ?
                 GROUP BY bc.id
@@ -1086,16 +1124,13 @@ try {
             
             $stmt = $db->prepare("
                 SELECT bl.*, s.name AS supplier_name,
-                    COALESCE(ppl.name, mpl.name) AS price_list_name,
-                    COALESCE(ppl.unit_price, mpl.unit_price) AS price_list_unit_price,
-                    ROUND(bl.quantity * COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht), 2) AS total_cost_ht,
-                    ROUND(bl.quantity * COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2) AS sale_price_ht
+                    ppl.name AS price_list_name,
+                    ppl.unit_price AS price_list_unit_price,
+                    ROUND(bl.quantity * COALESCE(ppl.unit_price, bl.unit_cost_ht), 2) AS total_cost_ht,
+                    ROUND(bl.quantity * COALESCE(ppl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2) AS sale_price_ht
                 FROM boq_lines bl
-                LEFT JOIN boq_categories bc_join ON bl.category_id = bc_join.id
-                LEFT JOIN models m_join ON bc_join.model_id = m_join.id
                 LEFT JOIN suppliers s ON bl.supplier_id = s.id
-                LEFT JOIN pool_boq_price_list ppl ON bl.price_list_id = ppl.id AND m_join.type IN ('pool', 'container')
-                LEFT JOIN modular_boq_price_list mpl ON bl.price_list_id = mpl.id AND m_join.type NOT IN ('pool', 'container')
+                LEFT JOIN pool_boq_price_list ppl ON bl.price_list_id = ppl.id
                 WHERE bl.category_id = ?
                 ORDER BY bl.display_order ASC, bl.id ASC
             ");
@@ -1313,13 +1348,11 @@ try {
             // Get base price from non-option BOQ categories
             $stmt = $db->prepare("
                 SELECT 
-                    COALESCE(SUM(ROUND(bl.quantity * COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS base_price_ht,
-                    COALESCE(SUM(ROUND(bl.quantity * COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht), 2)), 0) AS total_cost_ht
+                    COALESCE(SUM(ROUND(bl.quantity * COALESCE(ppl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS base_price_ht,
+                    COALESCE(SUM(ROUND(bl.quantity * COALESCE(ppl.unit_price, bl.unit_cost_ht), 2)), 0) AS total_cost_ht
                 FROM boq_categories bc
-                LEFT JOIN models m ON m.id = bc.model_id
                 LEFT JOIN boq_lines bl ON bc.id = bl.category_id
-                LEFT JOIN pool_boq_price_list ppl ON bl.price_list_id = ppl.id AND m.type IN ('pool', 'container')
-                LEFT JOIN modular_boq_price_list mpl ON bl.price_list_id = mpl.id AND m.type NOT IN ('pool', 'container')
+                LEFT JOIN pool_boq_price_list ppl ON bl.price_list_id = ppl.id
                 WHERE bc.model_id = ? AND bc.is_option = FALSE
             ");
             $stmt->execute([$modelId]);
@@ -1348,12 +1381,10 @@ try {
             $stmt = $db->prepare("
                 SELECT bc.id, bc.name, bc.parent_id, bc.display_order, bc.qty_editable,
                        mi.file_path as image_path,
-                       COALESCE(SUM(ROUND(bl.quantity * COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS own_price_ht
+                       COALESCE(SUM(ROUND(bl.quantity * COALESCE(ppl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2)), 0) AS own_price_ht
                 FROM boq_categories bc
-                LEFT JOIN models m ON m.id = bc.model_id
                 LEFT JOIN boq_lines bl ON bc.id = bl.category_id
-                LEFT JOIN pool_boq_price_list ppl ON bl.price_list_id = ppl.id AND m.type IN ('pool', 'container')
-                LEFT JOIN modular_boq_price_list mpl ON bl.price_list_id = mpl.id AND m.type NOT IN ('pool', 'container')
+                LEFT JOIN pool_boq_price_list ppl ON bl.price_list_id = ppl.id
                 LEFT JOIN model_images mi ON bc.image_id = mi.id
                 WHERE bc.model_id = ? AND bc.is_option = TRUE
                 GROUP BY bc.id
@@ -1770,15 +1801,13 @@ try {
             $lStmt = $db->prepare("
                 SELECT bc.name AS category_name,
                        bl.description, bl.quantity, bl.unit, bl.margin_percent,
-                       COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht) AS unit_price,
-                       ROUND(bl.quantity * COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht), 2) AS total_price,
+                       COALESCE(ppl.unit_price, bl.unit_cost_ht) AS unit_price,
+                       ROUND(bl.quantity * COALESCE(ppl.unit_price, bl.unit_cost_ht), 2) AS total_price,
                        COALESCE(s.name, 'Fournisseur non défini') AS supplier_name,
                        bc.display_order AS cat_order, bl.display_order AS line_order
                 FROM boq_categories bc
-                LEFT JOIN models m_pr ON m_pr.id = bc.model_id
                 LEFT JOIN boq_lines bl ON bl.category_id = bc.id
-                LEFT JOIN pool_boq_price_list ppl ON bl.price_list_id = ppl.id AND m_pr.type IN ('pool', 'container')
-                LEFT JOIN modular_boq_price_list mpl ON bl.price_list_id = mpl.id AND m_pr.type NOT IN ('pool', 'container')
+                LEFT JOIN pool_boq_price_list ppl ON bl.price_list_id = ppl.id
                 LEFT JOIN suppliers s ON bl.supplier_id = s.id
                 WHERE bc.model_id = ? AND bc.is_option = FALSE AND bl.id IS NOT NULL
                 ORDER BY COALESCE(s.name,'Fournisseur non défini'), bc.display_order, bl.display_order
@@ -1790,16 +1819,14 @@ try {
             $optLinesStmt = $db->prepare("
                 SELECT bc.name AS category_name,
                        bl.description, bl.quantity, bl.unit, bl.margin_percent,
-                       COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht) AS unit_price,
-                       ROUND(bl.quantity * COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht), 2) AS total_price,
+                       COALESCE(ppl.unit_price, bl.unit_cost_ht) AS unit_price,
+                       ROUND(bl.quantity * COALESCE(ppl.unit_price, bl.unit_cost_ht), 2) AS total_price,
                        COALESCE(s.name, 'Fournisseur non défini') AS supplier_name,
                        bc.display_order AS cat_order, bl.display_order AS line_order
                 FROM quote_options qo
                 JOIN boq_categories bc ON bc.model_id = ? AND bc.is_option = TRUE AND bc.name = qo.option_name
-                LEFT JOIN models m_pr2 ON m_pr2.id = bc.model_id
                 LEFT JOIN boq_lines bl ON bl.category_id = bc.id
-                LEFT JOIN pool_boq_price_list ppl ON bl.price_list_id = ppl.id AND m_pr2.type IN ('pool', 'container')
-                LEFT JOIN modular_boq_price_list mpl ON bl.price_list_id = mpl.id AND m_pr2.type NOT IN ('pool', 'container')
+                LEFT JOIN pool_boq_price_list ppl ON bl.price_list_id = ppl.id
                 LEFT JOIN suppliers s ON bl.supplier_id = s.id
                 WHERE qo.quote_id = ? AND bl.id IS NOT NULL
                 ORDER BY COALESCE(s.name,'Fournisseur non défini'), bc.display_order, bl.display_order
@@ -2596,14 +2623,11 @@ try {
 
                 $boqLineStmt = $db->prepare("
                     SELECT bl.description, bl.quantity, bl.unit,
-                           COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht) AS unit_cost_ht,
+                           COALESCE(ppl.unit_price, bl.unit_cost_ht) AS unit_cost_ht,
                            bl.margin_percent,
-                           ROUND(bl.quantity * COALESCE(ppl.unit_price, mpl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2) AS sale_price_ht
+                           ROUND(bl.quantity * COALESCE(ppl.unit_price, bl.unit_cost_ht) * (1 + bl.margin_percent / 100), 2) AS sale_price_ht
                     FROM boq_lines bl
-                    LEFT JOIN boq_categories bc_q ON bl.category_id = bc_q.id
-                    LEFT JOIN models m_q ON bc_q.model_id = m_q.id
-                    LEFT JOIN pool_boq_price_list ppl ON bl.price_list_id = ppl.id AND m_q.type IN ('pool', 'container')
-                    LEFT JOIN modular_boq_price_list mpl ON bl.price_list_id = mpl.id AND m_q.type NOT IN ('pool', 'container')
+                    LEFT JOIN pool_boq_price_list ppl ON bl.price_list_id = ppl.id
                     WHERE bl.category_id = ?
                     ORDER BY bl.display_order ASC, bl.id ASC
                 ");
@@ -3563,14 +3587,14 @@ try {
         }
 
         // ============================================
-        // === MODULAR BOQ PRICE LIST
+        // === MODULAR BOQ PRICE LIST (redirected to pool_boq_price_list — unified pricelist)
         // ============================================
         case 'get_modular_boq_price_list': {
             $stmt = $db->query("
-                SELECT ml.*, s.name AS supplier_name
-                FROM modular_boq_price_list ml
-                LEFT JOIN suppliers s ON ml.supplier_id = s.id
-                ORDER BY ml.display_order ASC, ml.name ASC
+                SELECT pl.*, s.name AS supplier_name
+                FROM pool_boq_price_list pl
+                LEFT JOIN suppliers s ON pl.supplier_id = s.id
+                ORDER BY pl.display_order ASC, pl.name ASC
             ");
             $rows = $stmt->fetchAll();
             foreach ($rows as &$r) {
@@ -3584,7 +3608,7 @@ try {
         case 'create_modular_boq_price_list_item': {
             validateRequired($body, ['name']);
             $stmt = $db->prepare("
-                INSERT INTO modular_boq_price_list (name, unit, unit_price, has_vat, supplier_id, display_order)
+                INSERT INTO pool_boq_price_list (name, unit, unit_price, has_vat, supplier_id, display_order)
                 VALUES (?, ?, ?, ?, ?, ?)
             ");
             $stmt->execute([
@@ -3602,7 +3626,7 @@ try {
         case 'update_modular_boq_price_list_item': {
             validateRequired($body, ['id', 'name']);
             $stmt = $db->prepare("
-                UPDATE modular_boq_price_list SET
+                UPDATE pool_boq_price_list SET
                     name          = ?,
                     unit          = ?,
                     unit_price    = ?,
@@ -3626,7 +3650,7 @@ try {
 
         case 'delete_modular_boq_price_list_item': {
             validateRequired($body, ['id']);
-            $stmt = $db->prepare("DELETE FROM modular_boq_price_list WHERE id = ?");
+            $stmt = $db->prepare("DELETE FROM pool_boq_price_list WHERE id = ?");
             $stmt->execute([(int)$body['id']]);
             ok();
             break;
@@ -3758,7 +3782,7 @@ try {
                        bl.price_list_id, bl.margin_percent, bl.display_order,
                        mp.unit_price AS price_list_unit_price
                 FROM boq_lines bl
-                LEFT JOIN modular_boq_price_list mp ON bl.price_list_id = mp.id
+                LEFT JOIN pool_boq_price_list mp ON bl.price_list_id = mp.id
                 WHERE bl.category_id = ?
                 ORDER BY bl.display_order ASC, bl.id ASC
             ");
