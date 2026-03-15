@@ -642,17 +642,17 @@ export default function BOQPage() {
     try {
       setSaving(true);
 
-      // Load modular price list to resolve price_list_name → unit_cost_ht + price_list_id
+      // Load unified price list to resolve price_list_name → unit_cost_ht + price_list_id
       let customPriceMap: Record<string, { id: number; unit_price: number; unit: string }> = {};
       try {
-        const customPriceData = await api.getModularBOQPriceList();
+        const customPriceData = await api.getPoolBOQPriceList();
         if (Array.isArray(customPriceData)) {
           for (const p of customPriceData) {
             customPriceMap[String(p.name)] = { id: Number(p.id), unit_price: Number(p.unit_price ?? 0), unit: String(p.unit ?? 'unité') };
           }
         }
       } catch (priceErr: any) {
-        console.warn('Impossible de charger la liste de prix modulaire :', priceErr?.message ?? priceErr);
+        console.warn('Impossible de charger la pricelist :', priceErr?.message ?? priceErr);
       }
 
       const { base: baseTemplate, options: optionsTemplate } = await loadModularTemplateFromDB(selectedModel.type);
