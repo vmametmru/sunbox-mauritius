@@ -3193,7 +3193,12 @@ try {
                 LEFT JOIN suppliers s ON pl.supplier_id = s.id
                 ORDER BY pl.display_order ASC
             ");
-            ok($stmt->fetchAll());
+            $rows = $stmt->fetchAll();
+            foreach ($rows as &$r) {
+                $r['unit_price'] = (float)$r['unit_price'];
+                $r['has_vat']    = (bool)$r['has_vat'];
+            }
+            ok($rows);
             break;
         }
 
@@ -3207,7 +3212,7 @@ try {
                 sanitize($body['name']),
                 sanitize($body['unit'] ?? 'unité'),
                 (float)($body['unit_price'] ?? 0),
-                (bool)($body['has_vat'] ?? true),
+                isset($body['has_vat']) ? (int)(bool)$body['has_vat'] : 1,
                 !empty($body['supplier_id']) ? (int)$body['supplier_id'] : null,
                 (int)($body['display_order'] ?? 0),
             ]);
@@ -3226,7 +3231,7 @@ try {
                 sanitize($body['name']),
                 sanitize($body['unit'] ?? 'unité'),
                 (float)($body['unit_price'] ?? 0),
-                (bool)($body['has_vat'] ?? true),
+                isset($body['has_vat']) ? (int)(bool)$body['has_vat'] : 1,
                 !empty($body['supplier_id']) ? (int)$body['supplier_id'] : null,
                 (int)($body['display_order'] ?? 0),
                 (int)$body['id'],

@@ -273,7 +273,12 @@ try {
                 LEFT JOIN suppliers s ON pl.supplier_id = s.id
                 ORDER BY pl.display_order ASC
             ");
-            ok($stmt->fetchAll());
+            $rows = $stmt->fetchAll();
+            foreach ($rows as &$r) {
+                $r['unit_price'] = (float)$r['unit_price'];
+                $r['has_vat']    = (bool)$r['has_vat'];
+            }
+            ok($rows);
             break;
         }
 
